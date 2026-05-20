@@ -3,11 +3,12 @@ services:
     image: postgres:16-alpine
     restart: always
     environment:
-      POSTGRES_USER: boun_user
-      POSTGRES_PASSWORD: boun_password
-      POSTGRES_DB: boun_archive
+      POSTGRES_USER: ${POSTGRES_USER:-boun_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-boun_password}
+      POSTGRES_DB: ${POSTGRES_DB:-boun_archive}
+      PGPORT: ${DB_PORT_INTERNAL:-5432}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:${DB_PORT_INTERNAL:-5432}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -15,10 +16,11 @@ services:
     image: getmeili/meilisearch:v1.12
     restart: always
     environment:
-      MEILI_MASTER_KEY: masterKey123
-      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKey123}
+      MEILI_ENV: ${MEILI_ENV:-production}
+      MEILI_HTTP_ADDR: "0.0.0.0:${MEILI_PORT_INTERNAL:-7700}"
     ports:
-      - "7700:7700"
+      - "${MEILI_PORT:-7700}:${MEILI_PORT_INTERNAL:-7700}"
     volumes:
       - meilisearch_data:/meili_data
 
@@ -28,11 +30,12 @@ services:
       dockerfile: ./backend/Dockerfile
     restart: always
     environment:
-      DATABASE_URL: postgresql://boun_user:boun_password@db:5432/boun_archive
-      MEILI_URL: http://meilisearch:7700
-      MEILI_MASTER_KEY: masterKey123
+      DATABASE_URL: postgresql://${POSTGRES_USER:-boun_user}:${POSTGRES_PASSWORD:-boun_password}@${DB_HOST:-db}:${DB_PORT_INTERNAL:-5432}/${POSTGRES_DB:-boun_archive}
+      MEILI_URL: http://${MEILI_HOST:-meilisearch}:${MEILI_PORT_INTERNAL:-7700}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKey123}
+      BACKEND_PORT_INTERNAL: ${BACKEND_PORT_INTERNAL:-8000}
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:${BACKEND_PORT_INTERNAL:-8000}"
     depends_on:
       - db
       - meilisearch
@@ -44,8 +47,9 @@ services:
     restart: always
     environment:
       PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+      PORT: ${FRONTEND_PORT_INTERNAL:-3000}
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:${FRONTEND_PORT_INTERNAL:-3000}"
     depends_on:
       - backend
 

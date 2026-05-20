@@ -17,5 +17,5 @@ echo "Synchronizing search index in Meilisearch..."
 PYTHONPATH=. python scripts/sync_meilisearch.py
 
 # 4. Start FastAPI server
-echo "Starting FastAPI application via Uvicorn..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+echo "Starting FastAPI application via Uvicorn on port ${BACKEND_PORT_INTERNAL:-8000}..."
+exec uvicorn app.main:app --host 0.0.0.0 --port "${BACKEND_PORT_INTERNAL:-8000}"
