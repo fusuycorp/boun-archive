@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Search, Filter, BookOpen, User, Calendar, MapPin, Check, X } from "lucide-svelte";
+  import { API_BASE } from "$lib/config";
 
   let query = $state("");
   let results = $state<any[]>([]);
@@ -18,7 +19,7 @@
 
   async function fetchGlobalFacets() {
     try {
-      const response = await fetch("http://localhost:8000/api/v1/facets");
+      const response = await fetch(`${API_BASE}/api/v1/facets`);
       globalFacets = await response.json();
     } catch (e) {
       console.error("Failed to fetch facets", e);
@@ -38,7 +39,7 @@
       selectedTerms.forEach(t => params.append("term", t));
       selectedDepts.forEach(d => params.append("dept", d));
 
-      const response = await fetch(`http://localhost:8000/api/v1/search?${params.toString()}`);
+      const response = await fetch(`${API_BASE}/api/v1/search?${params.toString()}`);
       const data = await response.json();
       results = data.hits;
       currentFacets = data.facetDistribution;

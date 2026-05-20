@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { User, Search, History, BookOpen, Clock, Calendar } from "lucide-svelte";
+  import { API_BASE } from "$lib/config";
 
   let query = $state("");
   let instructors = $state<any[]>([]);
@@ -13,7 +14,7 @@
       instructors = [];
       return;
     }
-    const res = await fetch(`http://localhost:8000/api/v1/instructors?q=${query}`);
+    const res = await fetch(`${API_BASE}/api/v1/instructors?q=${query}`);
     instructors = await res.json();
   }
 
@@ -23,7 +24,7 @@
     query = instructor.full_name;
     loading = true;
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/analytics/instructor/${instructor.id}/legacy`);
+      const res = await fetch(`${API_BASE}/api/v1/analytics/instructor/${instructor.id}/legacy`);
       legacyData = await res.json();
     } catch (e) {
       console.error(e);

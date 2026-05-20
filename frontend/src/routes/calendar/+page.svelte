@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Search, Calendar, Plus, Trash2, AlertTriangle, Filter, Check, X } from "lucide-svelte";
+  import { API_BASE } from "$lib/config";
 
   // State
   let terms = $state<any[]>([]);
@@ -31,7 +32,7 @@
   });
 
   async function fetchTerms() {
-    const res = await fetch("http://localhost:8000/api/v1/terms");
+    const res = await fetch(`${API_BASE}/api/v1/terms`);
     terms = await res.json();
     if (terms.length > 0) {
       selectedTerm = terms[0].id;
@@ -47,7 +48,7 @@
         term: selectedTerm,
         limit: "10"
       });
-      const res = await fetch(`http://localhost:8000/api/v1/search?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/api/v1/search?${params.toString()}`);
       const data = await res.json();
       searchResults = data.hits;
     } finally {

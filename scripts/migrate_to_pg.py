@@ -1,9 +1,13 @@
 import pandas as pd
 import sqlite3
 import os
-from sqlalchemy import create_engine, text
+import sys
+from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
+
+# Add backend to path to import app modules when running from root or in container
+sys.path.append(os.path.join(os.getcwd(), 'backend'))
 from app.database import Base
 from app.models import Term, Department, Instructor, Room, Course, CourseSlot
 
@@ -16,6 +20,19 @@ def migrate():
     sqlite_conn = sqlite3.connect('schedules.db')
     pg_url = os.getenv("DATABASE_URL")
     engine = create_engine(pg_url)
+    
+    # Idempotency check: Skip if courses table exists and contains records
+    inspector = inspect(engine)
+    if inspector.has_table("courses"):
+        try:
+            with engine.connect() as conn:
+                res = conn.execute(text("SELECT COUNT(*) FROM courses")).scalar()
+                if res > 0:
+                    print("PostgreSQL already contains migrated course data. Skipping SQLite migration.")
+                    return
+        except Exception as e:
+            print(f"Error checking course table status (table may be corrupted): {e}. Proceeding with fresh migration.")
+
     Session = sessionmaker(bind=engine)
     session = Session()
 

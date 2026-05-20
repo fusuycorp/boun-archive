@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Calendar, Layers, Map, ChevronLeft, ChevronRight, Search, Filter, Check, X } from "lucide-svelte";
+  import { API_BASE } from "$lib/config";
 
   let terms = $state<any[]>([]);
   let globalFacets = $state<any>({});
@@ -37,8 +38,8 @@
   async function fetchInitialData() {
     try {
       const [termsRes, facetsRes] = await Promise.all([
-        fetch("http://localhost:8000/api/v1/terms"),
-        fetch("http://localhost:8000/api/v1/facets")
+        fetch(`${API_BASE}/api/v1/terms`),
+        fetch(`${API_BASE}/api/v1/facets`)
       ]);
       terms = await termsRes.json();
       globalFacets = await facetsRes.json();
@@ -59,7 +60,7 @@
       const params = new URLSearchParams();
       selectedDepts.forEach(d => params.append("dept", d));
       
-      const res = await fetch(`http://localhost:8000/api/v1/analytics/ghost-schedule/${selectedTerm}?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/api/v1/analytics/ghost-schedule/${selectedTerm}?${params.toString()}`);
       scheduleData = await res.json();
     } catch (e) {
       console.error(e);

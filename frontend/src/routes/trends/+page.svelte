@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Search, TrendingUp, Calendar, Clock, AlertCircle } from "lucide-svelte";
+  import { API_BASE } from "$lib/config";
 
   let query = $state("");
   let prediction = $state<any>(null);
@@ -12,7 +13,7 @@
     error = "";
     prediction = null;
     try {
-      const res = await fetch(`http://localhost:8000/api/v1/predict/course/${query.toUpperCase()}`);
+      const res = await fetch(`${API_BASE}/api/v1/predict/course/${query.toUpperCase()}`);
       if (!res.ok) throw new Error("Course not found in historical records");
       prediction = await res.json();
     } catch (e: any) {
