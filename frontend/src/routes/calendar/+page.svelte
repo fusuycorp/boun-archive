@@ -60,7 +60,7 @@
     if (myCourses.some(c => c.id === courseId)) {
       removeCourse(courseId);
     } else {
-      const res = await fetch(`http://localhost:8000/api/v1/courses/${courseId}`);
+      const res = await fetch(`${API_BASE}/api/v1/courses/${courseId}`);
       const course = await res.json();
       myCourses = [...myCourses, course];
     }
