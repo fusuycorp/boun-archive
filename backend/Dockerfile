@@ -9,15 +9,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements files separately for layer caching
-COPY backend/pyproject.toml backend/uv.lock ./
+# Copy files needed for dependency installation
+# We copy README.md because pyproject.toml references it
+COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
 
-# Install dependencies in two steps: 
-# 1. Install defined dependencies
-# 2. Install the package itself later if needed, but for now just requirements
-RUN uv pip install --system --no-cache -r pyproject.toml
+# Create a dummy app directory to satisfy the build system 
+# during the dependency-only install phase (caching)
+RUN mkdir app && touch app/__init__.py
 
-# Copy backend source modules and scripts
+# Install dependencies
+RUN uv pip install --system --no-cache .
+
+# Now copy the actual source code (this will invalidate cache for subsequent steps)
 COPY backend/app/ ./app/
 COPY backend/wait_for_services.py ./
 COPY backend/entrypoint.sh ./
