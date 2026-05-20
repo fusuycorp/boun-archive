@@ -9,11 +9,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy requirements files separately for layer caching
 COPY backend/pyproject.toml backend/uv.lock ./
 
-# Install dependencies
-RUN uv pip install --system --no-cache -e .
+# Install dependencies in two steps: 
+# 1. Install defined dependencies
+# 2. Install the package itself later if needed, but for now just requirements
+RUN uv pip install --system --no-cache -r pyproject.toml
 
 # Copy backend source modules and scripts
 COPY backend/app/ ./app/
