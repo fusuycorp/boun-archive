@@ -53,9 +53,12 @@
 <div class="flex h-screen bg-slate-50 font-sans text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-100">
   <!-- Sidebar -->
   <aside class="w-64 bg-white border-r border-slate-200 flex flex-col transition-colors duration-200 dark:bg-slate-900 dark:border-slate-800">
-    <div class="p-6">
-      <h1 class="text-xl font-bold text-indigo-600 tracking-tight dark:text-indigo-400">BOUN Archive</h1>
-      <p class="text-xs text-slate-500 mt-1 uppercase tracking-widest font-semibold dark:text-slate-400">Academic Analytics</p>
+    <div class="p-6 flex items-center space-x-3">
+      <img src="/logo.png" alt="BOUN Archive Logo" class="h-10 w-10 rounded-lg shadow-sm border border-slate-100 dark:border-slate-800 object-cover" />
+      <div>
+        <h1 class="text-base font-extrabold text-slate-900 tracking-tight leading-none dark:text-white">BOUN Archive</h1>
+        <p class="text-[9px] text-slate-400 mt-1 uppercase tracking-widest font-black dark:text-slate-500">Academic Analytics</p>
+      </div>
     </div>
 
     <nav class="flex-1 px-4 space-y-1">
