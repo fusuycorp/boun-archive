@@ -10,7 +10,13 @@ SQLALCHEMY_DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://boun_user:boun_password@localhost/boun_archive"
 )
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_size=20,
+    max_overflow=10,
+    pool_recycle=3600,
+    pool_pre_ping=True
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

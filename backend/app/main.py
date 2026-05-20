@@ -3,14 +3,20 @@ import meilisearch
 import pandas as pd
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from redis import asyncio as aioredis
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.redis import RedisBackend
+from fastapi_cache.decorator import cache
 
 from . import models, schemas, database
 
 app = FastAPI(title="BOUN Archive API")
 
-# CORS
+# Middlewares
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], # In production, restrict this
@@ -18,6 +24,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup():
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    redis = aioredis.from_url(redis_url, encoding="utf8", decode_responses=True)
+    FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache")
 
 # Meilisearch Client
 MEILI_CLIENT = meilisearch.Client(
@@ -30,6 +42,7 @@ def read_root():
     return {"message": "Welcome to the BOUN Archive API"}
 
 @app.get("/api/v1/search")
+@cache(expire=600)
 def search_courses(
     q: str = "",
     term: List[str] = Query(None),
@@ -61,6 +74,7 @@ def search_courses(
     return results
 
 @app.get("/api/v1/facets")
+@cache(expire=3600)
 def get_global_facets():
     # Return facets for all documents (empty search)
     results = MEILI_CLIENT.index('courses').search("", {
@@ -70,6 +84,7 @@ def get_global_facets():
     return results['facetDistribution']
 
 @app.get("/api/v1/analytics/ghost-schedule/{term:path}")
+@cache(expire=3600)
 def get_ghost_schedule(
     term: str, 
     dept: List[str] = Query(None),
@@ -103,6 +118,7 @@ def get_engine(db: Session = Depends(database.get_db)):
     return TrendEngine(courses_df, slots_df)
 
 @app.get("/api/v1/predict/course/{course_code}")
+@cache(expire=3600)
 def predict_course(course_code: str, db: Session = Depends(database.get_db)):
     # For performance in this demo, we'll query only the relevant history
     history = db.query(models.Course).filter(models.Course.course_code == course_code).all()
@@ -134,6 +150,7 @@ def predict_course(course_code: str, db: Session = Depends(database.get_db)):
     }
 
 @app.get("/api/v1/courses/{course_id}", response_model=schemas.Course)
+@cache(expire=3600)
 def get_course(course_id: int, db: Session = Depends(database.get_db)):
     course = db.query(models.Course).filter(models.Course.id == course_id).first()
     if not course:
@@ -141,6 +158,7 @@ def get_course(course_id: int, db: Session = Depends(database.get_db)):
     return course
 
 @app.get("/api/v1/instructors", response_model=List[schemas.Instructor])
+@cache(expire=3600)
 def get_instructors(q: str = "", db: Session = Depends(database.get_db)):
     query = db.query(models.Instructor)
     if q:
@@ -148,6 +166,7 @@ def get_instructors(q: str = "", db: Session = Depends(database.get_db)):
     return query.limit(50).all()
 
 @app.get("/api/v1/analytics/instructor/{instructor_id}/legacy")
+@cache(expire=3600)
 def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get_db)):
     instructor = db.query(models.Instructor).filter(models.Instructor.id == instructor_id).first()
     if not instructor:
@@ -187,6 +206,7 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
     }
 
 @app.get("/api/v1/terms", response_model=List[schemas.Term])
+@cache(expire=86400)
 def get_terms(db: Session = Depends(database.get_db)):
     return db.query(models.Term).order_by(models.Term.id.desc()).all()
 

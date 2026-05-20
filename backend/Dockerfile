@@ -1,18 +1,19 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Install system dependencies for compilation and database support
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     libpq-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy backend requirements configuration
-COPY backend/pyproject.toml ./
+# Copy requirements
+COPY backend/pyproject.toml backend/uv.lock ./
 
-# Install python dependencies
-RUN pip install --no-cache-dir .
+# Install dependencies
+RUN uv pip install --system --no-cache -e .
 
 # Copy backend source modules and scripts
 COPY backend/app/ ./app/
