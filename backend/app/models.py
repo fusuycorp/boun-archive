@@ -53,6 +53,7 @@ class CourseSlot(Base):
     course_id = Column(Integer, ForeignKey("courses.id"), index=True)
     day_code = Column(String(10))
     slot_hour = Column(Integer)
+    slot_title = Column(String(255))
     room_id = Column(Integer, ForeignKey("rooms.id"), index=True)
 
     course = relationship("Course", back_populates="slots")

@@ -59,12 +59,18 @@ def sync_meilisearch():
     
     # 4. Configure Index (Facets/Searchable)
     print("Configuring index...")
-    index.update_filterable_attributes([
-        'term', 'dept_code', 'department', 'instructor', 'delivery_method'
-    ])
-    index.update_searchable_attributes([
-        'course_code', 'title', 'instructor', 'department'
-    ])
+    index.update_settings({
+        'filterableAttributes': [
+            'term', 'dept_code', 'department', 'instructor', 'delivery_method'
+        ],
+        'searchableAttributes': [
+            'course_code', 'title', 'instructor', 'department'
+        ],
+        'faceting': {
+            'maxValuesPerFacet': 1000
+        },
+        'sortableAttributes': ['term', 'course_code']
+    })
     
     print("Meilisearch sync completed!")
 

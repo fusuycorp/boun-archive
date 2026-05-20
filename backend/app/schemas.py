@@ -39,7 +39,8 @@ class Room(RoomBase):
 class CourseSlotBase(BaseModel):
     day_code: str
     slot_hour: int
-    room_id: int
+    slot_title: Optional[str] = None
+    room_id: Optional[int] = None
 
 class CourseSlot(CourseSlotBase):
     id: int

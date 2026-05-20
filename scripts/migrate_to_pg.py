@@ -113,6 +113,7 @@ def migrate():
             course_id=row['course_id'],
             day_code=row['day'],
             slot_hour=hour_val,
+            slot_title=row['slot_title'],
             room_id=room_map.get(row['room'].strip()) if row['room'] else None
         )
         slot_objects.append(slot)
