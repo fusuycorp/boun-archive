@@ -10,6 +10,7 @@
     TrendingUp, 
     User, 
     CalendarDays, 
+    BookOpen,
     Sun, 
     Moon 
   } from "lucide-svelte";
