@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { BookOpen, Search, ArrowRight, ChevronRight, Hash } from "lucide-svelte";
+  import { BookOpen, Search, ArrowRight, ChevronRight, Hash, ArrowUpDown } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
 
   let departments = $state<any[]>([]);
@@ -9,19 +9,51 @@
   let loading = $state(false);
   let deptSearch = $state("");
 
+  // Sorting
+  let sortColumn = $state("latest_term");
+  let sortDirection = $state<"asc" | "desc">("desc");
+
   async function fetchDepartments() {
     const res = await fetch(`${API_BASE}/api/v1/departments`);
     departments = await res.json();
+    
+    // Restore state if available
+    const savedDept = sessionStorage.getItem("dept_selected");
+    if (savedDept) {
+      selectedDept = savedDept;
+      const savedCourses = sessionStorage.getItem(`dept_courses_${savedDept}`);
+      if (savedCourses) {
+        uniqueCourses = JSON.parse(savedCourses);
+      } else {
+        fetchUniqueCourses(savedDept);
+      }
+    }
   }
 
   async function fetchUniqueCourses(deptCode: string) {
     loading = true;
     selectedDept = deptCode;
+    sessionStorage.setItem("dept_selected", deptCode);
     try {
       const res = await fetch(`${API_BASE}/api/v1/departments/${deptCode}/unique-courses`);
-      uniqueCourses = await res.json();
+      const data = await res.json();
+      // Add latest_term field for easy sorting
+      uniqueCourses = data.map((c: any) => ({
+        ...c,
+        latest_term: c.terms[0] || ""
+      }));
+      sessionStorage.setItem(`dept_courses_${deptCode}`, JSON.stringify(uniqueCourses));
     } finally {
       loading = false;
+    }
+  }
+
+  function handleSort(column: string) {
+    if (sortColumn === column) {
+      sortDirection = sortDirection === "asc" ? "desc" : "asc";
+    } else {
+      sortColumn = column;
+      sortDirection = column === "latest_term" ? "desc" : "asc";
     }
   }
 
@@ -32,6 +64,16 @@
       d.kisaadi.toLowerCase().includes(deptSearch.toLowerCase()) || 
       d.bolum.toLowerCase().includes(deptSearch.toLowerCase())
     )
+  );
+
+  const sortedCourses = $derived(
+    [...uniqueCourses].sort((a, b) => {
+      const valA = a[sortColumn];
+      const valB = b[sortColumn];
+      if (valA < valB) return sortDirection === "asc" ? -1 : 1;
+      if (valA > valB) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    })
   );
 </script>
 
@@ -106,14 +148,51 @@
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="bg-slate-50/50 dark:bg-slate-950/50 border-b border-slate-100 dark:border-slate-800">
-                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Code</th>
-                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Historical Title</th>
+                  <th class="p-4">
+                    <button 
+                      onclick={() => handleSort('course_code')}
+                      class="flex items-center space-x-1 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+                    >
+                      <span>Code</span>
+                      {#if sortColumn === 'course_code'}
+                        {sortDirection === 'asc' ? '↑' : '↓'}
+                      {:else}
+                        <ArrowUpDown size={10} />
+                      {/if}
+                    </button>
+                  </th>
+                  <th class="p-4">
+                    <button 
+                      onclick={() => handleSort('title')}
+                      class="flex items-center space-x-1 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+                    >
+                      <span>Historical Title</span>
+                      {#if sortColumn === 'title'}
+                        {sortDirection === 'asc' ? '↑' : '↓'}
+                      {:else}
+                        <ArrowUpDown size={10} />
+                      {/if}
+                    </button>
+                  </th>
+                  <th class="p-4">
+                    <button 
+                      onclick={() => handleSort('latest_term')}
+                      class="flex items-center space-x-1 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+                    >
+                      <span>Latest Term</span>
+                      {#if sortColumn === 'latest_term'}
+                        {sortDirection === 'asc' ? '↑' : '↓'}
+                      {:else}
+                        <ArrowUpDown size={10} />
+                      {/if}
+                    </button>
+                  </th>
                   <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Active Semesters</th>
                   <th class="p-4"></th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-50 dark:divide-slate-800/50">
-                {#each uniqueCourses as course}
+                {#each sortedCourses as course}
                   <tr class="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors group">
                     <td class="p-4 whitespace-nowrap">
                       <span class="text-sm font-bold text-indigo-600 dark:text-indigo-400">{course.course_code}</span>
@@ -121,13 +200,16 @@
                     <td class="p-4">
                       <span class="text-sm font-bold text-slate-700 dark:text-slate-200">{course.title}</span>
                     </td>
+                    <td class="p-4 whitespace-nowrap">
+                      <span class="text-xs font-bold text-slate-500 dark:text-slate-400">{course.latest_term}</span>
+                    </td>
                     <td class="p-4">
                       <div class="flex flex-wrap gap-1">
-                        {#each course.terms.slice(0, 5) as term}
+                        {#each course.terms.slice(0, 3) as term}
                           <span class="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold rounded-md dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-700">{term}</span>
                         {/each}
-                        {#if course.terms.length > 5}
-                          <span class="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-[9px] font-black rounded-md dark:bg-indigo-950/40 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50">+{course.terms.length - 5} MORE</span>
+                        {#if course.terms.length > 3}
+                          <span class="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-[9px] font-black rounded-md dark:bg-indigo-950/40 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50">+{course.terms.length - 3} MORE</span>
                         {/if}
                       </div>
                     </td>

@@ -35,6 +35,18 @@
     loading = true;
     if (resetOffset) offset = 0;
     
+    // Save state to sessionStorage
+    const state = {
+      query,
+      selectedTerms,
+      selectedDepts,
+      offset,
+      limit,
+      sortColumn,
+      sortDirection
+    };
+    sessionStorage.setItem("search_state", JSON.stringify(state));
+
     try {
       const params = new URLSearchParams();
       params.append("q", query);
@@ -117,9 +129,24 @@
     timeout = setTimeout(performSearch, 300);
   }
 
-  onMount(() => {
-    fetchGlobalFacets();
-    performSearch();
+  onMount(async () => {
+    await fetchGlobalFacets();
+    
+    // Restore state if available
+    const savedState = sessionStorage.getItem("search_state");
+    if (savedState) {
+      const state = JSON.parse(savedState);
+      query = state.query || "";
+      selectedTerms = state.selectedTerms || [];
+      selectedDepts = state.selectedDepts || [];
+      offset = state.offset || 0;
+      limit = state.limit || 20;
+      sortColumn = state.sortColumn || "";
+      sortDirection = state.sortDirection || "asc";
+      performSearch(false); // Search without resetting offset
+    } else {
+      performSearch();
+    }
   });
 
   const filteredDepts = $derived(
