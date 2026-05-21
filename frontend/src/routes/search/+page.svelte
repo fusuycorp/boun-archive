@@ -10,7 +10,8 @@
   let loading = $state(false);
   let totalHits = $state(0);
   let offset = $state(0);
-  const limit = 20;
+  let limit = $state(20);
+  const limitOptions = [10, 20, 50, 100, 200];
 
   // Filters
   let selectedTerms = $state<string[]>([]);
@@ -56,6 +57,11 @@
     offset = newOffset;
     performSearch(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function handleLimitChange(newLimit: number) {
+    limit = newLimit;
+    performSearch(true);
   }
 
   function toggleTerm(term: string) {
@@ -117,8 +123,22 @@
             <span>Clear All</span>
           </button>
        {/if}
-       <div class="text-sm text-slate-500 font-medium bg-white px-3 py-1.5 rounded-full border border-slate-200 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400">
-         {totalHits.toLocaleString()} results found
+       <div class="flex items-center space-x-2 text-sm text-slate-500 font-medium bg-white px-3 py-1.5 rounded-full border border-slate-200 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400 shadow-sm">
+         <span class="text-slate-800 dark:text-slate-100 font-bold">{totalHits.toLocaleString()}</span> 
+         <span class="text-xs text-slate-400">results found</span>
+       </div>
+       
+       <div class="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-full border border-slate-200 dark:bg-slate-900 dark:border-slate-800 shadow-sm">
+         <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Show</span>
+         <select 
+          value={limit} 
+          onchange={(e) => handleLimitChange(Number(e.currentTarget.value))}
+          class="bg-transparent text-xs font-bold text-slate-700 dark:text-slate-300 outline-none border-none focus:ring-0 cursor-pointer"
+         >
+           {#each limitOptions as option}
+             <option value={option}>{option}</option>
+           {/each}
+         </select>
        </div>
     </div>
   </div>
@@ -238,69 +258,73 @@
           <p class="text-slate-500 dark:text-slate-400 font-medium animate-pulse">Querying Meilisearch...</p>
         </div>
       {:else}
-        <div class="grid grid-cols-1 gap-4">
-          {#each results as course}
-            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all group dark:bg-slate-900 dark:border-slate-800 dark:hover:border-indigo-500/50">
-              <div class="flex justify-between items-start">
-                <div class="space-y-2">
-                  <div class="flex items-center space-x-2">
-                    <span class="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-[10px] font-black rounded-lg uppercase tracking-wider border border-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-400 dark:border-indigo-900/50">{course.course_code}</span>
-                    <span class="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-widest">Section {course.section}</span>
-                  </div>
-                  <h3 class="text-xl font-bold text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors leading-tight">{course.title}</h3>
-                </div>
-                <div class="text-right flex flex-col items-end">
-                  <div class="text-sm font-black text-slate-700 dark:text-slate-300">{course.credits} <span class="text-[10px] text-slate-400 dark:text-slate-500 font-normal uppercase">Credits</span></div>
-                  <div class="text-xs text-slate-400 dark:text-slate-500 font-bold">{course.ects} <span class="font-normal uppercase">ECTS</span></div>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-6 mt-8 pt-6 border-t border-slate-50 dark:border-slate-800/40">
-                <div class="flex flex-col space-y-1">
-                  <span class="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">Instructor</span>
-                  <div class="flex items-center space-x-2 text-slate-600 dark:text-slate-300">
-                    <User size={14} class="text-indigo-400 dark:text-indigo-500" />
-                    <span class="text-xs font-bold truncate">{course.instructor}</span>
-                  </div>
-                </div>
-                <div class="flex flex-col space-y-1">
-                  <span class="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">Department</span>
-                  <div class="flex items-center space-x-2 text-slate-600 dark:text-slate-300">
-                    <BookOpen size={14} class="text-indigo-400 dark:text-indigo-500" />
-                    <span class="text-xs font-bold truncate">{course.department}</span>
-                  </div>
-                </div>
-                <div class="flex flex-col space-y-1">
-                  <span class="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">Term</span>
-                  <div class="flex items-center space-x-2 text-slate-600 dark:text-slate-300">
-                    <Calendar size={14} class="text-indigo-400 dark:text-indigo-500" />
-                    <span class="text-xs font-bold">{course.term}</span>
-                  </div>
-                </div>
-                <div class="flex flex-col space-y-1">
-                  <span class="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">Delivery</span>
-                  <div class="flex items-center space-x-2 text-slate-600 dark:text-slate-300">
-                    <MapPin size={14} class="text-indigo-400 dark:text-indigo-500" />
-                    <span class="text-xs font-bold">{course.delivery_method || 'N/A'}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          {:else}
-            <div class="bg-white p-24 rounded-2xl border border-slate-200 border-dashed flex flex-col items-center justify-center text-center dark:bg-slate-900 dark:border-slate-800 dark:border-dashed">
-               <div class="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-300 mb-4 dark:bg-slate-950 dark:text-slate-700">
-                 <Search size={32} />
-               </div>
-               <h3 class="text-lg font-bold text-slate-800 dark:text-slate-200">No results matched your filters</h3>
-               <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">Try adjusting your keywords or clearing the active filters.</p>
-               <button onclick={clearFilters} class="mt-6 px-6 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 dark:shadow-none">Clear all filters</button>
-            </div>
-          {/each}
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden dark:bg-slate-900 dark:border-slate-800">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-50/50 dark:bg-slate-950/50 border-b border-slate-100 dark:border-slate-800">
+                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Course</th>
+                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Title</th>
+                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Instructor</th>
+                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest text-center">Cr/ECTS</th>
+                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Term</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-50 dark:divide-slate-800/50">
+                {#each results as course}
+                  <tr class="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors group">
+                    <td class="p-4 whitespace-nowrap">
+                      <div class="flex flex-col">
+                        <span class="text-sm font-bold text-indigo-600 dark:text-indigo-400">{course.course_code}</span>
+                        <span class="text-[10px] text-slate-400 font-medium">Sec {course.section}</span>
+                      </div>
+                    </td>
+                    <td class="p-4">
+                      <div class="flex flex-col">
+                        <span class="text-sm font-bold text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{course.title}</span>
+                        <span class="text-[10px] text-slate-400 dark:text-slate-500 truncate max-w-[200px]">{course.department}</span>
+                      </div>
+                    </td>
+                    <td class="p-4 whitespace-nowrap">
+                      <div class="flex items-center space-x-2">
+                        <User size={14} class="text-slate-300 dark:text-slate-600" />
+                        <span class="text-xs font-medium text-slate-600 dark:text-slate-300">{course.instructor}</span>
+                      </div>
+                    </td>
+                    <td class="p-4 whitespace-nowrap text-center">
+                      <div class="flex flex-col items-center">
+                        <span class="text-xs font-bold text-slate-700 dark:text-slate-300">{course.credits}</span>
+                        <span class="text-[9px] text-slate-400 uppercase font-bold">{course.ects} ECTS</span>
+                      </div>
+                    </td>
+                    <td class="p-4 whitespace-nowrap">
+                      <div class="flex items-center space-x-2">
+                        <Calendar size={14} class="text-slate-300 dark:text-slate-600" />
+                        <span class="text-xs font-medium text-slate-600 dark:text-slate-300">{course.term}</span>
+                      </div>
+                    </td>
+                  </tr>
+                {:else}
+                  <tr>
+                    <td colspan="5" class="p-24 text-center">
+                      <div class="flex flex-col items-center justify-center">
+                        <div class="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-300 mb-4 dark:bg-slate-950 dark:text-slate-700">
+                          <Search size={32} />
+                        </div>
+                        <h3 class="text-lg font-bold text-slate-800 dark:text-slate-200">No results found</h3>
+                        <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">Try adjusting your filters or search terms.</p>
+                      </div>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <!-- Pagination UI -->
         {#if totalHits > limit}
-          <div class="flex items-center justify-between pt-8 border-t border-slate-100 dark:border-slate-800">
+          <div class="flex items-center justify-between pt-8">
             <div class="text-sm text-slate-500 dark:text-slate-400">
               Showing <span class="font-bold text-slate-700 dark:text-slate-300">{offset + 1}</span> to 
               <span class="font-bold text-slate-700 dark:text-slate-300">{Math.min(offset + limit, totalHits)}</span> of 
@@ -310,14 +334,14 @@
               <button 
                 onclick={() => handlePageChange(offset - limit)}
                 disabled={offset === 0}
-                class="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800/60"
+                class="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800/60 shadow-sm"
               >
                 Previous
               </button>
               <button 
                 onclick={() => handlePageChange(offset + limit)}
                 disabled={offset + limit >= totalHits}
-                class="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800/60"
+                class="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors dark:bg-slate-900 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800/60 shadow-sm"
               >
                 Next
               </button>
