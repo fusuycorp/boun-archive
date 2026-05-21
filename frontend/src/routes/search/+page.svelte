@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Search, Filter, BookOpen, User, Calendar, MapPin, Check, X } from "lucide-svelte";
+  import { Search, Filter, BookOpen, User, Calendar, MapPin, Check, X, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
 
   let query = $state("");
@@ -12,6 +12,10 @@
   let offset = $state(0);
   let limit = $state(20);
   const limitOptions = [10, 20, 50, 100, 200];
+
+  // Sorting
+  let sortColumn = $state("");
+  let sortDirection = $state<"asc" | "desc">("asc");
 
   // Filters
   let selectedTerms = $state<string[]>([]);
@@ -36,6 +40,11 @@
       params.append("q", query);
       params.append("limit", limit.toString());
       params.append("offset", offset.toString());
+      
+      if (sortColumn) {
+        params.append("sort_by", sortColumn);
+        params.append("sort_order", sortDirection);
+      }
       
       selectedTerms.forEach(t => params.append("term", t));
       selectedDepts.forEach(d => params.append("dept", d));
@@ -64,6 +73,16 @@
     performSearch(true);
   }
 
+  function handleSort(column: string) {
+    if (sortColumn === column) {
+      sortDirection = sortDirection === "asc" ? "desc" : "asc";
+    } else {
+      sortColumn = column;
+      sortDirection = "asc";
+    }
+    performSearch(true);
+  }
+
   function toggleTerm(term: string) {
     if (selectedTerms.includes(term)) {
       selectedTerms = selectedTerms.filter(t => t !== term);
@@ -86,6 +105,8 @@
     selectedTerms = [];
     selectedDepts = [];
     query = "";
+    sortColumn = "";
+    sortDirection = "asc";
     performSearch();
   }
 
@@ -114,7 +135,7 @@
   <div class="flex items-center justify-between">
     <h2 class="text-3xl font-bold text-slate-800 dark:text-slate-100">Course Search</h2>
     <div class="flex items-center space-x-4">
-       {#if selectedTerms.length > 0 || selectedDepts.length > 0 || query}
+       {#if selectedTerms.length > 0 || selectedDepts.length > 0 || query || sortColumn}
           <button 
             onclick={clearFilters}
             class="text-xs font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 flex items-center space-x-1 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-1.5 rounded-full transition-colors"
@@ -263,11 +284,73 @@
             <table class="w-full text-left border-collapse">
               <thead>
                 <tr class="bg-slate-50/50 dark:bg-slate-950/50 border-b border-slate-100 dark:border-slate-800">
-                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Course</th>
-                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Title</th>
-                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Instructor</th>
-                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest text-center">Cr/ECTS</th>
-                  <th class="p-4 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Term</th>
+                  <th class="p-4">
+                    <button 
+                      onclick={() => handleSort('course_code')}
+                      class="flex items-center space-x-1 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+                    >
+                      <span>Course</span>
+                      {#if sortColumn === 'course_code'}
+                        {sortDirection === 'asc' ? '↑' : '↓'}
+                      {:else}
+                        <ArrowUpDown size={10} />
+                      {/if}
+                    </button>
+                  </th>
+                  <th class="p-4">
+                    <button 
+                      onclick={() => handleSort('title')}
+                      class="flex items-center space-x-1 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+                    >
+                      <span>Title</span>
+                      {#if sortColumn === 'title'}
+                        {sortDirection === 'asc' ? '↑' : '↓'}
+                      {:else}
+                        <ArrowUpDown size={10} />
+                      {/if}
+                    </button>
+                  </th>
+                  <th class="p-4">
+                    <button 
+                      onclick={() => handleSort('instructor')}
+                      class="flex items-center space-x-1 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+                    >
+                      <span>Instructor</span>
+                      {#if sortColumn === 'instructor'}
+                        {sortDirection === 'asc' ? '↑' : '↓'}
+                      {:else}
+                        <ArrowUpDown size={10} />
+                      {/if}
+                    </button>
+                  </th>
+                  <th class="p-4">
+                    <div class="flex flex-col items-center">
+                      <button 
+                        onclick={() => handleSort('credits')}
+                        class="flex items-center space-x-1 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+                      >
+                        <span>Cr</span>
+                        {#if sortColumn === 'credits'}
+                          {sortDirection === 'asc' ? '↑' : '↓'}
+                        {:else}
+                          <ArrowUpDown size={10} />
+                        {/if}
+                      </button>
+                    </div>
+                  </th>
+                  <th class="p-4">
+                    <button 
+                      onclick={() => handleSort('term')}
+                      class="flex items-center space-x-1 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest hover:text-indigo-600 transition-colors"
+                    >
+                      <span>Term</span>
+                      {#if sortColumn === 'term'}
+                        {sortDirection === 'asc' ? '↑' : '↓'}
+                      {:else}
+                        <ArrowUpDown size={10} />
+                      {/if}
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-50 dark:divide-slate-800/50">
@@ -281,7 +364,12 @@
                     </td>
                     <td class="p-4">
                       <div class="flex flex-col">
-                        <span class="text-sm font-bold text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{course.title}</span>
+                        <a 
+                          href="/course/{course.course_code}"
+                          class="text-sm font-bold text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors"
+                        >
+                          {course.title}
+                        </a>
                         <span class="text-[10px] text-slate-400 dark:text-slate-500 truncate max-w-[200px]">{course.department}</span>
                       </div>
                     </td>

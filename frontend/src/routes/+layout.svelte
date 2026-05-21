@@ -19,6 +19,7 @@
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutGrid },
     { href: "/search", label: "Search", icon: Search },
+    { href: "/departments", label: "Departments", icon: BookOpen },
     { href: "/calendar", label: "Weekly Planner", icon: CalendarDays },
     { href: "/ghost-schedule", label: "Ghost Schedule", icon: History },
     { href: "/trends", label: "Trends", icon: TrendingUp },

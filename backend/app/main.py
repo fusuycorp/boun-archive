@@ -34,7 +34,7 @@ async def startup():
 # Meilisearch Client
 MEILI_CLIENT = meilisearch.Client(
     os.getenv("MEILI_URL", "http://localhost:7700"), 
-    os.getenv("MEILI_MASTER_KEY", "masterKey123")
+    os.getenv("MEILI_MASTER_KEY", "masterKeyLongEnough123")
 )
 
 @app.get("/")
@@ -48,6 +48,8 @@ def search_courses(
     term: List[str] = Query(None),
     dept: List[str] = Query(None),
     instructor: Optional[str] = None,
+    sort_by: Optional[str] = None,
+    sort_order: str = "asc",
     limit: int = 20,
     offset: int = 0
 ):
@@ -64,12 +66,19 @@ def search_courses(
     if instructor:
         filter_list.append(f"instructor = '{instructor}'")
 
+    sort_list = []
+    if sort_by:
+        sort_list.append(f"{sort_by}:{sort_order}")
+    else:
+        # Default sort
+        sort_list = ['term:desc', 'course_code:asc']
+
     results = MEILI_CLIENT.index('courses').search(q, {
         'filter': " AND ".join(filter_list) if filter_list else None,
         'limit': limit,
         'offset': offset,
         'facets': ['term', 'dept_code', 'instructor', 'delivery_method'],
-        'sort': ['term:desc', 'course_code:asc']
+        'sort': sort_list
     })
     return results
 
@@ -210,4 +219,67 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
 def get_terms(db: Session = Depends(database.get_db)):
     return db.query(models.Term).order_by(models.Term.id.desc()).all()
 
-# Additional endpoints will be added here
+@app.get("/api/v1/departments", response_model=List[schemas.Department])
+@cache(expire=86400)
+def get_departments(db: Session = Depends(database.get_db)):
+    return db.query(models.Department).order_by(models.Department.kisaadi).all()
+
+@app.get("/api/v1/departments/{dept_code}/unique-courses")
+@cache(expire=3600)
+def get_department_unique_courses(dept_code: str, db: Session = Depends(database.get_db)):
+    # Get all unique courses for this department and the terms they were offered in
+    courses = db.query(
+        models.Course.course_code,
+        models.Course.title,
+        models.Course.term_id
+    ).filter(models.Course.dept_kisaadi == dept_code).all()
+    
+    unique_courses = {}
+    for c in courses:
+        if c.course_code not in unique_courses:
+            unique_courses[c.course_code] = {
+                "course_code": c.course_code,
+                "title": c.title,
+                "terms": set()
+            }
+        unique_courses[c.course_code]["terms"].add(c.term_id)
+        
+    # Convert sets to sorted lists for JSON
+    result = []
+    for code in sorted(unique_courses.keys()):
+        course_data = unique_courses[code]
+        course_data["terms"] = sorted(list(course_data["terms"]), reverse=True)
+        result.append(course_data)
+        
+    return result
+
+@app.get("/api/v1/courses/history/{course_code}")
+@cache(expire=3600)
+def get_course_history(course_code: str, db: Session = Depends(database.get_db)):
+    # Get all instances of this course code across all terms
+    courses = db.query(models.Course).filter(models.Course.course_code == course_code).all()
+    if not courses:
+        raise HTTPException(status_code=404, detail="Course history not found")
+        
+    result = []
+    for c in courses:
+        slots = db.query(models.CourseSlot).filter(models.CourseSlot.course_id == c.id).all()
+        result.append({
+            "id": c.id,
+            "term_id": c.term_id,
+            "section": c.section,
+            "title": c.title,
+            "instructor": c.instructor.full_name if c.instructor else "TBA",
+            "credits": c.credits,
+            "ects": c.ects,
+            "delivery_method": c.delivery_method,
+            "slots": [{
+                "day": s.day_code,
+                "hour": s.slot_hour,
+                "room": s.room.name if s.room else "N/A",
+                "title": s.slot_title
+            } for s in slots]
+        })
+        
+    # Sort by term (desc) and section (asc)
+    return sorted(result, key=lambda x: (x['term_id'], x['section']), reverse=True)
