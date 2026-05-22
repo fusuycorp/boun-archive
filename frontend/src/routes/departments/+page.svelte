@@ -343,18 +343,21 @@
                   {#each sortedInstructors as instructor}
                     <tr class="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors group">
                       <td class="p-4 whitespace-nowrap">
-                        <div class="flex items-center space-x-3">
-                          <div class="w-7 h-7 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 dark:bg-slate-800 dark:text-slate-600 group-hover:bg-indigo-100 group-hover:text-indigo-600 transition-colors">
+                        <a 
+                          href="/instructor/{instructor.id}"
+                          class="flex items-center space-x-3 group/item"
+                        >
+                          <div class="w-7 h-7 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 dark:bg-slate-800 dark:text-slate-600 group-hover/item:bg-indigo-100 group-hover/item:text-indigo-600 transition-colors">
                             <User size={14} />
                           </div>
-                          <span class="text-sm font-bold text-slate-700 dark:text-slate-200">{instructor.full_name}</span>
-                        </div>
+                          <span class="text-sm font-bold text-slate-700 dark:text-slate-200 group-hover/item:text-indigo-600 transition-colors">{instructor.full_name}</span>
+                        </a>
                       </td>
                       <td class="p-4 whitespace-nowrap"><span class="text-xs font-bold text-slate-500 dark:text-slate-400">{instructor.last_term}</span></td>
                       <td class="p-4 text-center"><span class="text-xs font-black text-slate-600 dark:text-slate-300">{instructor.course_count}</span></td>
                       <td class="p-4 text-center"><span class="text-xs font-black text-slate-600 dark:text-slate-300">{instructor.total_semesters}</span></td>
                       <td class="p-4 text-right">
-                         <button class="text-slate-300 dark:text-slate-700"><ChevronRight size={14} /></button>
+                         <a href="/instructor/{instructor.id}" class="text-slate-300 hover:text-indigo-600 dark:text-slate-700 dark:hover:text-indigo-400 transition-colors"><ChevronRight size={14} /></a>
                       </td>
                     </tr>
                   {/each}

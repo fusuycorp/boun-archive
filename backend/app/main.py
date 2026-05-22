@@ -175,6 +175,14 @@ def get_instructors(q: str = "", db: Session = Depends(database.get_db)):
         query = query.filter(models.Instructor.full_name.ilike(f"%{q}%"))
     return query.limit(50).all()
 
+@app.get("/api/v1/instructors/{instructor_id}", response_model=schemas.Instructor)
+@cache(expire=3600)
+def get_instructor(instructor_id: int, db: Session = Depends(database.get_db)):
+    instructor = db.query(models.Instructor).filter(models.Instructor.id == instructor_id).first()
+    if not instructor:
+        raise HTTPException(status_code=404, detail="Instructor not found")
+    return instructor
+
 @app.get("/api/v1/analytics/instructor/{instructor_id}/legacy")
 @cache(expire=3600)
 def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get_db)):
