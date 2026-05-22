@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Calendar, Layers, Map, ChevronLeft, ChevronRight, Search, Filter, Check, X } from "lucide-svelte";
+  import { Calendar, Layers, Map, ChevronLeft, ChevronRight, Search, Filter, Check, X, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import { exportToCSV } from "$lib/utils";
 
   let terms = $state<any[]>([]);
   let globalFacets = $state<any>({});
@@ -69,13 +70,39 @@
     }
   }
 
+  function handleExport() {
+    if (scheduleData.length === 0) return;
+    
+    const exportData = scheduleData.map(s => ({
+      term: selectedTerm,
+      day: s.day_code,
+      hour: s.slot_hour,
+      room: s.room_name,
+      course_code: s.course_code,
+      department: s.dept_kisaadi
+    }));
+    
+    exportToCSV(exportData, `boun_ghost_schedule_${selectedTerm}_${new Date().toISOString().split('T')[0]}`);
+  }
+
   onMount(fetchInitialData);
 </script>
 
 <div class="space-y-6">
-  <div>
-    <h2 class="text-3xl font-bold text-slate-800 dark:text-slate-100">Ghost Schedule</h2>
-    <p class="text-slate-500 mt-2 dark:text-slate-400">Historical campus reconstruction and building utilization.</p>
+  <div class="flex items-center justify-between">
+    <div>
+      <h2 class="text-3xl font-bold text-slate-800 dark:text-slate-100">Ghost Schedule</h2>
+      <p class="text-slate-500 mt-2 dark:text-slate-400">Historical campus reconstruction and building utilization.</p>
+    </div>
+
+    <button 
+        onclick={handleExport}
+        disabled={scheduleData.length === 0}
+        class="flex items-center space-x-2 bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-50 transition-colors shadow-sm dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700 disabled:opacity-50"
+    >
+      <Download size={14} />
+      <span>Export Schedule CSV</span>
+    </button>
   </div>
 
   <!-- Control Bar -->

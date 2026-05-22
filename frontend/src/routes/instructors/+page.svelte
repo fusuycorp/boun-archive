@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { User, Search, History, BookOpen, Clock, Calendar } from "lucide-svelte";
+  import { User, Search, History, BookOpen, Clock, Calendar, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import { exportToCSV } from "$lib/utils";
 
   let query = $state("");
   let instructors = $state<any[]>([]);
@@ -33,6 +34,19 @@
     }
   }
 
+  function handleExport() {
+    if (!legacyData || legacyData.history.length === 0) return;
+    
+    const exportData = legacyData.history.map((item: any) => ({
+      instructor: legacyData.instructor_name,
+      term: item.term,
+      course_code: item.course_code,
+      title: item.title
+    }));
+    
+    exportToCSV(exportData, `boun_instructor_${legacyData.instructor_name.replace(/\s+/g, '_')}_history_${new Date().toISOString().split('T')[0]}`);
+  }
+
   let timeout: any;
   function handleInput() {
     clearTimeout(timeout);
@@ -41,9 +55,21 @@
 </script>
 
 <div class="space-y-8">
-  <div>
-    <h2 class="text-3xl font-bold text-slate-800 dark:text-slate-100">Instructor DNA</h2>
-    <p class="text-slate-500 mt-2 dark:text-slate-400">Historical teaching history and academic footprint.</p>
+  <div class="flex items-center justify-between">
+    <div>
+      <h2 class="text-3xl font-bold text-slate-800 dark:text-slate-100">Instructor DNA</h2>
+      <p class="text-slate-500 mt-2 dark:text-slate-400">Historical teaching history and academic footprint.</p>
+    </div>
+    
+    {#if legacyData}
+       <button 
+          onclick={handleExport}
+          class="flex items-center space-x-2 bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-50 transition-colors shadow-sm dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+       >
+         <Download size={14} />
+         <span>Export History CSV</span>
+       </button>
+    {/if}
   </div>
 
   <!-- Search -->

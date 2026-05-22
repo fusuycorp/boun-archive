@@ -46,7 +46,7 @@ services:
     image: getmeili/meilisearch:v1.12
     restart: always
     environment:
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKey123}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKeyLongEnough123}
       MEILI_ENV: ${MEILI_ENV:-production}
       MEILI_HTTP_ADDR: "0.0.0.0:${MEILI_PORT_INTERNAL:-7700}"
     expose:
@@ -67,7 +67,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-boun_user}:${POSTGRES_PASSWORD:-boun_password}@${DB_HOST:-db}:${DB_PORT_INTERNAL:-5432}/${POSTGRES_DB:-boun_archive}
       MEILI_URL: http://${MEILI_HOST:-meilisearch}:${MEILI_PORT_INTERNAL:-7700}
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKey123}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKeyLongEnough123}
       REDIS_URL: redis://redis:6379
       BACKEND_PORT_INTERNAL: ${BACKEND_PORT_INTERNAL:-8000}
     expose:

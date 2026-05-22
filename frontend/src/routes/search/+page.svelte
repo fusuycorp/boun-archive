@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Search, Filter, BookOpen, User, Calendar, MapPin, Check, X, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-svelte";
+  import { Search, Filter, BookOpen, User, Calendar, MapPin, Check, X, ArrowUp, ArrowDown, ArrowUpDown, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import { exportToCSV } from "$lib/utils";
 
   let query = $state("");
   let results = $state<any[]>([]);
@@ -122,6 +123,25 @@
     performSearch();
   }
 
+  function handleExport() {
+    if (results.length === 0) return;
+    
+    // Clean data for export
+    const exportData = results.map(c => ({
+      course_code: c.course_code,
+      section: c.section,
+      title: c.title,
+      department: c.department,
+      instructor: c.instructor,
+      credits: c.credits,
+      ects: c.ects,
+      term: c.term,
+      delivery_method: c.delivery_method
+    }));
+    
+    exportToCSV(exportData, `boun_courses_export_${new Date().toISOString().split('T')[0]}`);
+  }
+
   // Debounced search
   let timeout: any;
   function handleInput() {
@@ -188,6 +208,15 @@
            {/each}
          </select>
        </div>
+
+       <button 
+          onclick={handleExport}
+          disabled={results.length === 0}
+          class="flex items-center space-x-2 bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 dark:shadow-none disabled:opacity-50 disabled:cursor-not-allowed"
+       >
+         <Download size={14} />
+         <span>Export CSV</span>
+       </button>
     </div>
   </div>
 

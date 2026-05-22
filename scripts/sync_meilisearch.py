@@ -69,7 +69,7 @@ def sync_meilisearch():
         'faceting': {
             'maxValuesPerFacet': 1000
         },
-        'sortableAttributes': ['term', 'course_code']
+        'sortableAttributes': ['term', 'course_code', 'title', 'instructor', 'credits', 'ects']
     })
     
     print("Meilisearch sync completed!")

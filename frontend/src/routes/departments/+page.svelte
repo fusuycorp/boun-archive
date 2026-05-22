@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { BookOpen, Search, ArrowRight, ChevronRight, Hash, ArrowUpDown, User } from "lucide-svelte";
+  import { BookOpen, Search, ArrowRight, ChevronRight, Hash, ArrowUpDown, User, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import { exportToCSV } from "$lib/utils";
 
   let departments = $state<any[]>([]);
   let selectedDept = $state<string | null>(null);
@@ -108,6 +109,28 @@
     sessionStorage.setItem("dept_view_mode", mode);
   }
 
+  function handleExport() {
+    if (viewMode === 'courses') {
+      if (uniqueCourses.length === 0) return;
+      const exportData = sortedCourses.map(c => ({
+        course_code: c.course_code,
+        title: c.title,
+        latest_term: c.latest_term,
+        all_terms: c.terms.join('; ')
+      }));
+      exportToCSV(exportData, `boun_dept_${selectedDept}_courses_${new Date().toISOString().split('T')[0]}`);
+    } else {
+      if (deptInstructors.length === 0) return;
+      const exportData = sortedInstructors.map(i => ({
+        full_name: i.full_name,
+        last_term: i.last_term,
+        course_count: i.course_count,
+        total_semesters: i.total_semesters
+      }));
+      exportToCSV(exportData, `boun_dept_${selectedDept}_instructors_${new Date().toISOString().split('T')[0]}`);
+    }
+  }
+
   onMount(fetchDepartments);
 
   const filteredDepts = $derived(
@@ -193,7 +216,7 @@
         </div>
       {:else if selectedDept}
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden dark:bg-slate-900 dark:border-slate-800">
-          <div class="p-6 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between bg-slate-50/50 dark:bg-slate-950/50 gap-4">
+          <div class="p-6 border-b border-slate-100 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between bg-slate-50/50 dark:bg-slate-950/50 gap-4">
             <div class="flex items-center space-x-3">
               <div class="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200 dark:shadow-none">
                 {#if viewMode === 'courses'}
@@ -210,16 +233,26 @@
               </div>
             </div>
 
-            <!-- Tab Switcher -->
-            <div class="flex bg-slate-200/50 dark:bg-slate-800/50 p-1 rounded-xl">
-               <button 
-                onclick={() => setViewMode('courses')}
-                class="px-4 py-1.5 text-xs font-bold rounded-lg transition-all {viewMode === 'courses' ? 'bg-white text-indigo-600 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}"
-               >Courses</button>
-               <button 
-                onclick={() => setViewMode('instructors')}
-                class="px-4 py-1.5 text-xs font-bold rounded-lg transition-all {viewMode === 'instructors' ? 'bg-white text-indigo-600 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}"
-               >Instructors</button>
+            <div class="flex items-center space-x-3">
+              <!-- Tab Switcher -->
+              <div class="flex bg-slate-200/50 dark:bg-slate-800/50 p-1 rounded-xl">
+                 <button 
+                  onclick={() => setViewMode('courses')}
+                  class="px-4 py-1.5 text-xs font-bold rounded-lg transition-all {viewMode === 'courses' ? 'bg-white text-indigo-600 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}"
+                 >Courses</button>
+                 <button 
+                  onclick={() => setViewMode('instructors')}
+                  class="px-4 py-1.5 text-xs font-bold rounded-lg transition-all {viewMode === 'instructors' ? 'bg-white text-indigo-600 shadow-sm dark:bg-slate-700 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}"
+                 >Instructors</button>
+              </div>
+
+              <button 
+                  onclick={handleExport}
+                  class="flex items-center space-x-2 bg-white border border-slate-200 text-slate-600 px-4 py-1.5 rounded-xl text-xs font-bold hover:bg-slate-50 transition-colors shadow-sm dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+              >
+                <Download size={14} />
+                <span class="hidden sm:inline">Export CSV</span>
+              </button>
             </div>
           </div>
           
@@ -321,7 +354,6 @@
                       <td class="p-4 text-center"><span class="text-xs font-black text-slate-600 dark:text-slate-300">{instructor.course_count}</span></td>
                       <td class="p-4 text-center"><span class="text-xs font-black text-slate-600 dark:text-slate-300">{instructor.total_semesters}</span></td>
                       <td class="p-4 text-right">
-                         <!-- Instructor details are handled via their own page/search logic if available -->
                          <button class="text-slate-300 dark:text-slate-700"><ChevronRight size={14} /></button>
                       </td>
                     </tr>
