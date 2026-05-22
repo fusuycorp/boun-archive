@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+from sqlalchemy import func, distinct, extract, case
+from sqlalchemy.orm import Session
+from . import models
 
 class TrendEngine:
     def __init__(self, courses_df: pd.DataFrame, slots_df: pd.DataFrame):
@@ -32,22 +35,14 @@ class TrendEngine:
             lookback_years = current_year - history['year'].min()
 
         # 2. Apply Weighted Decay
-        # Recent years carry significantly more weight: Weight = e^(-lambda * age)
-        # For 5 years, lambda=0.3 gives weights approx: [1.0, 0.74, 0.55, 0.40, 0.30]
         decay_lambda = 0.3
         recent_history['age'] = current_year - recent_history['year']
         recent_history['weight'] = np.exp(-decay_lambda * recent_history['age'])
         
         # 3. Calculate Normalized Probabilities
-        # Group by semester and sum weights
         semester_weights = recent_history.groupby('semester_num')['weight'].sum()
-        
-        # Total potential weight for each semester type over the lookback window
-        # (Assuming a course could be offered once per year in each semester)
         total_potential_weight = sum(np.exp(-decay_lambda * i) for i in range(0, lookback_years))
         
-        # If we have very little data (e.g. course only offered once 5 years ago), 
-        # the probability should reflect that uncertainty.
         probabilities = {
             "Fall": float(min(1.0, semester_weights.get(1, 0) / total_potential_weight) * 100),
             "Spring": float(min(1.0, semester_weights.get(2, 0) / total_potential_weight) * 100),
@@ -78,10 +73,8 @@ class TrendEngine:
         decay_lambda = 0.3
         relevant_slots['year'] = relevant_slots['term'].str.split('/').str[0].astype(int)
         
-        # Filter for 5 years
         relevant_slots = relevant_slots[relevant_slots['year'] > (current_year - 5)].copy()
         if relevant_slots.empty:
-             # Fallback if no recent slots
              relevant_slots = self.slots[self.slots['course_id'].isin(course_ids)].copy()
              relevant_slots = relevant_slots.merge(self.courses[['id', 'term']], left_on='course_id', right_on='id')
              relevant_slots['year'] = relevant_slots['term'].str.split('/').str[0].astype(int)
@@ -89,24 +82,117 @@ class TrendEngine:
         relevant_slots['age'] = current_year - relevant_slots['year']
         relevant_slots['weight'] = np.exp(-decay_lambda * relevant_slots['age'])
 
-        # Group by day and hour
         grouped = relevant_slots.groupby(['day', 'hour'])['weight'].sum().reset_index()
         grouped = grouped.sort_values(by='weight', ascending=False).head(3)
         
-        # Normalize score
         total_weight = grouped['weight'].sum()
-        grouped['confidence_score'] = grouped['weight'] / total_weight
+        grouped['confidence_score'] = grouped['weight'] / total_weight if total_weight > 0 else 0
 
         return grouped[['day', 'hour', 'confidence_score']].to_dict(orient='records')
 
-# Unit test / usage check
-if __name__ == "__main__":
-    import sqlite3
-    conn = sqlite3.connect('schedules.db')
-    c_df = pd.read_sql_query("SELECT * FROM courses", conn)
-    s_df = pd.read_sql_query("SELECT * FROM course_slots", conn)
+class MacroEngine:
+    """
+    High-performance engine for university-wide historical analytics.
+    Uses SQLAlchemy for direct DB aggregations.
+    """
     
-    engine = TrendEngine(c_df, s_df)
-    print(f"Predictions for INTT514:")
-    print(engine.predict_offering("INTT514"))
-    print(engine.predict_slots("INTT514"))
+    @staticmethod
+    def get_department_evolution(db: Session):
+        # We want count of courses per department per year
+        # Term ID format: "2024/2025-1" -> Year is "2024"
+        
+        # Subquery to extract year from term_id
+        # Note: SQLite vs Postgres substring logic differs slightly. 
+        # Using a more robust approach: taking the first 4 chars.
+        results = db.query(
+            models.Course.dept_kisaadi,
+            func.substr(models.Course.term_id, 1, 4).label('year'),
+            func.count(models.Course.id).label('count')
+        ).group_by(
+            models.Course.dept_kisaadi,
+            'year'
+        ).all()
+        
+        # Format for Chart.js (Pivot-like structure)
+        data = {}
+        all_years = sorted(list(set(r.year for r in results)))
+        
+        for r in results:
+            if r.dept_kisaadi not in data:
+                data[r.dept_kisaadi] = {y: 0 for y in all_years}
+            data[r.dept_kisaadi][r.year] = r.count
+            
+        return {
+            "years": all_years,
+            "departments": data
+        }
+
+    @staticmethod
+    def get_delivery_evolution(db: Session):
+        results = db.query(
+            func.substr(models.Course.term_id, 1, 4).label('year'),
+            models.Course.delivery_method,
+            func.count(models.Course.id).label('count')
+        ).group_by(
+            'year',
+            models.Course.delivery_method
+        ).all()
+        
+        # Normalize delivery methods (Standard, Online, Hybrid)
+        data = {}
+        all_years = sorted(list(set(r.year for r in results)))
+        
+        for r in results:
+            method = r.delivery_method or "Standard"
+            if method not in data:
+                data[method] = {y: 0 for y in all_years}
+            data[method][r.year] += r.count
+            
+        return {
+            "years": all_years,
+            "methods": data
+        }
+
+    @staticmethod
+    def get_scheduling_heatmap(db: Session, decade: int = None):
+        query = db.query(
+            models.CourseSlot.day_code,
+            models.CourseSlot.slot_hour,
+            func.count(models.CourseSlot.id).label('count')
+        ).join(models.Course)
+        
+        if decade:
+            start_year = str(decade)
+            end_year = str(decade + 9)
+            query = query.filter(models.Course.term_id >= start_year, models.Course.term_id <= end_year)
+            
+        results = query.group_by(
+            models.CourseSlot.day_code,
+            models.CourseSlot.slot_hour
+        ).all()
+        
+        return [r._asdict() for r in results]
+
+    @staticmethod
+    def get_course_lifecycles(db: Session):
+        # Current state: 2024/2025-1
+        # Extinct: Not offered in 10 years
+        # New: First offered in last 2 years
+        
+        all_courses = db.query(
+            models.Course.course_code,
+            func.min(func.substr(models.Course.term_id, 1, 4)).label('first_seen'),
+            func.max(func.substr(models.Course.term_id, 1, 4)).label('last_seen')
+        ).group_by(models.Course.course_code).all()
+        
+        current_year = 2024 # Based on latest data in DB
+        
+        new_courses = [c.course_code for c in all_courses if int(c.first_seen) >= (current_year - 2)]
+        extinct_courses = [c.course_code for c in all_courses if int(c.last_seen) <= (current_year - 10)]
+        
+        return {
+            "new": new_courses[:50], # Limit for UI
+            "extinct": extinct_courses[:50],
+            "total_new": len(new_courses),
+            "total_extinct": len(extinct_courses)
+        }

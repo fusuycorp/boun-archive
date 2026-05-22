@@ -117,7 +117,28 @@ def get_ghost_schedule(
     # Convert Row objects to dictionaries for JSON serialization
     return [r._asdict() for r in results]
 
-from .analytics import TrendEngine
+from .analytics import TrendEngine, MacroEngine
+
+# Macro Analytics Endpoints
+@app.get("/api/v1/analytics/macro/departments-evolution")
+@cache(expire=86400)
+def get_dept_evolution(db: Session = Depends(database.get_db)):
+    return MacroEngine.get_department_evolution(db)
+
+@app.get("/api/v1/analytics/macro/delivery-evolution")
+@cache(expire=86400)
+def get_delivery_evolution(db: Session = Depends(database.get_db)):
+    return MacroEngine.get_delivery_evolution(db)
+
+@app.get("/api/v1/analytics/macro/scheduling-heatmap")
+@cache(expire=86400)
+def get_heatmap(decade: Optional[int] = Query(None), db: Session = Depends(database.get_db)):
+    return MacroEngine.get_scheduling_heatmap(db, decade)
+
+@app.get("/api/v1/analytics/macro/course-lifecycles")
+@cache(expire=86400)
+def get_lifecycles(db: Session = Depends(database.get_db)):
+    return MacroEngine.get_course_lifecycles(db)
 
 # Load analytics engine (in a real app, do this once or use a dependency)
 def get_engine(db: Session = Depends(database.get_db)):
