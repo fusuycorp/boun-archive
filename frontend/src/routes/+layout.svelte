@@ -70,8 +70,8 @@
 <div class="flex h-screen bg-slate-50 font-sans text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
   <!-- Sidebar -->
   <aside 
-    class="bg-white border-r border-slate-200 flex flex-col transition-all duration-300 ease-in-out dark:bg-slate-900 dark:border-slate-800 relative z-20"
-    style="width: {isSidebarOpen ? '256px' : '80px'}"
+    class="bg-white border-r border-slate-200 flex flex-col transition-all duration-300 ease-in-out dark:bg-slate-900 dark:border-slate-800 relative z-20 shrink-0 overflow-hidden"
+    style="width: {isSidebarOpen ? '256px' : '80px'}; min-width: {isSidebarOpen ? '256px' : '80px'}; max-width: {isSidebarOpen ? '256px' : '80px'}"
   >
     <div class="p-6 flex items-center {isSidebarOpen ? 'space-x-3' : 'justify-center'}">
       <img src="/logo.png" alt="BOUN Archive Logo" class="h-10 w-10 rounded-lg shadow-sm border border-slate-100 dark:border-slate-800 object-cover shrink-0" />
