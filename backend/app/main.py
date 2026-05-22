@@ -253,7 +253,45 @@ def get_department_unique_courses(dept_code: str, db: Session = Depends(database
         
     return result
 
-@app.get("/api/v1/courses/history/{course_code}")
+@app.get("/api/v1/departments/{dept_code}/instructors")
+@cache(expire=3600)
+def get_department_instructors(dept_code: str, db: Session = Depends(database.get_db)):
+    # Get all instructors who taught courses in this department
+    # and their most recent term
+    results = db.query(
+        models.Instructor.id,
+        models.Instructor.full_name,
+        models.Course.term_id
+    ).join(models.Course).filter(models.Course.dept_kisaadi == dept_code).all()
+    
+    instructor_map = {}
+    for r in results:
+        if r.id not in instructor_map:
+            instructor_map[r.id] = {
+                "id": r.id,
+                "full_name": r.full_name,
+                "last_term": r.term_id,
+                "course_count": 0,
+                "terms": set()
+            }
+        
+        # Update last_term if this one is more recent (alphabetical sort works for term IDs like 2024/2025-1)
+        if r.term_id > instructor_map[r.id]["last_term"]:
+            instructor_map[r.id]["last_term"] = r.term_id
+            
+        instructor_map[r.id]["course_count"] += 1
+        instructor_map[r.id]["terms"].add(r.term_id)
+        
+    # Convert to list and calculate total unique semesters taught
+    final_results = []
+    for iid in instructor_map:
+        data = instructor_map[iid]
+        data["total_semesters"] = len(data["terms"])
+        del data["terms"] # Don't need the full set in the response
+        final_results.append(data)
+        
+    # Default sort by last_term desc
+    return sorted(final_results, key=lambda x: x['last_term'], reverse=True)
 @cache(expire=3600)
 def get_course_history(course_code: str, db: Session = Depends(database.get_db)):
     # Get all instances of this course code across all terms
