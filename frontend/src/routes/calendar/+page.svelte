@@ -46,7 +46,7 @@
       const params = new URLSearchParams({
         q: searchQuery,
         term: selectedTerm,
-        limit: "10"
+        limit: "200"
       });
       const res = await fetch(`${API_BASE}/api/v1/search?${params.toString()}`);
       const data = await res.json();
