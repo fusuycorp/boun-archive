@@ -10,11 +10,22 @@
   let error = $state<string | null>(null);
 
   async function fetchHistory() {
+    if (!courseCode) return;
+    
     loading = true;
     error = null;
     try {
-      const res = await fetch(`${API_BASE}/api/v1/courses/history/${courseCode}`);
-      if (!res.ok) throw new Error("Course not found");
+      // Use encodeURIComponent to handle spaces and special characters safely
+      const encodedCode = encodeURIComponent(courseCode.trim());
+      const res = await fetch(`${API_BASE}/api/v1/courses/history/${encodedCode}`);
+      
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error("Course history not found");
+        }
+        throw new Error("Failed to fetch course history");
+      }
+      
       history = await res.json();
     } catch (e: any) {
       error = e.message;
@@ -50,7 +61,10 @@
       </div>
       <h3 class="text-2xl font-bold text-slate-800 dark:text-slate-200">{error}</h3>
       <p class="text-slate-500 dark:text-slate-400 mt-2 max-w-sm">We couldn't find any historical data for the course code "{courseCode}".</p>
-      <a href="/search" class="mt-8 px-8 py-3 bg-indigo-600 text-white rounded-2xl font-bold shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-colors">Back to Search</a>
+      <div class="flex space-x-4 mt-8">
+        <a href="/search" class="px-8 py-3 bg-indigo-600 text-white rounded-2xl font-bold shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-colors">Back to Search</a>
+        <button onclick={fetchHistory} class="px-8 py-3 bg-white border border-slate-200 text-slate-600 rounded-2xl font-bold hover:bg-slate-50 transition-colors">Retry</button>
+      </div>
     </div>
   {:else}
     <!-- Header -->

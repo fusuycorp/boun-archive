@@ -4,6 +4,7 @@ import pandas as pd
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from redis import asyncio as aioredis
@@ -292,10 +293,24 @@ def get_department_instructors(dept_code: str, db: Session = Depends(database.ge
         
     # Default sort by last_term desc
     return sorted(final_results, key=lambda x: x['last_term'], reverse=True)
+
+@app.get("/api/v1/courses/history/{course_code}")
 @cache(expire=3600)
 def get_course_history(course_code: str, db: Session = Depends(database.get_db)):
+    # Normalize input
+    clean_code = course_code.strip()
+    
     # Get all instances of this course code across all terms
-    courses = db.query(models.Course).filter(models.Course.course_code == course_code).all()
+    # We use ILIKE for case-insensitive matching
+    courses = db.query(models.Course).filter(models.Course.course_code.ilike(clean_code)).all()
+    
+    if not courses:
+        # Try without spaces as a fallback
+        no_spaces = clean_code.replace(" ", "")
+        courses = db.query(models.Course).filter(
+            func.replace(models.Course.course_code, ' ', '').ilike(no_spaces)
+        ).all()
+        
     if not courses:
         raise HTTPException(status_code=404, detail="Course history not found")
         
