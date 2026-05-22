@@ -68,6 +68,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>BOUN Archive</title>
+</svelte:head>
+
 <div class="flex h-screen w-full bg-slate-50 font-sans text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
   <!-- Sidebar -->
   <aside 
