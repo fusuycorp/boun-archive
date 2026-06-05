@@ -21,7 +21,7 @@ services:
         condition: on-failure
       placement:
         constraints:
-          - node.role == manager
+          - node.labels.type == worky
       resources:
         limits:
           cpus: '0.50'
@@ -39,6 +39,9 @@ services:
     deploy:
       restart_policy:
         condition: on-failure
+      placement:
+        constraints:
+          - node.labels.type == worky
       resources:
         limits:
           cpus: '0.20'
@@ -62,6 +65,9 @@ services:
     deploy:
       restart_policy:
         condition: on-failure
+      placement:
+        constraints:
+          - node.labels.type == worky
       resources:
         limits:
           cpus: '0.50'
@@ -82,6 +88,9 @@ services:
       replicas: 2
       restart_policy:
         condition: on-failure
+      placement:
+        constraints:
+          - node.labels.type == worky
       resources:
         limits:
           cpus: '0.50'
@@ -98,6 +107,9 @@ services:
       replicas: 2
       restart_policy:
         condition: on-failure
+      placement:
+        constraints:
+          - node.labels.type == tanri
       resources:
         limits:
           cpus: '0.30'
@@ -114,7 +126,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.role == manager
+          - node.labels.type == tanri
 
 networks:
   backend_net:
