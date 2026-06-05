@@ -97,7 +97,7 @@ services:
           memory: 512M
 
   frontend:
-    image: ${FRONTEND_IMAGE:-boun-archive-frontend:latest}
+    image: ${FRONTEND_IMAGE:-registry.bogazici.app/boun-archive-frontend:latest}
     environment:
       PUBLIC_API_URL: ${PUBLIC_API_URL}
       PORT: ${FRONTEND_PORT}
