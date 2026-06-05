@@ -4,13 +4,18 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: boun_user
-      POSTGRES_PASSWORD: boun_password
-      POSTGRES_DB: boun_archive
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net
     deploy:
       restart_policy:
         condition: on-failure
@@ -20,17 +25,40 @@ services:
       resources:
         limits:
           cpus: '0.50'
-          memory: 512M
+          memory: 1G
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net
+    deploy:
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: '0.20'
+          memory: 256M
 
   meilisearch:
-    image: getmeili/meilisearch:latest
+    image: getmeili/meilisearch:v1.12
     environment:
-      MEILI_MASTER_KEY: masterKey123
-      MEILI_ENV: development
-    ports:
-      - "7700:7700"
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: ${MEILI_ENV}
+      MEILI_NO_ANALYTICS: "true"
     volumes:
       - meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net
     deploy:
       restart_policy:
         condition: on-failure
@@ -38,6 +66,62 @@ services:
         limits:
           cpus: '0.50'
           memory: 1G
+
+  backend:
+    image: ${BACKEND_IMAGE:-boun-archive-backend:latest}
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MEILI_URL: ${MEILI_URL}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      REDIS_URL: ${REDIS_URL}
+      PORT: ${BACKEND_PORT}
+    networks:
+      - backend_net
+      - frontend_net
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-boun-archive-frontend:latest}
+    environment:
+      PUBLIC_API_URL: ${PUBLIC_API_URL}
+      PORT: ${FRONTEND_PORT}
+    networks:
+      - frontend_net
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: '0.30'
+          memory: 256M
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:3000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - frontend_net
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+networks:
+  backend_net:
+    driver: overlay
+    internal: true
+  frontend_net:
+    driver: overlay
 
 volumes:
   postgres_data:

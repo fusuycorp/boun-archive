@@ -20,7 +20,7 @@ RUN mkdir app && touch app/__init__.py
 # Install dependencies
 RUN uv pip install --system --no-cache .
 
-# Now copy the actual source code (this will invalidate cache for subsequent steps)
+# Now copy the actual source code
 COPY backend/app/ ./app/
 COPY backend/wait_for_services.py ./
 COPY backend/entrypoint.sh ./
@@ -30,8 +30,12 @@ COPY scripts/ ./scripts/
 COPY schedules.db ./
 COPY departments.csv ./
 
-# Make entrypoint script executable
-RUN chmod +x entrypoint.sh
+# Create a non-root user and set permissions
+RUN groupadd -r python && useradd -r -g python python && \
+    chown -R python:python /app && \
+    chmod +x entrypoint.sh
+
+USER python
 
 EXPOSE 8000
 

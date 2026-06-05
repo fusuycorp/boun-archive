@@ -20,12 +20,15 @@ FROM oven/bun:1-alpine AS runner
 
 WORKDIR /app
 
+# Switch to non-root user
+USER bun
+
 # Copy lockfile and package descriptor, install only production packages
-COPY package.json bun.lock ./
+COPY --chown=bun:bun package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 # Copy compiled build output from compiler stage
-COPY --from=builder /app/build ./build
+COPY --chown=bun:bun --from=builder /app/build ./build
 
 # Set runtime options
 ENV PORT=3000

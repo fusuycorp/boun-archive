@@ -5,31 +5,37 @@ services:
     command:
       - "postgres"
       - "-c"
-      - "shared_buffers=4GB"
+      - "shared_buffers=1GB" # Adjusted for more reasonable default
       - "-c"
-      - "effective_cache_size=12GB"
+      - "effective_cache_size=3GB"
       - "-c"
       - "work_mem=64MB"
       - "-c"
-      - "maintenance_work_mem=1GB"
+      - "maintenance_work_mem=256MB"
       - "-c"
       - "min_wal_size=1GB"
       - "-c"
       - "max_wal_size=4GB"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-boun_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-boun_password}
-      POSTGRES_DB: ${POSTGRES_DB:-boun_archive}
-      PGPORT: ${DB_PORT_INTERNAL:-5432}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGPORT: ${DB_PORT}
     expose:
-      - "${DB_PORT_INTERNAL:-5432}"
+      - "${DB_PORT}"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U boun_user -d boun_archive"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
   redis:
     image: redis:7-alpine
@@ -41,23 +47,35 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   meilisearch:
     image: getmeili/meilisearch:v1.12
     restart: always
     environment:
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKeyLongEnough123}
-      MEILI_ENV: ${MEILI_ENV:-production}
-      MEILI_HTTP_ADDR: "0.0.0.0:${MEILI_PORT_INTERNAL:-7700}"
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: ${MEILI_ENV}
+      MEILI_HTTP_ADDR: "0.0.0.0:${MEILI_PORT}"
     expose:
-      - "${MEILI_PORT_INTERNAL:-7700}"
+      - "${MEILI_PORT}"
     volumes:
       - meilisearch_data:/meili_data
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:7700/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:${MEILI_PORT}/health"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - backend_net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   backend:
     build:
@@ -65,13 +83,13 @@ services:
       dockerfile: ./backend/Dockerfile
     restart: always
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-boun_user}:${POSTGRES_PASSWORD:-boun_password}@${DB_HOST:-db}:${DB_PORT_INTERNAL:-5432}/${POSTGRES_DB:-boun_archive}
-      MEILI_URL: http://${MEILI_HOST:-meilisearch}:${MEILI_PORT_INTERNAL:-7700}
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKeyLongEnough123}
-      REDIS_URL: redis://redis:6379
-      BACKEND_PORT_INTERNAL: ${BACKEND_PORT_INTERNAL:-8000}
+      DATABASE_URL: ${DATABASE_URL}
+      MEILI_URL: ${MEILI_URL}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      REDIS_URL: ${REDIS_URL}
+      PORT: ${BACKEND_PORT}
     expose:
-      - "${BACKEND_PORT_INTERNAL:-8000}"
+      - "${BACKEND_PORT}"
     depends_on:
       db:
         condition: service_healthy
@@ -79,6 +97,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - backend_net
+      - frontend_net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   frontend:
     build:
@@ -86,24 +111,37 @@ services:
       dockerfile: Dockerfile
     restart: always
     environment:
-      PUBLIC_API_URL: ""
-      PORT: ${FRONTEND_PORT_INTERNAL:-3000}
+      PUBLIC_API_URL: ${PUBLIC_API_URL}
+      PORT: ${FRONTEND_PORT}
     expose:
-      - "${FRONTEND_PORT_INTERNAL:-3000}"
+      - "${FRONTEND_PORT}"
     depends_on:
       backend:
         condition: service_started
+    networks:
+      - frontend_net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   nginx:
     image: nginx:alpine
     restart: always
-    expose:
-      - "3000"
+    ports:
+      - "80:3000" # Map host 80 to nginx internal 3000
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - frontend
       - backend
+    networks:
+      - frontend_net
+
+networks:
+  backend_net:
+    internal: true
+  frontend_net:
 
 volumes:
   postgres_data:

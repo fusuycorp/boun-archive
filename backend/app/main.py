@@ -18,9 +18,11 @@ app = FastAPI(title="BOUN Archive API")
 
 # Middlewares
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, restrict this
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
