@@ -41,3 +41,8 @@ jobs:
           tags: registry.bogazici.app/boun-archive-frontend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Trigger Dokploy Deployment
+        if: success()
+        run: |
+          curl -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}"
