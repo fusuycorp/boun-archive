@@ -28,14 +28,22 @@ The system is configured to handle up to 10,000 concurrent users using the follo
 The system uses a single entry point (Nginx) on port 3000 (mapped to 80/443 externally).
 
 - **Frontend**: Requests to `/` are proxied to the SvelteKit upstream.
-- **API**: Requests to `/api/` are stripped of the `/api` prefix and forwarded to the backend.
+- **API**: Requests to `/api/` are stripped of the `/api` prefix using an Nginx `rewrite` and forwarded to the backend. This preserves the full path (e.g., `/v1/search`).
   - *Example*: `bountools.com/api/v1/terms` -> `backend:8000/v1/terms`.
-- **Performance**: Nginx is tuned with `worker_connections 20000` and `keepalive` upstreams.
+- **Performance**: Nginx is tuned with `worker_connections 20000` and uses runtime DNS resolution via `resolver 127.0.0.11` to prevent startup crashes if upstreams are not yet healthy.
 
 ## Key Stability Fixes
 1. **Meilisearch Pathing**: Always use the default `/data.ms` internal path for the database volume to avoid version inference errors.
-2. **Config Versioning**: Docker Swarm `configs` are immutable. When updating `nginx.conf`, increment the version name in `docker-stack.yml` (e.g., `nginx_config_v1` -> `nginx_config_v2`).
-3. **Wait for Services**: The backend includes a `wait_for_services.py` script that ensures PostgreSQL, Redis, and Meilisearch are healthy before starting the application.
+2. **Config Versioning**: Docker Swarm `configs` are immutable. The current stable version is **`nginx_config_v3`**. When updating `nginx.conf`, increment the version name in `docker-stack.yml`.
+3. **Wait for Services**: The backend includes a `wait_for_services.py` script that ensures PostgreSQL, Redis, and Meilisearch are healthy before starting the application. It uses a **Redis-based Distributed Lock** to coordinate initialization across multiple replicas.
+
+## GitHub Actions Deployment
+The deployment webhook requires a JSON payload to match the branch:
+```bash
+curl -X POST "${DOKPLOY_WEBHOOK_URL}" \
+  -H "Content-Type: application/json" \
+  -d '{"ref": "refs/heads/main"}'
+```
 
 ## Troubleshooting
 - **502 Bad Gateway**: Usually means the Backend is down or still starting. Check backend logs for `wait_for_services.py` status.
