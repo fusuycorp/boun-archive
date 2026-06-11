@@ -113,7 +113,7 @@ services:
       - backend_net
       - frontend_net
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:$$PORT/ || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:$$PORT/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

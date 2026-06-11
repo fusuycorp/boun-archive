@@ -44,6 +44,11 @@ MEILI_CLIENT = meilisearch.Client(
 def read_root():
     return {"message": "Welcome to the BOUN Archive API"}
 
+@app.get("/health")
+@app.head("/health")
+def health_check():
+    return {"status": "healthy"}
+
 @app.get("/v1/search")
 @cache(expire=600)
 def search_courses(
