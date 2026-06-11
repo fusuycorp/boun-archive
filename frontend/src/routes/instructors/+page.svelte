@@ -13,7 +13,7 @@
       instructors = [];
       return;
     }
-    const res = await fetch(`${API_BASE}/api/v1/instructors?q=${query}`);
+    const res = await fetch(`${API_BASE}/v1/instructors?q=${query}`);
     instructors = await res.json();
   }
 

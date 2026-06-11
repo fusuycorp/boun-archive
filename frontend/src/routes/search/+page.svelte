@@ -25,7 +25,7 @@
 
   async function fetchGlobalFacets() {
     try {
-      const response = await fetch(`${API_BASE}/api/v1/facets`);
+      const response = await fetch(`${API_BASE}/v1/facets`);
       globalFacets = await response.json();
     } catch (e) {
       console.error("Failed to fetch facets", e);
@@ -62,7 +62,7 @@
       selectedTerms.forEach(t => params.append("term", t));
       selectedDepts.forEach(d => params.append("dept", d));
 
-      const response = await fetch(`${API_BASE}/api/v1/search?${params.toString()}`);
+      const response = await fetch(`${API_BASE}/v1/search?${params.toString()}`);
       const data = await response.json();
       results = data.hits;
       currentFacets = data.facetDistribution;

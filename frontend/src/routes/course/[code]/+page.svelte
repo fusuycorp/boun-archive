@@ -17,7 +17,7 @@
     try {
       // Use encodeURIComponent to handle spaces and special characters safely
       const encodedCode = encodeURIComponent(courseCode.trim());
-      const res = await fetch(`${API_BASE}/api/v1/courses/history/${encodedCode}`);
+      const res = await fetch(`${API_BASE}/v1/courses/history/${encodedCode}`);
       
       if (!res.ok) {
         if (res.status === 404) {

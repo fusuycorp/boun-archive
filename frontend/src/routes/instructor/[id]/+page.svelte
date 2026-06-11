@@ -15,7 +15,7 @@
     loading = true;
     error = null;
     try {
-      const res = await fetch(`${API_BASE}/api/v1/analytics/instructor/${instructorId}/legacy`);
+      const res = await fetch(`${API_BASE}/v1/analytics/instructor/${instructorId}/legacy`);
       if (!res.ok) throw new Error("Instructor DNA not found");
       legacyData = await res.json();
     } catch (e: any) {

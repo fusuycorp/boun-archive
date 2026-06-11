@@ -39,8 +39,8 @@
   async function fetchInitialData() {
     try {
       const [termsRes, facetsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/v1/terms`),
-        fetch(`${API_BASE}/api/v1/facets`)
+        fetch(`${API_BASE}/v1/terms`),
+        fetch(`${API_BASE}/v1/facets`)
       ]);
       terms = await termsRes.json();
       globalFacets = await facetsRes.json();
@@ -61,7 +61,7 @@
       const params = new URLSearchParams();
       selectedDepts.forEach(d => params.append("dept", d));
       
-      const res = await fetch(`${API_BASE}/api/v1/analytics/ghost-schedule/${selectedTerm}?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/v1/analytics/ghost-schedule/${selectedTerm}?${params.toString()}`);
       scheduleData = await res.json();
     } catch (e) {
       console.error(e);

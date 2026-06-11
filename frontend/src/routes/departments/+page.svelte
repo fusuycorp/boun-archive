@@ -21,7 +21,7 @@
   let instructorSortDirection = $state<"asc" | "desc">("desc");
 
   async function fetchDepartments() {
-    const res = await fetch(`${API_BASE}/api/v1/departments`);
+    const res = await fetch(`${API_BASE}/v1/departments`);
     departments = await res.json();
     
     // Restore state if available
@@ -50,7 +50,7 @@
 
   async function fetchUniqueCourses(deptCode: string) {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/departments/${deptCode}/unique-courses`);
+      const res = await fetch(`${API_BASE}/v1/departments/${deptCode}/unique-courses`);
       const data = await res.json();
       uniqueCourses = data.map((c: any) => ({
         ...c,
@@ -64,7 +64,7 @@
 
   async function fetchDeptInstructors(deptCode: string) {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/departments/${deptCode}/instructors`);
+      const res = await fetch(`${API_BASE}/v1/departments/${deptCode}/instructors`);
       const data = await res.json();
       deptInstructors = data;
       sessionStorage.setItem(`dept_instructors_${deptCode}`, JSON.stringify(deptInstructors));

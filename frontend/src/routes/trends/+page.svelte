@@ -44,10 +44,10 @@
     macroLoading = true;
     try {
       const [evo, deliv, life] = await Promise.all([
-        fetch(`${API_BASE}/api/v1/analytics/macro/departments-evolution`).then(r => r.json()),
-        fetch(`${API_BASE}/api/v1/analytics/macro/delivery-evolution`).then(r => r.json()),
-        fetch(`${API_BASE}/api/v1/analytics/macro/course-lifecycles`).then(r => r.json())
-      ]);
+        fetch(`${API_BASE}/v1/analytics/macro/departments-evolution`),
+        fetch(`${API_BASE}/v1/analytics/macro/delivery-evolution`),
+        fetch(`${API_BASE}/v1/analytics/macro/course-lifecycles`)
+      ].map(p => p.then(r => r.json())));
       evolutionData = evo;
       deliveryData = deliv;
       lifecycleData = life;
@@ -59,7 +59,7 @@
   }
 
   async function fetchHeatmap() {
-    const url = new URL(`${API_BASE}/api/v1/analytics/macro/scheduling-heatmap`);
+    const url = new URL(`${API_BASE}/v1/analytics/macro/scheduling-heatmap`);
     if (selectedDecade) url.searchParams.set("decade", selectedDecade.toString());
     const res = await fetch(url);
     heatmapData = await res.json();
@@ -71,7 +71,7 @@
     forecastError = "";
     forecastData = null;
     try {
-      const res = await fetch(`${API_BASE}/api/v1/predict/course/${forecastQuery.toUpperCase()}`);
+      const res = await fetch(`${API_BASE}/v1/predict/course/${forecastQuery.toUpperCase()}`);
       if (!res.ok) throw new Error("Course not found in historical records");
       forecastData = await res.json();
     } catch (e: any) {

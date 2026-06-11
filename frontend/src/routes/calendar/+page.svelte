@@ -32,7 +32,7 @@
   });
 
   async function fetchTerms() {
-    const res = await fetch(`${API_BASE}/api/v1/terms`);
+    const res = await fetch(`${API_BASE}/v1/terms`);
     terms = await res.json();
     if (terms.length > 0) {
       selectedTerm = terms[0].id;
@@ -48,7 +48,7 @@
         term: selectedTerm,
         limit: "200"
       });
-      const res = await fetch(`${API_BASE}/api/v1/search?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/v1/search?${params.toString()}`);
       const data = await res.json();
       searchResults = data.hits;
     } finally {
@@ -60,7 +60,7 @@
     if (myCourses.some(c => c.id === courseId)) {
       removeCourse(courseId);
     } else {
-      const res = await fetch(`${API_BASE}/api/v1/courses/${courseId}`);
+      const res = await fetch(`${API_BASE}/v1/courses/${courseId}`);
       const course = await res.json();
       myCourses = [...myCourses, course];
     }
