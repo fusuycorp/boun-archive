@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build-and-push:
@@ -18,9 +19,18 @@ jobs:
       - name: Login to Custom Registry
         uses: docker/login-action@v3
         with:
-          registry: registry.bogazici.app
+          registry: https://registry.bogazici.app
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Extract Metadata for Backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: registry.bogazici.app/boun-archive-backend
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
 
       - name: Build and Push Backend
         uses: docker/build-push-action@v5
@@ -28,9 +38,18 @@ jobs:
           context: .
           file: ./backend/Dockerfile
           push: true
-          tags: registry.bogazici.app/boun-archive-backend:latest
+          tags: ${{ steps.meta-backend.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Extract Metadata for Frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: registry.bogazici.app/boun-archive-frontend
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
 
       - name: Build and Push Frontend
         uses: docker/build-push-action@v5
@@ -38,7 +57,7 @@ jobs:
           context: ./frontend
           file: ./frontend/Dockerfile
           push: true
-          tags: registry.bogazici.app/boun-archive-frontend:latest
+          tags: ${{ steps.meta-frontend.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
