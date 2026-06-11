@@ -1,13 +1,13 @@
 import os
 import meilisearch
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, joinedload
 from dotenv import load_dotenv
 import sys
 
 # Add backend to path to import models
 sys.path.append(os.path.join(os.getcwd(), 'backend'))
-from app.models import Course, Term, Department, Instructor
+from app.models import Course, Term, Department, Instructor, CourseSlot, Room
 
 load_dotenv()
 
@@ -27,13 +27,27 @@ def sync_meilisearch():
     
     index = client.index('courses')
     
-    # 2. Fetch data from PG with joins
+    # 2. Fetch data from PG with joins, including slots and rooms
     print("Fetching courses from PostgreSQL...")
-    courses = session.query(Course).join(Term).join(Department).outerjoin(Instructor).all()
+    courses = session.query(Course).options(
+        joinedload(Course.term),
+        joinedload(Course.department),
+        joinedload(Course.instructor),
+        joinedload(Course.slots).joinedload(CourseSlot.room)
+    ).all()
     
     print(f"Preparing {len(courses)} documents...")
     documents = []
     for c in courses:
+        slots_data = []
+        for s in c.slots:
+            slots_data.append({
+                'day_code': s.day_code,
+                'slot_hour': s.slot_hour,
+                'slot_title': s.slot_title,
+                'room_name': s.room.name if s.room else None
+            })
+
         doc = {
             'id': c.id,
             'course_code': c.course_code,
@@ -45,7 +59,8 @@ def sync_meilisearch():
             'instructor': c.instructor.full_name if c.instructor else "TBA",
             'credits': c.credits,
             'ects': c.ects,
-            'delivery_method': c.delivery_method
+            'delivery_method': c.delivery_method,
+            'slots': slots_data
         }
         documents.append(doc)
     
