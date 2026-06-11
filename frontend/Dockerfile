@@ -20,7 +20,8 @@ FROM oven/bun:1-alpine AS runner
 
 WORKDIR /app
 
-# Switch to non-root user
+# Ensure /app is owned by bun and switch user
+RUN chown bun:bun /app
 USER bun
 
 # Copy lockfile and package descriptor, install only production packages
