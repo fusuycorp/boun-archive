@@ -7,6 +7,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     build-essential \
+    wget \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy files needed for dependency installation
