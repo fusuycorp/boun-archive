@@ -27,7 +27,7 @@ jobs:
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
-          images: registry.bogazici.app/boun-archive-backend
+          images: registry.bogazici.app/budok/boun-archive-backend
           tags: |
             type=raw,value=latest
             type=sha,format=long
@@ -46,7 +46,7 @@ jobs:
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
-          images: registry.bogazici.app/boun-archive-frontend
+          images: registry.bogazici.app/budok/boun-archive-frontend
           tags: |
             type=raw,value=latest
             type=sha,format=long

@@ -74,7 +74,7 @@ services:
           memory: 1G
 
   backend:
-    image: ${BACKEND_IMAGE:-registry.bogazici.app/boun-archive-backend:latest}
+    image: ${BACKEND_IMAGE:-registry.bogazici.app/budok/boun-archive-backend:latest}
     environment:
       DATABASE_URL: ${DATABASE_URL}
       MEILI_URL: ${MEILI_URL}
@@ -97,7 +97,7 @@ services:
           memory: 512M
 
   frontend:
-    image: ${FRONTEND_IMAGE:-registry.bogazici.app/boun-archive-frontend:latest}
+    image: ${FRONTEND_IMAGE:-registry.bogazici.app/budok/boun-archive-frontend:latest}
     environment:
       PUBLIC_API_URL: ${PUBLIC_API_URL}
       PORT: ${FRONTEND_PORT}
