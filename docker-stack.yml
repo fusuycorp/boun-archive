@@ -50,9 +50,10 @@ services:
   meilisearch:
     image: getmeili/meilisearch:v1.12
     environment:
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKeyLongEnough123}
       MEILI_ENV: ${MEILI_ENV:-production}
       MEILI_NO_ANALYTICS: "true"
+      MEILI_DB_PATH: /meili_data
     volumes:
       - meilisearch_data:/meili_data
     healthcheck:
@@ -60,6 +61,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     networks:
       - backend_net
     deploy:
@@ -70,17 +72,17 @@ services:
           - node.labels.type == worky
       resources:
         limits:
-          cpus: '0.50'
-          memory: 1G
+          cpus: '1.0'
+          memory: 2G
 
   backend:
     image: ${BACKEND_IMAGE:-registry.bogazici.app/budok/boun-archive-backend:latest}
     environment:
-      DATABASE_URL: ${DATABASE_URL}
-      MEILI_URL: ${MEILI_URL}
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
-      REDIS_URL: ${REDIS_URL}
-      PORT: ${BACKEND_PORT}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://boun_user:boun_password@db:5432/boun_archive}
+      MEILI_URL: ${MEILI_URL:-http://meilisearch:7700}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKeyLongEnough123}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      PORT: ${BACKEND_PORT:-8000}
     networks:
       - backend_net
       - frontend_net

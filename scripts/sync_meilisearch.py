@@ -51,7 +51,7 @@ def sync_meilisearch():
     
     # 3. Push to Meilisearch in chunks
     print("Pushing to Meilisearch...")
-    chunk_size = 10000
+    chunk_size = 1000
     for i in range(0, len(documents), chunk_size):
         chunk = documents[i:i + chunk_size]
         index.add_documents(chunk)
