@@ -3,6 +3,20 @@ version: '3.8'
 services:
   db:
     image: postgres:16-alpine
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=2GB"
+      - "-c"
+      - "effective_cache_size=6GB"
+      - "-c"
+      - "work_mem=64MB"
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -24,14 +38,15 @@ services:
           - node.labels.type == worky
       resources:
         reservations:
-          cpus: '0.20'
-          memory: 512M
+          cpus: '1.0'
+          memory: 2G
         limits:
-          cpus: '0.75'
-          memory: 1.5G
+          cpus: '2.0'
+          memory: 4G
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "1gb", "--maxmemory-policy", "allkeys-lru"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -47,11 +62,11 @@ services:
           - node.labels.type == worky
       resources:
         reservations:
-          cpus: '0.10'
-          memory: 128M
+          cpus: '0.50'
+          memory: 512M
         limits:
-          cpus: '0.25'
-          memory: 256M
+          cpus: '1.0'
+          memory: 1.5G
 
   meilisearch:
     image: getmeili/meilisearch:v1.12
@@ -60,6 +75,7 @@ services:
       MEILI_ENV: ${MEILI_ENV:-production}
       MEILI_NO_ANALYTICS: "true"
       MEILI_DB_PATH: /meili_data
+      MEILI_HTTP_PAYLOAD_SIZE_LIMIT: 104857600 # 100MB
     volumes:
       - meilisearch_data:/meili_data
     healthcheck:
@@ -78,11 +94,11 @@ services:
           - node.labels.type == worky
       resources:
         reservations:
-          cpus: '0.50'
-          memory: 1G
-        limits:
           cpus: '1.0'
           memory: 2G
+        limits:
+          cpus: '4.0'
+          memory: 6G
 
   backend:
     image: ${BACKEND_IMAGE:-registry.bogazici.app/budok/boun-archive-backend:latest}
@@ -92,6 +108,8 @@ services:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKeyLongEnough123}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PORT: ${BACKEND_PORT:-8000}
+      # Higher worker count for high concurrency
+      WEB_CONCURRENCY: 4
     networks:
       - backend_net
       - frontend_net
@@ -102,7 +120,10 @@ services:
       retries: 3
       start_period: 60s
     deploy:
-      replicas: 1
+      replicas: 4
+      update_config:
+        parallelism: 1
+        delay: 10s
       restart_policy:
         condition: on-failure
       placement:
@@ -110,11 +131,11 @@ services:
           - node.labels.type == worky
       resources:
         reservations:
-          cpus: '0.25'
-          memory: 512M
-        limits:
-          cpus: '1.0'
+          cpus: '0.50'
           memory: 1G
+        limits:
+          cpus: '2.0'
+          memory: 2G
 
   frontend:
     image: ${FRONTEND_IMAGE:-registry.bogazici.app/budok/boun-archive-frontend:latest}
@@ -124,7 +145,10 @@ services:
     networks:
       - frontend_net
     deploy:
-      replicas: 1
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
       restart_policy:
         condition: on-failure
       placement:
@@ -132,11 +156,11 @@ services:
           - node.labels.type == tanri
       resources:
         reservations:
-          cpus: '0.10'
-          memory: 128M
-        limits:
-          cpus: '0.50'
+          cpus: '0.25'
           memory: 512M
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   nginx:
     image: nginx:alpine
@@ -146,16 +170,17 @@ services:
     networks:
       - frontend_net
     deploy:
+      replicas: 2
       placement:
         constraints:
           - node.labels.type == tanri
       resources:
         reservations:
-          cpus: '0.05'
-          memory: 64M
-        limits:
           cpus: '0.25'
           memory: 128M
+        limits:
+          cpus: '1.0'
+          memory: 512M
 
 configs:
   nginx_config:
