@@ -50,14 +50,63 @@ def wait_for_redis():
         try:
             client.ping()
             print("Redis is ready!")
-            break
+            return client # Return the client for reuse
         except Exception as e:
             if time.time() - start_time > 120:
                 print("Timeout waiting for Redis.")
                 raise e
             time.sleep(2)
 
+def acquire_init_lock(redis_client):
+    """
+    Attempts to acquire a lock to perform initialization.
+    Returns True if this instance should run init, False otherwise.
+    """
+    lock_key = "boun_archive_init_lock"
+    done_key = "boun_archive_init_done"
+    
+    # If already done, don't run
+    if redis_client.get(done_key):
+        print("Initialization already completed by another instance.")
+        return False
+        
+    # Try to acquire lock (expires in 10 minutes)
+    if redis_client.set(lock_key, "locked", nx=True, ex=600):
+        print("Acquired initialization lock.")
+        return True
+    
+    # If couldn't acquire, wait for done_key
+    print("Another instance is performing initialization. Waiting...")
+    start_time = time.time()
+    while not redis_client.get(done_key):
+        if time.time() - start_time > 300: # 5 minute timeout
+            print("Timeout waiting for another instance to finish initialization.")
+            # Break and try to start anyway
+            break
+        time.sleep(5)
+    
+    print("Initialization confirmed complete by another instance.")
+    return False
+
+def mark_init_done(redis_client):
+    """Mark initialization as complete and release the lock."""
+    redis_client.set("boun_archive_init_done", "true", ex=86400) # Keep 'done' for 24h
+    redis_client.delete("boun_archive_init_lock")
+    print("Initialization marked as done.")
+
 if __name__ == "__main__":
     wait_for_postgres()
     wait_for_meilisearch()
-    wait_for_redis()
+    r_client = wait_for_redis()
+    
+    # If run as a script, we can check if we should proceed with migrations
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--check-lock":
+        if acquire_init_lock(r_client):
+            sys.exit(0) # Proceed
+        else:
+            sys.exit(1) # Skip
+    elif len(sys.argv) > 1 and sys.argv[1] == "--mark-done":
+        mark_init_done(r_client)
+        sys.exit(0)
+

@@ -8,13 +8,20 @@ echo "Starting backend environment initialization..."
 # 1. Wait for services (PG & Meilisearch) to accept connections
 python wait_for_services.py
 
-# 2. Run Database Migration (checks for existing data to preserve persistence)
-echo "Executing PostgreSQL database migrations..."
-PYTHONPATH=. python scripts/migrate_to_pg.py
+# 2. Check distributed lock for initialization
+if python wait_for_services.py --check-lock; then
+    # We acquired the lock, run migrations and sync
+    echo "Executing PostgreSQL database migrations..."
+    PYTHONPATH=. python scripts/migrate_to_pg.py
 
-# 3. Sync Meilisearch
-echo "Synchronizing search index in Meilisearch..."
-PYTHONPATH=. python scripts/sync_meilisearch.py
+    echo "Synchronizing search index in Meilisearch..."
+    PYTHONPATH=. python scripts/sync_meilisearch.py
+    
+    # Mark as done
+    python wait_for_services.py --mark-done
+else
+    echo "Skipping migration and sync as another instance is handling it."
+fi
 
 # 4. Start FastAPI server
 echo "Starting FastAPI application via Uvicorn on port ${PORT:-8000}..."
