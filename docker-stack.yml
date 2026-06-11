@@ -117,14 +117,19 @@ services:
 
   nginx:
     image: nginx:alpine
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    configs:
+      - source: nginx_config
+        target: /etc/nginx/nginx.conf
     networks:
       - frontend_net
     deploy:
       placement:
         constraints:
           - node.labels.type == tanri
+
+configs:
+  nginx_config:
+    file: ./nginx.conf
 
 networks:
   backend_net:
