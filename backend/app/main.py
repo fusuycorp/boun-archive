@@ -44,7 +44,7 @@ MEILI_CLIENT = meilisearch.Client(
 def read_root():
     return {"message": "Welcome to the BOUN Archive API"}
 
-@app.get("/api/v1/search")
+@app.get("/v1/search")
 @cache(expire=600)
 def search_courses(
     q: str = "",
@@ -85,7 +85,7 @@ def search_courses(
     })
     return results
 
-@app.get("/api/v1/facets")
+@app.get("/v1/facets")
 @cache(expire=3600)
 def get_global_facets():
     # Return facets for all documents (empty search)
@@ -95,7 +95,7 @@ def get_global_facets():
     })
     return results['facetDistribution']
 
-@app.get("/api/v1/analytics/ghost-schedule/{term:path}")
+@app.get("/v1/analytics/ghost-schedule/{term:path}")
 @cache(expire=3600)
 def get_ghost_schedule(
     term: str, 
@@ -122,22 +122,22 @@ def get_ghost_schedule(
 from .analytics import TrendEngine, MacroEngine
 
 # Macro Analytics Endpoints
-@app.get("/api/v1/analytics/macro/departments-evolution")
+@app.get("/v1/analytics/macro/departments-evolution")
 @cache(expire=86400)
 def get_dept_evolution(db: Session = Depends(database.get_db)):
     return MacroEngine.get_department_evolution(db)
 
-@app.get("/api/v1/analytics/macro/delivery-evolution")
+@app.get("/v1/analytics/macro/delivery-evolution")
 @cache(expire=86400)
 def get_delivery_evolution(db: Session = Depends(database.get_db)):
     return MacroEngine.get_delivery_evolution(db)
 
-@app.get("/api/v1/analytics/macro/scheduling-heatmap")
+@app.get("/v1/analytics/macro/scheduling-heatmap")
 @cache(expire=86400)
 def get_heatmap(decade: Optional[int] = Query(None), db: Session = Depends(database.get_db)):
     return MacroEngine.get_scheduling_heatmap(db, decade)
 
-@app.get("/api/v1/analytics/macro/course-lifecycles")
+@app.get("/v1/analytics/macro/course-lifecycles")
 @cache(expire=86400)
 def get_lifecycles(db: Session = Depends(database.get_db)):
     return MacroEngine.get_course_lifecycles(db)
@@ -150,7 +150,7 @@ def get_engine(db: Session = Depends(database.get_db)):
     slots_df = pd.read_sql(db.query(models.CourseSlot).statement, db.bind)
     return TrendEngine(courses_df, slots_df)
 
-@app.get("/api/v1/predict/course/{course_code}")
+@app.get("/v1/predict/course/{course_code}")
 @cache(expire=3600)
 def predict_course(course_code: str, db: Session = Depends(database.get_db)):
     # For performance in this demo, we'll query only the relevant history
@@ -182,7 +182,7 @@ def predict_course(course_code: str, db: Session = Depends(database.get_db)):
         "predicted_slots": engine.predict_slots(course_code)
     }
 
-@app.get("/api/v1/courses/{course_id}", response_model=schemas.Course)
+@app.get("/v1/courses/{course_id}", response_model=schemas.Course)
 @cache(expire=3600)
 def get_course(course_id: int, db: Session = Depends(database.get_db)):
     course = db.query(models.Course).filter(models.Course.id == course_id).first()
@@ -190,7 +190,7 @@ def get_course(course_id: int, db: Session = Depends(database.get_db)):
         raise HTTPException(status_code=404, detail="Course not found")
     return course
 
-@app.get("/api/v1/instructors", response_model=List[schemas.Instructor])
+@app.get("/v1/instructors", response_model=List[schemas.Instructor])
 @cache(expire=3600)
 def get_instructors(q: str = "", db: Session = Depends(database.get_db)):
     query = db.query(models.Instructor)
@@ -198,7 +198,7 @@ def get_instructors(q: str = "", db: Session = Depends(database.get_db)):
         query = query.filter(models.Instructor.full_name.ilike(f"%{q}%"))
     return query.limit(50).all()
 
-@app.get("/api/v1/instructors/{instructor_id}", response_model=schemas.Instructor)
+@app.get("/v1/instructors/{instructor_id}", response_model=schemas.Instructor)
 @cache(expire=3600)
 def get_instructor(instructor_id: int, db: Session = Depends(database.get_db)):
     instructor = db.query(models.Instructor).filter(models.Instructor.id == instructor_id).first()
@@ -206,7 +206,7 @@ def get_instructor(instructor_id: int, db: Session = Depends(database.get_db)):
         raise HTTPException(status_code=404, detail="Instructor not found")
     return instructor
 
-@app.get("/api/v1/analytics/instructor/{instructor_id}/legacy")
+@app.get("/v1/analytics/instructor/{instructor_id}/legacy")
 @cache(expire=3600)
 def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get_db)):
     instructor = db.query(models.Instructor).filter(models.Instructor.id == instructor_id).first()
@@ -246,17 +246,17 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
         } for c in courses], key=lambda x: x['term'], reverse=True)
     }
 
-@app.get("/api/v1/terms", response_model=List[schemas.Term])
+@app.get("/v1/terms", response_model=List[schemas.Term])
 @cache(expire=86400)
 def get_terms(db: Session = Depends(database.get_db)):
     return db.query(models.Term).order_by(models.Term.id.desc()).all()
 
-@app.get("/api/v1/departments", response_model=List[schemas.Department])
+@app.get("/v1/departments", response_model=List[schemas.Department])
 @cache(expire=86400)
 def get_departments(db: Session = Depends(database.get_db)):
     return db.query(models.Department).order_by(models.Department.kisaadi).all()
 
-@app.get("/api/v1/departments/{dept_code}/unique-courses")
+@app.get("/v1/departments/{dept_code}/unique-courses")
 @cache(expire=3600)
 def get_department_unique_courses(dept_code: str, db: Session = Depends(database.get_db)):
     # Get all unique courses for this department and the terms they were offered in
@@ -285,7 +285,7 @@ def get_department_unique_courses(dept_code: str, db: Session = Depends(database
         
     return result
 
-@app.get("/api/v1/departments/{dept_code}/instructors")
+@app.get("/v1/departments/{dept_code}/instructors")
 @cache(expire=3600)
 def get_department_instructors(dept_code: str, db: Session = Depends(database.get_db)):
     # Get all instructors who taught courses in this department
@@ -325,7 +325,7 @@ def get_department_instructors(dept_code: str, db: Session = Depends(database.ge
     # Default sort by last_term desc
     return sorted(final_results, key=lambda x: x['last_term'], reverse=True)
 
-@app.get("/api/v1/courses/history/{course_code}")
+@app.get("/v1/courses/history/{course_code}")
 @cache(expire=3600)
 def get_course_history(course_code: str, db: Session = Depends(database.get_db)):
     # Normalize input
