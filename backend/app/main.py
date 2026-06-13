@@ -1,6 +1,5 @@
 import os
 import meilisearch
-import pandas as pd
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -144,21 +143,33 @@ def get_heatmap(decade: Optional[int] = Query(None), db: Session = Depends(datab
 
 @app.get("/v1/analytics/macro/course-lifecycles")
 @cache(expire=86400)
-def get_lifecycles(db: Session = Depends(database.get_db)):
-    return MacroEngine.get_course_lifecycles(db)
+def get_lifecycles(
+    extinct_threshold: int = Query(10, description="Not offered in N years"),
+    new_threshold: int = Query(2, description="First offered in last M years"),
+    db: Session = Depends(database.get_db)
+):
+    return MacroEngine.get_course_lifecycles(db, extinct_threshold, new_threshold)
 
-# Load analytics engine (in a real app, do this once or use a dependency)
-def get_engine(db: Session = Depends(database.get_db)):
-    # This is heavy for every request, but for demo/small data it's okay.
-    # Ideally, pre-calculate or use a subset.
-    courses_df = pd.read_sql(db.query(models.Course).statement, db.bind)
-    slots_df = pd.read_sql(db.query(models.CourseSlot).statement, db.bind)
-    return TrendEngine(courses_df, slots_df)
+@app.get("/v1/analytics/macro/campus-distribution")
+@cache(expire=86400)
+def get_campus_distribution(
+    lookback_years: Optional[int] = Query(None, description="Lookback window in years"),
+    db: Session = Depends(database.get_db)
+):
+    return MacroEngine.get_campus_distribution(db, lookback_years)
+
+@app.get("/v1/analytics/macro/semantic-shift")
+@cache(expire=86400)
+def get_semantic_shift(
+    interval_years: int = Query(10, description="Grouping interval in years"),
+    db: Session = Depends(database.get_db)
+):
+    return MacroEngine.get_semantic_shift(db, interval_years)
 
 @app.get("/v1/predict/course/{course_code}")
 @cache(expire=3600)
 def predict_course(course_code: str, db: Session = Depends(database.get_db)):
-    # For performance in this demo, we'll query only the relevant history
+    # Query only the relevant history
     history = db.query(models.Course).filter(models.Course.course_code == course_code).all()
     if not history:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -166,21 +177,20 @@ def predict_course(course_code: str, db: Session = Depends(database.get_db)):
     course_ids = [c.id for c in history]
     slots = db.query(models.CourseSlot, models.Course.term_id).join(models.Course).filter(models.CourseSlot.course_id.in_(course_ids)).all()
     
-    # Convert to DF for the existing engine logic
-    c_df = pd.DataFrame([{
+    c_list = [{
         'id': c.id, 
         'course_code': c.course_code, 
         'term': c.term_id
-    } for c in history])
+    } for c in history]
     
-    s_df = pd.DataFrame([{
+    s_list = [{
         'course_id': s.CourseSlot.course_id,
         'day': s.CourseSlot.day_code,
         'hour': s.CourseSlot.slot_hour,
         'term': s.term_id
-    } for s in slots])
+    } for s in slots]
     
-    engine = TrendEngine(c_df, s_df)
+    engine = TrendEngine(c_list, s_list)
     return {
         "course_code": course_code,
         "offering_probability": engine.predict_offering(course_code),
@@ -221,8 +231,9 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
     courses = db.query(models.Course).filter(models.Course.instructor_id == instructor_id).all()
     
     # Calculate legacy metrics
+    from collections import Counter
     total_semesters = len(set([c.term_id for c in courses]))
-    most_frequent = pd.Series([c.course_code for c in courses]).value_counts().head(5).to_dict()
+    most_frequent = dict(Counter([c.course_code for c in courses]).most_common(5))
     
     # Preferred slots (joining with course_slots)
     course_ids = [c.id for c in courses]
@@ -231,12 +242,16 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
         models.CourseSlot.slot_hour
     ).filter(models.CourseSlot.course_id.in_(course_ids)).all()
     
-    preferred_slots = pd.DataFrame([{'day': s.day_code, 'hour': s.slot_hour} for s in slots])
-    if not preferred_slots.empty:
-        slots_count = preferred_slots.groupby(['day', 'hour']).size().reset_index(name='frequency')
-        slots_count = slots_count.sort_values(by='frequency', ascending=False).head(5).to_dict(orient='records')
-    else:
-        slots_count = []
+    slots_list = []
+    for s in slots:
+        if s.day_code and s.slot_hour is not None:
+            slots_list.append((s.day_code, int(s.slot_hour)))
+            
+    slots_counter = Counter(slots_list)
+    slots_count = [
+        {"day": day, "hour": hour, "frequency": freq}
+        for (day, hour), freq in slots_counter.most_common(5)
+    ]
 
     return {
         "instructor_name": instructor.full_name,

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { Search, Calendar, Plus, Trash2, AlertTriangle, Filter, Check, X } from "lucide-svelte";
+  import { onMount, untrack } from "svelte";
+  import { Search, Calendar, Plus, Trash2, AlertTriangle, Filter, Check, X, MapPin } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
 
   // State
@@ -12,6 +12,9 @@
   let loading = $state(false);
   let days = ["M", "T", "W", "Th", "F", "St", "Su"];
   let hours = Array.from({ length: 14 }, (_, i) => i + 1);
+
+  // Commute Config State
+  let commuteStrictness = $state("all"); // "all", "high", "impossible", "none"
 
   // Persistence
   $effect(() => {
@@ -70,21 +73,100 @@
     myCourses = myCourses.filter(c => c.id !== id);
   }
 
+  // Helper to resolve campus based on room name prefixes
+  function resolveCampus(roomName: string): string {
+    if (!roomName) return "Unknown";
+    const name = roomName.trim().toUpperCase();
+    if (name.startsWith("TB") || name.startsWith("IB") || name.startsWith("OD") || name.startsWith("DODGE") || name.startsWith("BTS") || name.startsWith("ALBERT") || name.startsWith("JF")) {
+      return "South";
+    } else if (name.startsWith("KB") || name.startsWith("NH") || name.startsWith("ETA") || name.startsWith("BM") || name.startsWith("BİM") || name.startsWith("BIM") || name.startsWith("EF") || name.startsWith("M ") || name.startsWith("M-")) {
+      return "North";
+    } else if (name.startsWith("HB") || name.startsWith("HC") || name.startsWith("HD") || name.startsWith("HK")) {
+      return "Hisar";
+    } else if (name.startsWith("KP") || name.startsWith("KYD") || name.startsWith("KİLYOS") || name.startsWith("KILYOS") || name.startsWith("SARITEPE") || name.startsWith("SARI")) {
+      return "Kilyos";
+    } else {
+      if (name.includes("KILYOS") || name.includes("SARITEPE")) return "Kilyos";
+      if (name.includes("HISAR") || name.includes("HİSAR")) return "Hisar";
+      if (name.length > 1 && name.startsWith("M") && ((name[1] >= "0" && name[1] <= "9") || name[1] === " ")) return "North";
+      return "South";
+    }
+  }
+
   // Conflict Logic
   function getCoursesAt(day: string, hour: number) {
     return myCourses.flatMap(c => 
       c.slots
         .filter((s: any) => s.day_code === day && s.slot_hour === hour)
-        .map((s: any) => ({ ...c, slot_type: s.slot_title || "" }))
+        .map((s: any) => ({ ...c, slot_type: s.slot_title || "", room_name: s.room_name || "N/A" }))
     );
   }
 
-  // Check if slot type is lab or ps
   function isLabOrPS(slotType: string) {
     if (!slotType) return false;
     const type = slotType.toLowerCase();
     return type.includes("lab") || type.includes("ps") || type.includes("practice");
   }
+
+  // Dash of Death - Campus Commute Warning Analyser
+  const commuteWarnings = $derived.by(() => {
+    const warnings: any[] = [];
+    if (commuteStrictness === "none") return warnings;
+
+    days.forEach(day => {
+      for (let i = 0; i < hours.length - 1; i++) {
+        const h1 = hours[i];
+        const h2 = hours[i + 1];
+
+        const courses1 = getCoursesAt(day, h1);
+        const courses2 = getCoursesAt(day, h2);
+
+        if (courses1.length > 0 && courses2.length > 0) {
+          courses1.forEach(c1 => {
+            courses2.forEach(c2 => {
+              const camp1 = resolveCampus(c1.room_name);
+              const camp2 = resolveCampus(c2.room_name);
+
+              if (camp1 !== camp2 && camp1 !== "Unknown" && camp2 !== "Unknown") {
+                let risk = "Medium";
+                let description = "10 min steep walk";
+
+                if (camp1 === "Kilyos" || camp2 === "Kilyos") {
+                  risk = "Impossible";
+                  description = "requires intercampus travel (Kilyos Prep to South/North)";
+                } else if ((camp1 === "Hisar" || camp2 === "Hisar") && (camp1 === "South" || camp2 === "South" || camp1 === "North" || camp2 === "North")) {
+                  risk = "High";
+                  description = "requires crossing busy highways (Hisar to South/North)";
+                }
+
+                const meetsStrictness = 
+                  commuteStrictness === "all" ||
+                  (commuteStrictness === "high" && (risk === "High" || risk === "Impossible")) ||
+                  (commuteStrictness === "impossible" && risk === "Impossible");
+
+                if (meetsStrictness) {
+                  warnings.push({
+                    day,
+                    hour1: h1,
+                    hour2: h2,
+                    code1: c1.course_code,
+                    code2: c2.course_code,
+                    room1: c1.room_name,
+                    room2: c2.room_name,
+                    camp1,
+                    camp2,
+                    risk,
+                    description
+                  });
+                }
+              }
+            });
+          });
+        }
+      }
+    });
+    return warnings;
+  });
 
   onMount(fetchTerms);
 
@@ -134,7 +216,7 @@
         </div>
 
         {#if searchResults.length > 0}
-          <div class="space-y-2">
+          <div class="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
             {#each searchResults as course}
               {@const isAdded = myCourses.some(c => c.id === course.id)}
               <button 
@@ -163,6 +245,48 @@
           </div>
         {/if}
       </div>
+
+      <!-- Config Panel for Commutes -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3 dark:bg-slate-900 dark:border-slate-800">
+        <label class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Commute Warnings</label>
+        <select 
+          bind:value={commuteStrictness}
+          class="w-full p-2 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-950 dark:border-slate-800 dark:text-slate-200"
+        >
+          <option value="all">Show All (Incl. South-to-North)</option>
+          <option value="high">High Risk Only (Hisar crossings)</option>
+          <option value="impossible">Impossible Only (Kilyos travel)</option>
+          <option value="none">Disable warnings</option>
+        </select>
+      </div>
+
+      <!-- Commute Warnings Panel -->
+      {#if commuteWarnings.length > 0}
+        <div class="bg-amber-50 border border-amber-200 p-4 rounded-2xl shadow-sm space-y-3 dark:bg-amber-950/20 dark:border-amber-900/50">
+          <div class="flex items-center space-x-2 text-amber-700 dark:text-amber-400 font-black text-xs uppercase tracking-wider">
+            <AlertTriangle size={16} />
+            <span>Dash of Death warnings</span>
+          </div>
+          <div class="space-y-2.5 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+            {#each commuteWarnings as w}
+              <div class="bg-white p-2.5 rounded-xl border border-amber-100 dark:bg-slate-950 dark:border-amber-950/40 text-[10px] space-y-1">
+                <div class="flex justify-between items-center font-bold">
+                  <span class="text-amber-600 dark:text-amber-400">{w.day} - Hour {w.hour1} to {w.hour2}</span>
+                  <span class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase
+                    {w.risk === 'Impossible' ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'}">
+                    {w.risk} Risk
+                  </span>
+                </div>
+                <p class="text-slate-600 dark:text-slate-400 leading-tight">
+                  <span class="font-black text-slate-700 dark:text-slate-300">{w.code1}</span> ({w.room1}, {w.camp1} Campus) to 
+                  <span class="font-black text-slate-700 dark:text-slate-300">{w.code2}</span> ({w.room2}, {w.camp2} Campus).
+                </p>
+                <div class="text-[9px] font-semibold text-slate-400 italic mt-0.5">{w.description}</div>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
 
       <!-- Selected List -->
       <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex-1 space-y-4 dark:bg-slate-900 dark:border-slate-800">
@@ -211,14 +335,14 @@
                 <td class="p-2 text-center text-xs font-black text-slate-300 dark:text-slate-600 border-r border-slate-200 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-950/20">{hour}</td>
                 {#each days as day}
                   {@const slotCourses = getCoursesAt(day, hour)}
-                  <td class="p-1 h-20 vertical-align-top relative">
+                  <td class="p-1 h-24 vertical-align-top relative">
                     <div class="flex flex-col gap-1 h-full font-sans">
                       {#each slotCourses as course}
                         {@const isSpecial = isLabOrPS(course.slot_type)}
                         <div 
                           class="p-1.5 rounded-lg border text-[10px] leading-tight flex-1 flex flex-col justify-center
                           {slotCourses.length > 1 
-                            ? 'bg-red-50 border-red-200 text-red-700 dark:bg-red-950/40 dark:border-red-900/50 dark:text-red-455' 
+                            ? 'bg-red-50 border-red-200 text-red-700 dark:bg-red-950/40 dark:border-red-900/50 dark:text-red-400' 
                             : isSpecial 
                               ? 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/40 dark:border-amber-900/50 dark:text-amber-400' 
                               : 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-950/40 dark:border-indigo-900/50 dark:text-indigo-300'}"
@@ -227,8 +351,13 @@
                             <div class="font-black truncate">{course.course_code}</div>
                             <div class="text-[8px] font-bold opacity-60">Sec {course.section}</div>
                           </div>
-                          <div class="flex justify-between items-center mt-0.5">
-                            <span class="text-[8px] font-bold uppercase opacity-70">{course.slot_type || 'Lecture'}</span>
+                          <!-- Display room name directly inside slot -->
+                          <div class="text-[8px] font-bold opacity-70 mt-0.5 truncate flex items-center space-x-0.5">
+                            <MapPin size={8} class="shrink-0 text-indigo-500" />
+                            <span>{course.room_name}</span>
+                          </div>
+                          <div class="flex justify-between items-center mt-0.5 border-t border-slate-100/50 dark:border-slate-850/50 pt-0.5">
+                            <span class="text-[8px] font-bold uppercase opacity-75">{course.slot_type || 'Lecture'}</span>
                             {#if slotCourses.length > 1}
                               <AlertTriangle size={8} class="text-red-500" />
                             {/if}

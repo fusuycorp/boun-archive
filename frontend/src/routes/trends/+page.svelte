@@ -22,7 +22,7 @@
   Chart.register(...registerables);
 
   // Tabs
-  let activeTab = $state("evolution"); // "evolution", "discovery", "timespace", "forecast"
+  let activeTab = $state("evolution"); // "evolution", "timespace", "discovery", "semantics", "forecast"
 
   // Forecast State
   let forecastQuery = $state("");
@@ -38,19 +38,31 @@
   let macroLoading = $state(true);
   let selectedDecade = $state<number | null>(null);
 
+  // Feature 2: Lifecycle Configs
+  let extinctThreshold = $state(10);
+  let newThreshold = $state(2);
+
+  // Feature 3: Campus Migration Configs
+  let campusLookback = $state<number | null>(null);
+  let campusData = $state<any>(null);
+  let campusLoading = $state(false);
+
+  // Feature 5: Semantic Shift Configs
+  let semanticInterval = $state(10);
+  let semanticData = $state<any>(null);
+  let semanticLoading = $state(false);
+
   const decades = [2020, 2010, 2000, 1990, 1980, 1970];
 
   async function fetchMacroData() {
     macroLoading = true;
     try {
-      const [evo, deliv, life] = await Promise.all([
+      const [evo, deliv] = await Promise.all([
         fetch(`${API_BASE}/v1/analytics/macro/departments-evolution`),
-        fetch(`${API_BASE}/v1/analytics/macro/delivery-evolution`),
-        fetch(`${API_BASE}/v1/analytics/macro/course-lifecycles`)
+        fetch(`${API_BASE}/v1/analytics/macro/delivery-evolution`)
       ].map(p => p.then(r => r.json())));
       evolutionData = evo;
       deliveryData = deliv;
-      lifecycleData = life;
     } catch (e) {
       console.error("Failed to fetch macro data", e);
     } finally {
@@ -63,6 +75,41 @@
     if (selectedDecade) url.searchParams.set("decade", selectedDecade.toString());
     const res = await fetch(url);
     heatmapData = await res.json();
+  }
+
+  async function fetchLifecycles() {
+    try {
+      const res = await fetch(`${API_BASE}/v1/analytics/macro/course-lifecycles?extinct_threshold=${extinctThreshold}&new_threshold=${newThreshold}`);
+      lifecycleData = await res.json();
+    } catch (e) {
+      console.error("Failed to fetch lifecycle data", e);
+    }
+  }
+
+  async function fetchCampusDistribution() {
+    campusLoading = true;
+    try {
+      const url = new URL(`${API_BASE}/v1/analytics/macro/campus-distribution`);
+      if (campusLookback) url.searchParams.set("lookback_years", campusLookback.toString());
+      const res = await fetch(url);
+      campusData = await res.json();
+    } catch (e) {
+      console.error("Failed to fetch campus distribution", e);
+    } finally {
+      campusLoading = false;
+    }
+  }
+
+  async function fetchSemanticShift() {
+    semanticLoading = true;
+    try {
+      const res = await fetch(`${API_BASE}/v1/analytics/macro/semantic-shift?interval_years=${semanticInterval}`);
+      semanticData = await res.json();
+    } catch (e) {
+      console.error("Failed to fetch semantic shift data", e);
+    } finally {
+      semanticLoading = false;
+    }
   }
 
   async function getForecast() {
@@ -80,6 +127,19 @@
       forecastLoading = false;
     }
   }
+
+  // Reactive effects for configs
+  $effect(() => {
+    fetchLifecycles();
+  });
+
+  $effect(() => {
+    fetchCampusDistribution();
+  });
+
+  $effect(() => {
+    fetchSemanticShift();
+  });
 
   $effect(() => {
     if (activeTab === 'timespace') {
@@ -110,6 +170,16 @@
       backgroundColor: method === "Online" ? "#6366f1" : method === "Hybrid" ? "#f59e0b" : "#94a3b8",
       borderRadius: 4
     }))
+  } : null);
+
+  const campusChartData = $derived(campusData ? {
+    labels: campusData.years,
+    datasets: [
+      { label: "South Campus", data: campusData.South, borderColor: "#6366f1", backgroundColor: "rgba(99, 102, 241, 0.05)", fill: true, tension: 0.4 },
+      { label: "North Campus", data: campusData.North, borderColor: "#3b82f6", backgroundColor: "rgba(59, 130, 246, 0.05)", fill: true, tension: 0.4 },
+      { label: "Hisar Campus", data: campusData.Hisar, borderColor: "#f59e0b", backgroundColor: "rgba(245, 158, 11, 0.05)", fill: true, tension: 0.4 },
+      { label: "Kilyos Campus", data: campusData.Kilyos, borderColor: "#10b981", backgroundColor: "rgba(16, 185, 129, 0.05)", fill: true, tension: 0.4 }
+    ]
   } : null);
 
   // Heatmap Helpers
@@ -165,6 +235,13 @@
         <span>Discovery</span>
       </button>
       <button 
+        onclick={() => activeTab = "semantics"}
+        class="flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all {activeTab === 'semantics' ? 'bg-white text-indigo-600 shadow-sm dark:bg-slate-800 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}"
+      >
+        <Sparkles size={16} />
+        <span>Semantics</span>
+      </button>
+      <button 
         onclick={() => activeTab = "forecast"}
         class="flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all {activeTab === 'forecast' ? 'bg-white text-indigo-600 shadow-sm dark:bg-slate-800 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'}"
       >
@@ -174,7 +251,7 @@
     </div>
   </div>
 
-  {#if macroLoading && activeTab !== "forecast" && activeTab !== "timespace"}
+  {#if macroLoading && activeTab === "evolution"}
     <div class="py-24 flex flex-col items-center justify-center space-y-4">
       <div class="animate-spin rounded-full h-12 w-12 border-4 border-slate-100 border-t-indigo-600 dark:border-slate-800 dark:border-t-indigo-500"></div>
       <p class="text-slate-500 dark:text-slate-400 font-medium">Compiling 50 years of data...</p>
@@ -227,7 +304,7 @@
           <div class="lg:col-span-2 grid grid-cols-1 md:grid-cols-4 gap-6">
              <div class="p-6 bg-indigo-600 rounded-3xl text-white shadow-xl shadow-indigo-200 dark:shadow-none">
                 <div class="text-3xl font-black">{lifecycleData?.total_new || 0}</div>
-                <div class="text-xs font-bold text-indigo-100 uppercase tracking-widest mt-1">New Courses (2yr)</div>
+                <div class="text-xs font-bold text-indigo-100 uppercase tracking-widest mt-1">New Courses</div>
              </div>
              <div class="p-6 bg-slate-800 rounded-3xl text-white shadow-xl shadow-slate-200 dark:shadow-none dark:bg-slate-950">
                 <div class="text-3xl font-black">{lifecycleData?.total_extinct || 0}</div>
@@ -247,107 +324,245 @@
 
       <!-- Time & Space Tab -->
       {#if activeTab === "timespace"}
-        <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-8 dark:bg-slate-900 dark:border-slate-800">
-           <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div>
-                <h3 class="text-xl font-bold text-slate-800 dark:text-slate-100">Scheduling Density Heatmap</h3>
-                <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Visualizing peak scheduling hours across the entire university.</p>
-              </div>
-              <div class="flex items-center space-x-2">
-                 <Filter size={16} class="text-slate-400" />
-                 <select 
-                    bind:value={selectedDecade}
-                    onchange={fetchHeatmap}
-                    class="p-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold dark:bg-slate-950 dark:border-slate-800"
-                 >
-                    <option value={null}>All Time</option>
-                    {#each decades as decade}
-                      <option value={decade}>{decade}s</option>
-                    {/each}
-                 </select>
-              </div>
-           </div>
+        <div class="space-y-8">
+          <!-- Scheduling Density Heatmap -->
+          <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-8 dark:bg-slate-900 dark:border-slate-800">
+             <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div>
+                  <h3 class="text-xl font-bold text-slate-800 dark:text-slate-100">Scheduling Density Heatmap</h3>
+                  <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Visualizing peak scheduling hours across the entire university.</p>
+                </div>
+                <div class="flex items-center space-x-2">
+                   <Filter size={16} class="text-slate-400" />
+                   <select 
+                      bind:value={selectedDecade}
+                      onchange={fetchHeatmap}
+                      class="p-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold dark:bg-slate-950 dark:border-slate-800"
+                   >
+                      <option value={null}>All Time</option>
+                      {#each decades as decade}
+                        <option value={decade}>{decade}s</option>
+                      {/each}
+                   </select>
+                </div>
+             </div>
 
-           <div class="overflow-x-auto no-scrollbar">
-             <table class="w-full border-separate border-spacing-1">
-                <thead>
-                  <tr>
-                    <th class="w-12"></th>
-                    {#each days as day}
-                      <th class="p-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">{day}</th>
-                    {/each}
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each hours as hour}
+             <div class="overflow-x-auto no-scrollbar">
+               <table class="w-full border-separate border-spacing-1">
+                  <thead>
                     <tr>
-                      <td class="text-right pr-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">{hour}</td>
+                      <th class="w-12"></th>
                       {#each days as day}
-                        {@const count = getSlotCount(day, hour)}
-                        <td 
-                          class="h-12 rounded-lg border border-slate-100 dark:border-slate-800 transition-all hover:ring-2 hover:ring-indigo-500 group relative cursor-help"
-                          style="background-color: {getHeatColor(count)}"
-                        >
-                           {#if count > 0}
-                             <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                <span class="text-[10px] font-black text-white bg-slate-900/80 px-2 py-1 rounded shadow-xl">
-                                  {count.toLocaleString()} Classes
-                                </span>
-                             </div>
-                           {/if}
-                        </td>
+                        <th class="p-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">{day}</th>
                       {/each}
                     </tr>
-                  {/each}
-                </tbody>
-             </table>
-           </div>
+                  </thead>
+                  <tbody>
+                    {#each hours as hour}
+                      <tr>
+                        <td class="text-right pr-4 text-[10px] font-black text-slate-300 uppercase tracking-widest">{hour}</td>
+                        {#each days as day}
+                          {@const count = getSlotCount(day, hour)}
+                          <td 
+                            class="h-12 rounded-lg border border-slate-100 dark:border-slate-800 transition-all hover:ring-2 hover:ring-indigo-500 group relative cursor-help"
+                            style="background-color: {getHeatColor(count)}"
+                          >
+                             {#if count > 0}
+                               <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <span class="text-[10px] font-black text-white bg-slate-900/80 px-2 py-1 rounded shadow-xl">
+                                    {count.toLocaleString()} Classes
+                                  </span>
+                               </div>
+                             {/if}
+                          </td>
+                        {/each}
+                      </tr>
+                    {/each}
+                  </tbody>
+               </table>
+             </div>
 
-           <div class="flex items-center justify-center space-x-4 pt-4 border-t border-slate-50 dark:border-slate-800/60">
-              <div class="flex items-center space-x-2">
-                 <div class="w-3 h-3 rounded bg-indigo-50 dark:bg-indigo-950/40"></div>
-                 <span class="text-[10px] font-bold text-slate-400 uppercase">Low Density</span>
+             <div class="flex items-center justify-center space-x-4 pt-4 border-t border-slate-50 dark:border-slate-800/60">
+                <div class="flex items-center space-x-2">
+                   <div class="w-3 h-3 rounded bg-indigo-50 dark:bg-indigo-950/40"></div>
+                   <span class="text-[10px] font-bold text-slate-400 uppercase">Low Density</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                   <div class="w-3 h-3 rounded bg-indigo-600"></div>
+                   <span class="text-[10px] font-bold text-slate-400 uppercase">High Density</span>
+                </div>
+             </div>
+          </div>
+
+          <!-- Campus Migration Graph -->
+          <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6 dark:bg-slate-900 dark:border-slate-800">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <h3 class="text-xl font-bold text-slate-800 dark:text-slate-100">South-to-North Campus Shift</h3>
+                <p class="text-sm text-slate-500 mt-1 dark:text-slate-400">Class location distribution showing center of gravity migrations.</p>
               </div>
               <div class="flex items-center space-x-2">
-                 <div class="w-3 h-3 rounded bg-indigo-600"></div>
-                 <span class="text-[10px] font-bold text-slate-400 uppercase">High Density</span>
+                <Filter size={16} class="text-slate-400" />
+                <select 
+                  bind:value={campusLookback}
+                  class="p-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold dark:bg-slate-950 dark:border-slate-800"
+                >
+                  <option value={null}>All Time</option>
+                  <option value={50}>Last 50 Years</option>
+                  <option value={20}>Last 20 Years</option>
+                  <option value={10}>Last 10 Years</option>
+                  <option value={5}>Last 5 Years</option>
+                  <option value={3}>Last 3 Years</option>
+                </select>
               </div>
-           </div>
+            </div>
+
+            {#if campusLoading}
+              <div class="py-12 flex justify-center">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+              </div>
+            {:else if campusChartData}
+              <div class="h-[300px]">
+                <Line 
+                  data={campusChartData} 
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { 
+                      y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } }, 
+                      x: { grid: { display: false } } 
+                    }
+                  }} 
+                />
+              </div>
+            {/if}
+          </div>
         </div>
       {/if}
 
       <!-- Discovery Tab -->
       {#if activeTab === "discovery"}
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-           <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6 dark:bg-slate-900 dark:border-slate-800">
-              <div class="flex items-center space-x-3 text-emerald-600 dark:text-emerald-400">
-                <Sparkles size={24} />
-                <h3 class="text-xl font-bold">New Horizons</h3>
-              </div>
-              <p class="text-sm text-slate-500 dark:text-slate-400">Recently introduced course codes in the last 2 years.</p>
-              <div class="flex flex-wrap gap-2">
-                {#each lifecycleData?.new || [] as code}
-                   <a href="/course/{code}" class="px-3 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-xl border border-emerald-100 hover:bg-emerald-100 transition-colors dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/50">
-                     {code}
-                   </a>
-                {/each}
-              </div>
-           </div>
+        <div class="space-y-6">
+          <!-- Configurations -->
+          <div class="bg-white p-6 rounded-3xl border border-slate-200 dark:bg-slate-900 dark:border-slate-800 flex flex-wrap gap-6 items-center shadow-sm">
+            <div class="flex flex-col space-y-1">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">New Course definition (Last N years)</label>
+              <select bind:value={newThreshold} class="p-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold dark:bg-slate-950 dark:border-slate-850">
+                <option value={1}>Last 1 Year</option>
+                <option value={2}>Last 2 Years</option>
+                <option value={3}>Last 3 Years</option>
+                <option value={5}>Last 5 Years</option>
+              </select>
+            </div>
+            <div class="flex flex-col space-y-1">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Extinct Course definition (Inactive for N years)</label>
+              <select bind:value={extinctThreshold} class="p-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold dark:bg-slate-950 dark:border-slate-850">
+                <option value={5}>Last 5 Years</option>
+                <option value={10}>Last 10 Years</option>
+                <option value={15}>Last 15 Years</option>
+                <option value={20}>Last 20 Years</option>
+              </select>
+            </div>
+          </div>
 
-           <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6 dark:bg-slate-900 dark:border-slate-800">
-              <div class="flex items-center space-x-3 text-slate-400 dark:text-slate-600">
-                <Skull size={24} />
-                <h3 class="text-xl font-bold">The Graveyard</h3>
-              </div>
-              <p class="text-sm text-slate-500 dark:text-slate-400">Courses that haven't been offered in over 10 years.</p>
-              <div class="flex flex-wrap gap-2 opacity-60 grayscale hover:grayscale-0 transition-all">
-                {#each lifecycleData?.extinct || [] as code}
-                   <a href="/course/{code}" class="px-3 py-1.5 bg-slate-50 text-slate-600 text-xs font-bold rounded-xl border border-slate-200 dark:bg-slate-950 dark:text-slate-500 dark:border-slate-800">
-                     {code}
-                   </a>
-                {/each}
-              </div>
-           </div>
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+             <!-- New Horizons -->
+             <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6 dark:bg-slate-900 dark:border-slate-800">
+                <div class="flex items-center space-x-3 text-emerald-600 dark:text-emerald-400">
+                  <Sparkles size={24} />
+                  <h3 class="text-xl font-bold">New Horizons</h3>
+                </div>
+                <p class="text-sm text-slate-500 dark:text-slate-400">Introduced course codes in the last {newThreshold} years.</p>
+                <div class="flex flex-wrap gap-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+                  {#each lifecycleData?.new || [] as code}
+                     <a href="/course/{code}" class="px-3 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-xl border border-emerald-100 hover:bg-emerald-100 transition-colors dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/50">
+                       {code}
+                     </a>
+                  {/each}
+                </div>
+             </div>
+
+             <!-- Evergreens -->
+             <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6 dark:bg-slate-900 dark:border-slate-800">
+                <div class="flex items-center space-x-3 text-indigo-600 dark:text-indigo-400">
+                  <Activity size={24} />
+                  <h3 class="text-xl font-bold">Evergreen Legends</h3>
+                </div>
+                <p class="text-sm text-slate-500 dark:text-slate-400">Active for 15+ years and still offered recently.</p>
+                <div class="flex flex-wrap gap-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+                  {#each lifecycleData?.evergreens || [] as code}
+                     <a href="/course/{code}" class="px-3 py-1.5 bg-indigo-50 text-indigo-750 text-xs font-bold rounded-xl border border-indigo-100 hover:bg-indigo-100 transition-colors dark:bg-indigo-950/20 dark:text-indigo-450 dark:border-indigo-900/50">
+                       {code}
+                     </a>
+                  {/each}
+                </div>
+             </div>
+
+             <!-- Graveyard -->
+             <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6 dark:bg-slate-900 dark:border-slate-800">
+                <div class="flex items-center space-x-3 text-slate-450 dark:text-slate-550">
+                  <Skull size={24} />
+                  <h3 class="text-xl font-bold">The Graveyard</h3>
+                </div>
+                <p class="text-sm text-slate-500 dark:text-slate-400">Courses that haven't been offered in over {extinctThreshold} years.</p>
+                <div class="flex flex-wrap gap-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar opacity-60 grayscale hover:grayscale-0 transition-all">
+                  {#each lifecycleData?.extinct || [] as code}
+                     <a href="/course/{code}" class="px-3 py-1.5 bg-slate-50 text-slate-600 text-xs font-bold rounded-xl border border-slate-200 dark:bg-slate-950 dark:text-slate-500 dark:border-slate-800">
+                       {code}
+                     </a>
+                  {/each}
+                </div>
+             </div>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Semantics Tab -->
+      {#if activeTab === "semantics"}
+        <div class="space-y-6">
+          <div class="bg-white p-6 rounded-3xl border border-slate-200 dark:bg-slate-900 dark:border-slate-800 flex flex-wrap gap-6 items-center justify-between shadow-sm">
+            <div>
+              <h3 class="text-xl font-bold text-slate-800 dark:text-slate-100">Curricular Semantic Shift</h3>
+              <p class="text-sm text-slate-500 mt-1 dark:text-slate-400 font-medium">Analyze how course subjects and terminology drift over time.</p>
+            </div>
+            <div class="flex flex-col space-y-1">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Grouping Interval</label>
+              <select bind:value={semanticInterval} class="p-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold dark:bg-slate-950 dark:border-slate-850">
+                <option value={3}>3-Year Chunks</option>
+                <option value={5}>5-Year Chunks</option>
+                <option value={10}>Decades (10 Years)</option>
+              </select>
+            </div>
+          </div>
+
+          {#if semanticLoading}
+            <div class="py-12 flex flex-col items-center justify-center space-y-4">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+              <p class="text-xs text-slate-400">Aggregating word occurrences...</p>
+            </div>
+          {:else if semanticData}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {#each semanticData.buckets as bucket}
+                <div class="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm dark:bg-slate-900 dark:border-slate-800 flex flex-col space-y-4">
+                  <h4 class="text-base font-black text-indigo-600 dark:text-indigo-400 border-b border-slate-50 dark:border-slate-800/60 pb-2">{bucket} Keywords</h4>
+                  <div class="space-y-2.5 flex-1 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
+                    {#each semanticData.shift[bucket] || [] as kw}
+                      {@const maxCount = Math.max(...(semanticData.shift[bucket] || []).map((x: any) => x.count))}
+                      <div class="flex items-center justify-between text-xs">
+                        <span class="font-bold text-slate-700 dark:text-slate-350 font-mono truncate max-w-[120px]">{kw.word}</span>
+                        <div class="flex items-center space-x-2 shrink-0">
+                          <span class="text-[10px] font-bold text-slate-400">{kw.count}x</span>
+                          <div class="w-16 bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                            <div class="bg-indigo-600 h-full rounded-full" style="width: {(kw.count / maxCount) * 100}%"></div>
+                          </div>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
 
@@ -400,7 +615,7 @@
                   {#each Object.entries(forecastData.offering_probability) as [sem, prob]}
                     <div class="space-y-2">
                       <div class="flex justify-between items-end">
-                        <span class="text-base font-bold text-slate-700 dark:text-slate-300">{sem} Semester</span>
+                        <span class="text-base font-bold text-slate-700 dark:text-slate-350">{sem} Semester</span>
                         <span class="text-2xl font-black text-indigo-600 dark:text-indigo-400">{Number(prob).toFixed(0)}%</span>
                       </div>
                       <div class="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3 overflow-hidden">

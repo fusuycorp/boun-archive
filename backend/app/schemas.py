@@ -44,6 +44,7 @@ class CourseSlotBase(BaseModel):
 
 class CourseSlot(CourseSlotBase):
     id: int
+    room_name: Optional[str] = None
     class Config:
         from_attributes = True
 

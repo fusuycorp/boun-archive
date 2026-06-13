@@ -3,6 +3,8 @@
   import { Search, Filter, BookOpen, User, Calendar, MapPin, Check, X, ArrowUp, ArrowDown, ArrowUpDown, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { exportToCSV } from "$lib/utils";
+  import { goto } from "$app/navigation";
+  import { page } from "$app/state";
 
   let query = $state("");
   let results = $state<any[]>([]);
@@ -32,21 +34,27 @@
     }
   }
 
+  function updateURL() {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (offset > 0) params.set("offset", offset.toString());
+    if (limit !== 20) params.set("limit", limit.toString());
+    if (sortColumn) {
+      params.set("sort_by", sortColumn);
+      params.set("sort_order", sortDirection);
+    }
+    selectedTerms.forEach(t => params.append("term", t));
+    selectedDepts.forEach(d => params.append("dept", d));
+    
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    goto(newUrl, { replaceState: true, keepFocus: true, noScroll: true });
+  }
+
   async function performSearch(resetOffset = true) {
     loading = true;
     if (resetOffset) offset = 0;
     
-    // Save state to sessionStorage
-    const state = {
-      query,
-      selectedTerms,
-      selectedDepts,
-      offset,
-      limit,
-      sortColumn,
-      sortDirection
-    };
-    sessionStorage.setItem("search_state", JSON.stringify(state));
+    updateURL();
 
     try {
       const params = new URLSearchParams();
@@ -152,17 +160,16 @@
   onMount(async () => {
     await fetchGlobalFacets();
     
-    // Restore state if available
-    const savedState = sessionStorage.getItem("search_state");
-    if (savedState) {
-      const state = JSON.parse(savedState);
-      query = state.query || "";
-      selectedTerms = state.selectedTerms || [];
-      selectedDepts = state.selectedDepts || [];
-      offset = state.offset || 0;
-      limit = state.limit || 20;
-      sortColumn = state.sortColumn || "";
-      sortDirection = state.sortDirection || "asc";
+    // Restore state from URL search params
+    const params = page.url.searchParams;
+    if (params.toString()) {
+      query = params.get("q") || "";
+      offset = parseInt(params.get("offset") || "0");
+      limit = parseInt(params.get("limit") || "20");
+      sortColumn = params.get("sort_by") || "";
+      sortDirection = (params.get("sort_order") as any) || "asc";
+      selectedTerms = params.getAll("term") || [];
+      selectedDepts = params.getAll("dept") || [];
       performSearch(false); // Search without resetting offset
     } else {
       performSearch();

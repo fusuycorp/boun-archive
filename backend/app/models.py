@@ -58,3 +58,8 @@ class CourseSlot(Base):
 
     course = relationship("Course", back_populates="slots")
     room = relationship("Room", back_populates="slots")
+
+    @property
+    def room_name(self) -> str:
+        return self.room.name if self.room else "N/A"
+
