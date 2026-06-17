@@ -48,14 +48,23 @@ The primary data source must be normalized from the raw scraped HTML/CSV into a 
 | `ects` | INTEGER | | |
 | `delivery_method`| VARCHAR(50) | | `Online`, `Face-to-Face`, etc. |
 
+### `rooms`
+| Column | Type | Constraints | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | SERIAL | PRIMARY KEY | |
+| `name` | VARCHAR(50) | UNIQUE, INDEX | e.g., `HKC325` |
+| `building` | VARCHAR(50) | | e.g., `Hisar` |
+| `capacity` | INTEGER | | |
+
 ### `course_slots`
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | SERIAL | PRIMARY KEY | |
 | `course_id` | INTEGER | FK (courses.id), INDEX | |
-| `day_code` | VARCHAR(2) | INDEX | `M`, `T`, `W`, `Th`, `F`, `St`, `Su` |
+| `day_code` | VARCHAR(10) | INDEX | `M`, `T`, `W`, `Th`, `F`, `St`, `Su` |
 | `slot_hour` | INTEGER | INDEX | `1` through `14` |
-| `room` | VARCHAR(50) | INDEX | e.g., `HKC325` |
+| `slot_title` | VARCHAR(255) | | e.g., `LAB` or `P.S.` |
+| `room_id` | INTEGER | FK (rooms.id), INDEX | |
 
 ---
 
@@ -70,15 +79,17 @@ The primary data source must be normalized from the raw scraped HTML/CSV into a 
 
 ### B. The Trend Engine (Statistical Prediction)
 **Objective:** Predict the likelihood of a course being offered in an upcoming semester and its likely time slot.
-**Algorithm (Frequency & Moving Average):**
+**Algorithm (Decay-Weighted Recency):**
 1.  **Availability Probability:**
     *   Look back $N$ years (e.g., $N=5$).
-    *   Count how many times course $C$ was offered in Fall vs. Spring vs. Summer.
-    *   Probability of Fall offering = $(Count_{Fall} / N) * 100$.
+    *   Deduplicate historical course listings by term key to ensure offering is evaluated as a binary event (Yes/No) per semester (preventing multi-section inflation).
+    *   Apply an exponential decay function ($e^{-\lambda \cdot t}$) where $t$ is the age of the academic year relative to 2026 and $\lambda = 0.3$.
+    *   Probability of Fall offering = $(\text{Sum of Fall Weights} / \text{Total Potential Weight}) * 100$.
 2.  **Time Slot Prediction:**
     *   Fetch all historical `course_slots` for course $C$.
-    *   Create a frequency map of `(day_code, slot_hour)`.
-    *   Apply a recency weight (slots from the last 2 years carry 1.5x weight compared to slots from 10 years ago).
+    *   Create a weight map of `(day_code, slot_hour)`.
+    *   Apply exponential decay weighting to each occurrence based on the age of the term.
+    *   Normalize confidence scores against the sum of weights of the unique terms in which the course was actually offered (capping at 1.0).
     *   Return the top 3 highest-scoring slot combinations.
 
 ---

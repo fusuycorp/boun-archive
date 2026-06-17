@@ -29,8 +29,10 @@
   });
 
   $effect(() => {
-    if (selectedTerm) {
-      localStorage.setItem(`planner_${selectedTerm}`, JSON.stringify(myCourses));
+    // Save courses only when myCourses changes, untracking selectedTerm to prevent data-loss race condition on term switch
+    const term = untrack(() => selectedTerm);
+    if (term) {
+      localStorage.setItem(`planner_${term}`, JSON.stringify(myCourses));
     }
   });
 

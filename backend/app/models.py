@@ -51,8 +51,8 @@ class CourseSlot(Base):
     __tablename__ = "course_slots"
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, ForeignKey("courses.id"), index=True)
-    day_code = Column(String(10))
-    slot_hour = Column(Integer)
+    day_code = Column(String(10), index=True)
+    slot_hour = Column(Integer, index=True)
     slot_title = Column(String(255))
     room_id = Column(Integer, ForeignKey("rooms.id"), index=True)
 

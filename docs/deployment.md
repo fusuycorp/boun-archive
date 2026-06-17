@@ -37,13 +37,27 @@ The system uses a single entry point (Nginx) on port 3000 (mapped to 80/443 exte
 2. **Config Versioning**: Docker Swarm `configs` are immutable. The current stable version is **`nginx_config_v3`**. When updating `nginx.conf`, increment the version name in `docker-stack.yml`.
 3. **Wait for Services**: The backend includes a `wait_for_services.py` script that ensures PostgreSQL, Redis, and Meilisearch are healthy before starting the application. It uses a **Redis-based Distributed Lock** to coordinate initialization across multiple replicas.
 
-## GitHub Actions Deployment
-The deployment webhook requires a JSON payload to match the branch:
-```bash
-curl -X POST "${DOKPLOY_WEBHOOK_URL}" \
-  -H "Content-Type: application/json" \
-  -d '{"ref": "refs/heads/main"}'
+## GitHub Actions Deployment (Custom Registry Redepolys)
+Standard auto-deploy webhooks provided by Dokploy check for provider-specific headers (like `X-Hub-Signature-256` for GitHub) to verify request authenticity. Triggering these manually via generic `curl` calls inside CI/CD scripts will fail due to signature mismatch.
+
+To trigger deployments programmatically after pushing a container to a custom repository, use Dokploy's REST API:
+
+1. Create a Dokploy API key in **Settings > Profile > API/CLI**.
+2. Save credentials as Secrets in your GitHub repo:
+   * `DOKPLOY_API_KEY`: Your generated API key.
+   * `DOKPLOY_URL`: Your Dokploy instance address (e.g. `https://dokploy.bountools.com`).
+   * `DOKPLOY_APPLICATION_ID`: The application's unique ID.
+3. In your `.github/workflows/deploy.yml` workflow, run the following command after container builds:
+
+```yaml
+- name: Trigger Dokploy Redeployment
+  run: |
+    curl -s -X POST "${{ secrets.DOKPLOY_URL }}/api/application.redeploy" \
+      -H "x-api-key: ${{ secrets.DOKPLOY_API_KEY }}" \
+      -H "Content-Type: application/json" \
+      -d '{"applicationId": "${{ secrets.DOKPLOY_APPLICATION_ID }}"}'
 ```
+
 
 ## Troubleshooting
 - **502 Bad Gateway**: Usually means the Backend is down or still starting. Check backend logs for `wait_for_services.py` status.

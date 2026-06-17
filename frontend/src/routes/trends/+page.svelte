@@ -70,45 +70,61 @@
     }
   }
 
-  async function fetchHeatmap() {
-    const url = new URL(`${API_BASE}/v1/analytics/macro/scheduling-heatmap`);
-    if (selectedDecade) url.searchParams.set("decade", selectedDecade.toString());
-    const res = await fetch(url);
-    heatmapData = await res.json();
-  }
-
-  async function fetchLifecycles() {
+  async function fetchHeatmap(signal?: AbortSignal) {
     try {
-      const res = await fetch(`${API_BASE}/v1/analytics/macro/course-lifecycles?extinct_threshold=${extinctThreshold}&new_threshold=${newThreshold}`);
-      lifecycleData = await res.json();
-    } catch (e) {
-      console.error("Failed to fetch lifecycle data", e);
+      const url = new URL(`${API_BASE}/v1/analytics/macro/scheduling-heatmap`);
+      if (selectedDecade) url.searchParams.set("decade", selectedDecade.toString());
+      const res = await fetch(url, { signal });
+      heatmapData = await res.json();
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        console.error("Failed to fetch heatmap data", e);
+      }
     }
   }
 
-  async function fetchCampusDistribution() {
+  async function fetchLifecycles(signal?: AbortSignal) {
+    try {
+      const res = await fetch(`${API_BASE}/v1/analytics/macro/course-lifecycles?extinct_threshold=${extinctThreshold}&new_threshold=${newThreshold}`, { signal });
+      lifecycleData = await res.json();
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        console.error("Failed to fetch lifecycle data", e);
+      }
+    }
+  }
+
+  async function fetchCampusDistribution(signal?: AbortSignal) {
     campusLoading = true;
     try {
       const url = new URL(`${API_BASE}/v1/analytics/macro/campus-distribution`);
       if (campusLookback) url.searchParams.set("lookback_years", campusLookback.toString());
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
       campusData = await res.json();
-    } catch (e) {
-      console.error("Failed to fetch campus distribution", e);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        console.error("Failed to fetch campus distribution", e);
+      }
     } finally {
-      campusLoading = false;
+      if (!signal || !signal.aborted) {
+        campusLoading = false;
+      }
     }
   }
 
-  async function fetchSemanticShift() {
+  async function fetchSemanticShift(signal?: AbortSignal) {
     semanticLoading = true;
     try {
-      const res = await fetch(`${API_BASE}/v1/analytics/macro/semantic-shift?interval_years=${semanticInterval}`);
+      const res = await fetch(`${API_BASE}/v1/analytics/macro/semantic-shift?interval_years=${semanticInterval}`, { signal });
       semanticData = await res.json();
-    } catch (e) {
-      console.error("Failed to fetch semantic shift data", e);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        console.error("Failed to fetch semantic shift data", e);
+      }
     } finally {
-      semanticLoading = false;
+      if (!signal || !signal.aborted) {
+        semanticLoading = false;
+      }
     }
   }
 
@@ -128,22 +144,38 @@
     }
   }
 
-  // Reactive effects for configs
+  // Reactive effects for configs with AbortController to prevent race conditions
   $effect(() => {
-    fetchLifecycles();
+    const controller = new AbortController();
+    fetchLifecycles(controller.signal);
+    return () => {
+      controller.abort();
+    };
   });
 
   $effect(() => {
-    fetchCampusDistribution();
+    const controller = new AbortController();
+    fetchCampusDistribution(controller.signal);
+    return () => {
+      controller.abort();
+    };
   });
 
   $effect(() => {
-    fetchSemanticShift();
+    const controller = new AbortController();
+    fetchSemanticShift(controller.signal);
+    return () => {
+      controller.abort();
+    };
   });
 
   $effect(() => {
     if (activeTab === 'timespace') {
-      fetchHeatmap();
+      const controller = new AbortController();
+      fetchHeatmap(controller.signal);
+      return () => {
+        controller.abort();
+      };
     }
   });
 

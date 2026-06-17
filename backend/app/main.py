@@ -1,10 +1,11 @@
 import os
+import hashlib
 import meilisearch
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from redis import asyncio as aioredis
 from fastapi_cache import FastAPICache
@@ -27,11 +28,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def custom_key_builder(
+    func,
+    namespace: str = "",
+    *,
+    request = None,
+    response = None,
+    args,
+    kwargs,
+) -> str:
+    # Filter out Session/db objects to prevent unique DB connection representation causing cache misses
+    filtered_args = tuple(arg for arg in args if not isinstance(arg, Session))
+    filtered_kwargs = {
+        k: v for k, v in kwargs.items()
+        if not isinstance(v, Session) and k != "db"
+    }
+    cache_key = hashlib.md5(
+        f"{func.__module__}:{func.__name__}:{filtered_args}:{filtered_kwargs}".encode()
+    ).hexdigest()
+    return f"{namespace}:{cache_key}"
+
 @app.on_event("startup")
 async def startup():
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
     redis = aioredis.from_url(redis_url, encoding="utf8", decode_responses=True)
-    FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache")
+    FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache", key_builder=custom_key_builder)
 
 # Meilisearch Client
 MEILI_CLIENT = meilisearch.Client(
@@ -63,15 +84,22 @@ def search_courses(
     filter_list = []
     
     if term:
-        term_filters = [f"term = '{t}'" for t in term]
+        term_filters = []
+        for t in term:
+            escaped = t.replace("'", "\\'")
+            term_filters.append(f"term = '{escaped}'")
         filter_list.append(f"({' OR '.join(term_filters)})")
         
     if dept:
-        dept_filters = [f"dept_code = '{d}'" for d in dept]
+        dept_filters = []
+        for d in dept:
+            escaped = d.replace("'", "\\'")
+            dept_filters.append(f"dept_code = '{escaped}'")
         filter_list.append(f"({' OR '.join(dept_filters)})")
         
     if instructor:
-        filter_list.append(f"instructor = '{instructor}'")
+        escaped_instructor = instructor.replace("'", "\\'")
+        filter_list.append(f"instructor = '{escaped_instructor}'")
 
     sort_list = []
     if sort_by:
@@ -200,7 +228,9 @@ def predict_course(course_code: str, db: Session = Depends(database.get_db)):
 @app.get("/v1/courses/{course_id}", response_model=schemas.Course)
 @cache(expire=3600)
 def get_course(course_id: int, db: Session = Depends(database.get_db)):
-    course = db.query(models.Course).filter(models.Course.id == course_id).first()
+    course = db.query(models.Course).options(
+        joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
+    ).filter(models.Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     return course
@@ -352,13 +382,19 @@ def get_course_history(course_code: str, db: Session = Depends(database.get_db))
     clean_code = course_code.strip()
     
     # Get all instances of this course code across all terms
-    # We use ILIKE for case-insensitive matching
-    courses = db.query(models.Course).filter(models.Course.course_code.ilike(clean_code)).all()
+    # We use ILIKE for case-insensitive matching, and eager-load relationships to avoid N+1 queries
+    courses = db.query(models.Course).options(
+        joinedload(models.Course.instructor),
+        joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
+    ).filter(models.Course.course_code.ilike(clean_code)).all()
     
     if not courses:
         # Try without spaces as a fallback
         no_spaces = clean_code.replace(" ", "")
-        courses = db.query(models.Course).filter(
+        courses = db.query(models.Course).options(
+            joinedload(models.Course.instructor),
+            joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
+        ).filter(
             func.replace(models.Course.course_code, ' ', '').ilike(no_spaces)
         ).all()
         
@@ -367,7 +403,6 @@ def get_course_history(course_code: str, db: Session = Depends(database.get_db))
         
     result = []
     for c in courses:
-        slots = db.query(models.CourseSlot).filter(models.CourseSlot.course_id == c.id).all()
         result.append({
             "id": c.id,
             "term_id": c.term_id,
@@ -382,7 +417,7 @@ def get_course_history(course_code: str, db: Session = Depends(database.get_db))
                 "hour": s.slot_hour,
                 "room": s.room.name if s.room else "N/A",
                 "title": s.slot_title
-            } for s in slots]
+            } for s in c.slots]
         })
         
     # Sort by term (desc) and section (asc)

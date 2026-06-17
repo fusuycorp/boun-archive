@@ -1,6 +1,6 @@
 import math
 from collections import Counter
-from sqlalchemy import func, distinct, extract, case
+from sqlalchemy import func, distinct, extract, case, Integer
 from sqlalchemy.orm import Session
 from . import models
 
@@ -39,6 +39,16 @@ class TrendEngine:
                 
         if not processed_history:
             return None
+            
+        # Deduplicate history by (year, semester_num) to prevent multi-section inflation
+        seen_terms = set()
+        deduped_history = []
+        for h in processed_history:
+            term_key = (h['year'], h['semester_num'])
+            if term_key not in seen_terms:
+                seen_terms.add(term_key)
+                deduped_history.append(h)
+        processed_history = deduped_history
             
         recent_history = [c for c in processed_history if c['year'] > (current_year - lookback_years)]
         if not recent_history:
@@ -107,15 +117,20 @@ class TrendEngine:
             weight = math.exp(-decay_lambda * age)
             slot_weights[key] = slot_weights.get(key, 0.0) + weight
 
+        # Sort slots by weight descending
         sorted_slots = sorted(slot_weights.items(), key=lambda x: x[1], reverse=True)[:3]
-        total_weight = sum(w for _, w in sorted_slots)
+        
+        # Compute total possible weight based on terms in which the course was actually offered
+        terms_with_course = set(s['year'] for s in recent_slots)
+        total_possible_weight = sum(math.exp(-decay_lambda * (current_year - y)) for y in terms_with_course)
         
         predicted = []
         for (day, hour), w in sorted_slots:
+            confidence = float(w / total_possible_weight) if total_possible_weight > 0 else 0.0
             predicted.append({
                 "day": day,
                 "hour": hour,
-                "confidence_score": float(w / total_weight) if total_weight > 0 else 0.0
+                "confidence_score": min(1.0, confidence)
             })
             
         return predicted
@@ -193,8 +208,9 @@ class MacroEngine:
         
         if decade:
             start_year = str(decade)
-            end_year = str(decade + 9)
-            query = query.filter(models.Course.term_id >= start_year, models.Course.term_id <= end_year)
+            end_year_bound = str(decade + 10)
+            # Use strict less-than to correctly include the 9th year (e.g. < 2030 includes 2029/2030-1)
+            query = query.filter(models.Course.term_id >= start_year, models.Course.term_id < end_year_bound)
             
         results = query.group_by(
             models.CourseSlot.day_code,
@@ -208,28 +224,45 @@ class MacroEngine:
         # Current state: 2024/2025-1
         # Extinct: Not offered in N years (extinct_threshold)
         # New: First offered in last M years (new_threshold)
+        current_year = 2024
+        year_expr = func.substr(models.Course.term_id, 1, 4)
         
-        all_courses = db.query(
+        # Subquery to aggregate first_seen and last_seen per course_code in SQL
+        subq = db.query(
             models.Course.course_code,
-            func.min(func.substr(models.Course.term_id, 1, 4)).label('first_seen'),
-            func.max(func.substr(models.Course.term_id, 1, 4)).label('last_seen')
-        ).group_by(models.Course.course_code).all()
+            func.min(year_expr).label('first_seen'),
+            func.max(year_expr).label('last_seen')
+        ).group_by(models.Course.course_code).subquery()
         
-        current_year = 2024 # Based on latest data in DB
+        # Query new courses
+        new_q = db.query(subq.c.course_code).filter(
+            func.cast(subq.c.first_seen, Integer) >= (current_year - new_threshold)
+        )
+        total_new = new_q.count()
+        new_courses = [r[0] for r in new_q.limit(50).all()]
         
-        new_courses = [c.course_code for c in all_courses if int(c.first_seen) >= (current_year - new_threshold)]
-        extinct_courses = [c.course_code for c in all_courses if int(c.last_seen) <= (current_year - extinct_threshold)]
+        # Query extinct courses
+        extinct_q = db.query(subq.c.course_code).filter(
+            func.cast(subq.c.last_seen, Integer) <= (current_year - extinct_threshold)
+        )
+        total_extinct = extinct_q.count()
+        extinct_courses = [r[0] for r in extinct_q.limit(50).all()]
         
-        # Evergreens: first seen >= 15 years ago, and still offered recently (within new_threshold)
-        evergreens = [c.course_code for c in all_courses if (current_year - int(c.first_seen) >= 15) and (int(c.last_seen) >= current_year - new_threshold)]
+        # Query evergreens
+        evergreen_q = db.query(subq.c.course_code).filter(
+            func.cast(subq.c.first_seen, Integer) <= (current_year - 15),
+            func.cast(subq.c.last_seen, Integer) >= (current_year - new_threshold)
+        )
+        total_evergreens = evergreen_q.count()
+        evergreens = [r[0] for r in evergreen_q.limit(50).all()]
         
         return {
-            "new": new_courses[:50], # Limit for UI
-            "extinct": extinct_courses[:50],
-            "evergreens": evergreens[:50],
-            "total_new": len(new_courses),
-            "total_extinct": len(extinct_courses),
-            "total_evergreens": len(evergreens)
+            "new": new_courses,
+            "extinct": extinct_courses,
+            "evergreens": evergreens,
+            "total_new": total_new,
+            "total_extinct": total_extinct,
+            "total_evergreens": total_evergreens
         }
 
 def resolve_campus(room_name: str) -> str:
@@ -257,9 +290,11 @@ def resolve_campus(room_name: str) -> str:
 class MacroEngineCampusAndSemantic(MacroEngine):
     @staticmethod
     def get_campus_distribution(db: Session, lookback_years: Optional[int] = None):
+        year_expr = func.substr(models.Course.term_id, 1, 4)
         query = db.query(
             models.Room.name.label("room_name"),
-            func.substr(models.Course.term_id, 1, 4).label("year")
+            year_expr.label("year"),
+            func.count(models.CourseSlot.id).label("count")
         ).join(models.CourseSlot, models.Room.slots).join(models.Course, models.CourseSlot.course)
         
         if lookback_years:
@@ -267,18 +302,17 @@ class MacroEngineCampusAndSemantic(MacroEngine):
             start_year = str(current_year - lookback_years)
             query = query.filter(models.Course.term_id >= start_year)
             
-        results = query.all()
+        results = query.group_by(models.Room.name, year_expr).all()
         
         campus_counts = {}
-        for r in results:
-            if not r.room_name or not r.year:
+        for r_name, r_year, r_count in results:
+            if not r_name or not r_year:
                 continue
-            campus = resolve_campus(r.room_name)
-            year = r.year
-            if year not in campus_counts:
-                campus_counts[year] = {"South": 0, "North": 0, "Hisar": 0, "Kilyos": 0}
-            if campus in campus_counts[year]:
-                campus_counts[year][campus] += 1
+            campus = resolve_campus(r_name)
+            if r_year not in campus_counts:
+                campus_counts[r_year] = {"South": 0, "North": 0, "Hisar": 0, "Kilyos": 0}
+            if campus in campus_counts[r_year]:
+                campus_counts[r_year][campus] += r_count
             
         years = sorted(list(campus_counts.keys()))
         return {
@@ -291,10 +325,11 @@ class MacroEngineCampusAndSemantic(MacroEngine):
 
     @staticmethod
     def get_semantic_shift(db: Session, interval_years: int = 10):
+        year_expr = func.substr(models.Course.term_id, 1, 4)
         results = db.query(
             models.Course.title,
-            func.substr(models.Course.term_id, 1, 4).label("year")
-        ).all()
+            year_expr.label("year")
+        ).group_by(models.Course.title, year_expr).all()
         
         stopwords = {
             "and", "the", "in", "of", "to", "for", "on", "with", "a", "an", "by", "from",
@@ -305,11 +340,11 @@ class MacroEngineCampusAndSemantic(MacroEngine):
         }
         
         bucket_words = {}
-        for r in results:
-            if not r.title or not r.year:
+        for r_title, r_year in results:
+            if not r_title or not r_year:
                 continue
             try:
-                year_val = int(r.year)
+                year_val = int(r_year)
             except:
                 continue
                 
@@ -319,7 +354,7 @@ class MacroEngineCampusAndSemantic(MacroEngine):
             if bucket_name not in bucket_words:
                 bucket_words[bucket_name] = []
                 
-            words = r.title.lower().split()
+            words = r_title.lower().split()
             cleaned_words = []
             for w in words:
                 cleaned = "".join(char for char in w if char.isalnum())
