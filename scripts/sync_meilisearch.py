@@ -54,7 +54,7 @@ def sync_meilisearch():
             'title': c.title,
             'section': c.section,
             'term': c.term_id,
-            'department': c.department.bolum,
+            'department': c.department.bolum if c.department else None,
             'dept_code': c.dept_kisaadi,
             'instructor': c.instructor.full_name if c.instructor else "TBA",
             'credits': c.credits,

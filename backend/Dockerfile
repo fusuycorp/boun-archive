@@ -19,8 +19,8 @@ COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
 # during the dependency-only install phase (caching)
 RUN mkdir app && touch app/__init__.py
 
-# Install dependencies
-RUN uv pip install --system --no-cache .
+# Install dependencies, including the migration/indexing script extra used by entrypoint.sh
+RUN uv pip install --system --no-cache ".[scripts]"
 
 # Now copy the actual source code
 COPY backend/app/ ./app/

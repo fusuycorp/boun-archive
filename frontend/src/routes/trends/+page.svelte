@@ -54,13 +54,21 @@
 
   const decades = [2020, 2010, 2000, 1990, 1980, 1970];
 
+  async function fetchJson(input: RequestInfo | URL, signal?: AbortSignal) {
+    const res = await fetch(input, signal ? { signal } : undefined);
+    if (!res.ok) {
+      throw new Error(`Request failed with status ${res.status}`);
+    }
+    return res.json();
+  }
+
   async function fetchMacroData() {
     macroLoading = true;
     try {
       const [evo, deliv] = await Promise.all([
-        fetch(`${API_BASE}/v1/analytics/macro/departments-evolution`),
-        fetch(`${API_BASE}/v1/analytics/macro/delivery-evolution`)
-      ].map(p => p.then(r => r.json())));
+        fetchJson(`${API_BASE}/v1/analytics/macro/departments-evolution`),
+        fetchJson(`${API_BASE}/v1/analytics/macro/delivery-evolution`)
+      ]);
       evolutionData = evo;
       deliveryData = deliv;
     } catch (e) {
@@ -72,10 +80,9 @@
 
   async function fetchHeatmap(signal?: AbortSignal) {
     try {
-      const url = new URL(`${API_BASE}/v1/analytics/macro/scheduling-heatmap`);
-      if (selectedDecade) url.searchParams.set("decade", selectedDecade.toString());
-      const res = await fetch(url, { signal });
-      heatmapData = await res.json();
+      let url = `${API_BASE}/v1/analytics/macro/scheduling-heatmap`;
+      if (selectedDecade) url += `?decade=${selectedDecade}`;
+      heatmapData = await fetchJson(url, signal);
     } catch (e: any) {
       if (e.name !== 'AbortError') {
         console.error("Failed to fetch heatmap data", e);
@@ -85,8 +92,7 @@
 
   async function fetchLifecycles(signal?: AbortSignal) {
     try {
-      const res = await fetch(`${API_BASE}/v1/analytics/macro/course-lifecycles?extinct_threshold=${extinctThreshold}&new_threshold=${newThreshold}`, { signal });
-      lifecycleData = await res.json();
+      lifecycleData = await fetchJson(`${API_BASE}/v1/analytics/macro/course-lifecycles?extinct_threshold=${extinctThreshold}&new_threshold=${newThreshold}`, signal);
     } catch (e: any) {
       if (e.name !== 'AbortError') {
         console.error("Failed to fetch lifecycle data", e);
@@ -97,10 +103,9 @@
   async function fetchCampusDistribution(signal?: AbortSignal) {
     campusLoading = true;
     try {
-      const url = new URL(`${API_BASE}/v1/analytics/macro/campus-distribution`);
-      if (campusLookback) url.searchParams.set("lookback_years", campusLookback.toString());
-      const res = await fetch(url, { signal });
-      campusData = await res.json();
+      let url = `${API_BASE}/v1/analytics/macro/campus-distribution`;
+      if (campusLookback) url += `?lookback_years=${campusLookback}`;
+      campusData = await fetchJson(url, signal);
     } catch (e: any) {
       if (e.name !== 'AbortError') {
         console.error("Failed to fetch campus distribution", e);
@@ -115,8 +120,7 @@
   async function fetchSemanticShift(signal?: AbortSignal) {
     semanticLoading = true;
     try {
-      const res = await fetch(`${API_BASE}/v1/analytics/macro/semantic-shift?interval_years=${semanticInterval}`, { signal });
-      semanticData = await res.json();
+      semanticData = await fetchJson(`${API_BASE}/v1/analytics/macro/semantic-shift?interval_years=${semanticInterval}`, signal);
     } catch (e: any) {
       if (e.name !== 'AbortError') {
         console.error("Failed to fetch semantic shift data", e);
@@ -146,6 +150,7 @@
 
   // Reactive effects for configs with AbortController to prevent race conditions
   $effect(() => {
+    if (activeTab !== 'evolution' && activeTab !== 'discovery') return;
     const controller = new AbortController();
     fetchLifecycles(controller.signal);
     return () => {
@@ -154,6 +159,7 @@
   });
 
   $effect(() => {
+    if (activeTab !== 'timespace') return;
     const controller = new AbortController();
     fetchCampusDistribution(controller.signal);
     return () => {
@@ -162,6 +168,7 @@
   });
 
   $effect(() => {
+    if (activeTab !== 'semantics') return;
     const controller = new AbortController();
     fetchSemanticShift(controller.signal);
     return () => {
@@ -217,17 +224,17 @@
   // Heatmap Helpers
   const days = ["M", "T", "W", "Th", "F", "St", "Su"];
   const hours = Array.from({ length: 14 }, (_, i) => i + 1);
+  const maxHeat = $derived(heatmapData.length ? Math.max(...heatmapData.map(d => d.count)) : 0);
+  const slotCountMap = $derived(new Map(heatmapData.map(d => [`${d.day_code}|${d.slot_hour}`, d.count])));
   
   function getHeatColor(count: number) {
-    if (heatmapData.length === 0) return 'transparent';
-    const max = Math.max(...heatmapData.map(d => d.count));
-    const intensity = count / max;
+    if (!maxHeat) return 'transparent';
+    const intensity = count / maxHeat;
     return `rgba(99, 102, 241, ${0.1 + intensity * 0.9})`;
   }
 
   function getSlotCount(day: string, hour: number) {
-    const slot = heatmapData.find(d => d.day_code === day && d.slot_hour === hour);
-    return slot ? slot.count : 0;
+    return slotCountMap.get(`${day}|${hour}`) || 0;
   }
 </script>
 
@@ -366,11 +373,10 @@
                 </div>
                 <div class="flex items-center space-x-2">
                    <Filter size={16} class="text-slate-400" />
-                   <select 
-                      bind:value={selectedDecade}
-                      onchange={fetchHeatmap}
-                      class="p-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold dark:bg-slate-950 dark:border-slate-800"
-                   >
+	                   <select 
+	                      bind:value={selectedDecade}
+	                      class="p-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold dark:bg-slate-950 dark:border-slate-800"
+	                   >
                       <option value={null}>All Time</option>
                       {#each decades as decade}
                         <option value={decade}>{decade}s</option>

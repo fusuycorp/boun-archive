@@ -13,7 +13,7 @@ This document outlines the architecture and deployment strategy for the BOUN-ARC
 The system is configured to handle up to 10,000 concurrent users using the following strategy:
 
 ### Service Replicas
-- **Backend**: 4 replicas (Python/FastAPI with `WEB_CONCURRENCY=4`).
+- **Backend**: 4 replicas (Python/FastAPI; `WEB_CONCURRENCY=4` is passed to Uvicorn workers by the entrypoint).
 - **Frontend**: 3 replicas (SvelteKit).
 - **Nginx**: 2 replicas (High Availability).
 - **Database/Search**: Single instances (1 replica) with high resource reservations.

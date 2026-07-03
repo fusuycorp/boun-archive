@@ -34,6 +34,8 @@ The primary data source must be normalized from the raw scraped HTML/CSV into a 
 | `id` | SERIAL | PRIMARY KEY | |
 | `full_name` | VARCHAR(100)| UNIQUE, INDEX | e.g., `ASLI DENİZ HELVACIOĞLU` |
 
+Note: the current source data does not provide a stable instructor identifier, so `full_name` is used as the uniqueness key. This can merge different people who share the same displayed name until a disambiguating source key is available.
+
 ### `courses`
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
@@ -164,8 +166,5 @@ The primary data source must be normalized from the raw scraped HTML/CSV into a 
 To move data from the current scraper outputs to the production database:
 1.  **Cleanse:** Read `schedules.csv`. Normalize whitespace.
 2.  **Entity Resolution:** Standardize instructor names (e.g., mapping "STAFF STAFF" to a generic ID, handling minor typos using Levenshtein distance).
-3.  **Load PostgreSQL:** Use bulk inserts (`COPY` command or Pandas `to_sql` for speed).
-4.  **Sync Meilisearch:** Create a flattened JSON structure for every course (combining metadata and slots) and push to the Meilisearch index.
-c ID, handling minor typos using Levenshtein distance).
 3.  **Load PostgreSQL:** Use bulk inserts (`COPY` command or Pandas `to_sql` for speed).
 4.  **Sync Meilisearch:** Create a flattened JSON structure for every course (combining metadata and slots) and push to the Meilisearch index.

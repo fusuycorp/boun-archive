@@ -50,7 +50,7 @@ graph TD
 *   **FastAPI (Python)**: High-performance ASGI framework serving API requests, featuring Gzip compression and CORS middleware.
 *   **SQLAlchemy (v2)**: Implements an Object-Relational Mapper (ORM) with connection pooling (`pool_size=20`, `max_overflow=10`, `pool_recycle=3600`) and robust relationships.
 *   **Redis & FastAPI-Cache**: Caches API responses (from 10 minutes to 24 hours depending on the request type) to drastically reduce database overhead.
-*   **Pandas & NumPy**: Drives the core statistical Trend Engine (prediction algorithms).
+*   **Pure Python analytics**: Drives the request-time Trend Engine, while Pandas is reserved for offline migration and indexing scripts.
 
 ### Search & Database
 *   **PostgreSQL (v16)**: Primary relational database containing normalized academic data. Production instances are tuned with resource reservations (2GB RAM min, 4GB limit) and DB cache settings (`shared_buffers=2GB`, `effective_cache_size=6GB`).
@@ -148,7 +148,7 @@ sequenceDiagram
         W-->>C: Exit 1 (Skip init)
     end
     
-    C->>C: exec uvicorn app.main:app
+    C->>C: exec uvicorn app.main:app --workers ${WEB_CONCURRENCY:-1}
 ```
 
 1.  **Migration (`scripts/migrate_to_pg.py`)**: Migrates raw SQL rows from SQLite `schedules.db` and the CSV metadata in `departments.csv` into PostgreSQL. It performs entity resolution, such as mapping instructor names and rooms, sanitizing spaces in course codes, and bulk-saving records.
@@ -162,7 +162,7 @@ sequenceDiagram
 Located in `backend/app/analytics.py`, this engine forecasts the offering probability and slot placement of courses.
 *   **Temporal Availability Probability**: Evaluates historical course data over a 5-year lookback window. Instead of a simple average, it applies an **exponential decay function** ($\lambda = 0.3$) to weight recent curricular schedules higher than older ones:
     $$W = e^{-\lambda \cdot \Delta t}$$
-    Where $\Delta t$ is the age of the academic year relative to 2026. This allows predictions to quickly adjust to recent department reforms.
+    Where $\Delta t$ is the age of the academic year relative to the newest term in the loaded dataset. This allows predictions to quickly adjust to recent department reforms.
 *   **Time Slot Confidences**: Collects all historical slots for a course, applies the same decay weighting to each occurrence, aggregates weights by `(day_code, slot_hour)`, and outputs the top 3 slot combinations normalized by confidence scores.
 
 ### B. The Ghost Schedule Engine (Campus Time Machine)
@@ -209,7 +209,7 @@ All endpoints are prefix-rewritten under `/api/` by Nginx and proxy-passed to th
     DB_PORT=5432
     DATABASE_URL=postgresql://boun_user:boun_password@db:5432/boun_archive
 
-    MEILI_MASTER_KEY=masterKeyLongEnough123
+    MEILI_MASTER_KEY=<minimum-16-character-secret>
     MEILI_ENV=development
     MEILI_PORT=7700
     MEILI_URL=http://meilisearch:7700

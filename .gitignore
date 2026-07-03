@@ -1,0 +1,7 @@
+.env
+.worktrees/
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+schedules.csv
