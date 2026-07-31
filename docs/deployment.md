@@ -38,16 +38,12 @@ The system uses a single entry point (Nginx) on port 3000 (mapped to 80/443 exte
 3. **Wait for Services**: The backend includes a `wait_for_services.py` script that ensures PostgreSQL, Redis, and Meilisearch are healthy before starting the application. It uses a **Redis-based Distributed Lock** to coordinate initialization across multiple replicas.
 
 ## GitHub Actions Deployment (Custom Registry Redeploys)
-Programmatic redeployment on Dokploy after pushing container builds to a custom registry can be triggered via **Webhook URL** or **Dokploy REST API**.
+Programmatic redeployment on Dokploy after pushing container builds to a custom registry is triggered via Dokploy's **Compose REST API** (`POST /api/compose.redeploy`).
 
-### Option A: Webhook URL (Recommended)
-1. Copy your application or stack Webhook URL from Dokploy.
-2. Save it as a GitHub Repository Secret named `DOKPLOY_WEBHOOK_URL`.
-
-### Option B: Dokploy Compose REST API
+### Prerequisites
 1. Create a Dokploy API key in **Settings > Profile > API/CLI**.
-2. Save credentials as Repository Secrets in GitHub:
-   * `DOKPLOY_API_KEY`: Your generated API key.
+2. Configure credentials as Repository Secrets in GitHub:
+   * `DOKPLOY_API_KEY`: Your generated API key (Required).
    * `DOKPLOY_URL`: Dokploy instance URL (defaults to `https://dokploy.bogazici.app`).
    * `DOKPLOY_COMPOSE_ID`: Unique compose stack ID (defaults to `FnoW3VW_TLpX8sXKPL60v`).
 
