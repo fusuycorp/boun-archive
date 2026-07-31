@@ -19,7 +19,7 @@ jobs:
       - name: Login to Custom Registry
         uses: docker/login-action@v3
         with:
-          registry: https://registry.bogazici.app
+          registry: registry.bogazici.app
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
@@ -39,6 +39,7 @@ jobs:
           file: ./backend/Dockerfile
           push: true
           tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -58,12 +59,24 @@ jobs:
           file: ./frontend/Dockerfile
           push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Trigger Dokploy Deployment
-        if: success()
         run: |
-          curl -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d '{"ref": "refs/heads/main"}'
+          if [ -n "${{ secrets.DOKPLOY_WEBHOOK_URL }}" ]; then
+            echo "Triggering Dokploy deployment via Webhook URL..."
+            curl -f -s -S -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d '{"ref": "refs/heads/main"}'
+          elif [ -n "${{ secrets.DOKPLOY_API_KEY }}" ] && [ -n "${{ secrets.DOKPLOY_URL }}" ]; then
+            echo "Triggering Dokploy deployment via REST API..."
+            curl -f -s -S -X POST "${{ secrets.DOKPLOY_URL }}/api/application.redeploy" \
+              -H "x-api-key: ${{ secrets.DOKPLOY_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d '{"applicationId": "${{ secrets.DOKPLOY_APPLICATION_ID }}"}'
+          else
+            echo "::error::Neither DOKPLOY_WEBHOOK_URL nor DOKPLOY_API_KEY/DOKPLOY_URL secrets are configured."
+            exit 1
+          fi

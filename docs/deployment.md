@@ -37,26 +37,21 @@ The system uses a single entry point (Nginx) on port 3000 (mapped to 80/443 exte
 2. **Config Versioning**: Docker Swarm `configs` are immutable. The current stable version is **`nginx_config_v3`**. When updating `nginx.conf`, increment the version name in `docker-stack.yml`.
 3. **Wait for Services**: The backend includes a `wait_for_services.py` script that ensures PostgreSQL, Redis, and Meilisearch are healthy before starting the application. It uses a **Redis-based Distributed Lock** to coordinate initialization across multiple replicas.
 
-## GitHub Actions Deployment (Custom Registry Redepolys)
-Standard auto-deploy webhooks provided by Dokploy check for provider-specific headers (like `X-Hub-Signature-256` for GitHub) to verify request authenticity. Triggering these manually via generic `curl` calls inside CI/CD scripts will fail due to signature mismatch.
+## GitHub Actions Deployment (Custom Registry Redeploys)
+Programmatic redeployment on Dokploy after pushing container builds to a custom registry can be triggered via **Webhook URL** or **Dokploy REST API**.
 
-To trigger deployments programmatically after pushing a container to a custom repository, use Dokploy's REST API:
+### Option A: Webhook URL (Recommended)
+1. Copy your application or stack Webhook URL from Dokploy.
+2. Save it as a GitHub Repository Secret named `DOKPLOY_WEBHOOK_URL`.
 
+### Option B: Dokploy REST API
 1. Create a Dokploy API key in **Settings > Profile > API/CLI**.
-2. Save credentials as Secrets in your GitHub repo:
+2. Save credentials as Repository Secrets in GitHub:
    * `DOKPLOY_API_KEY`: Your generated API key.
-   * `DOKPLOY_URL`: Your Dokploy instance address (e.g. `https://dokploy.bountools.com`).
-   * `DOKPLOY_APPLICATION_ID`: The application's unique ID.
-3. In your `.github/workflows/deploy.yml` workflow, run the following command after container builds:
+   * `DOKPLOY_URL`: Your Dokploy instance URL (e.g., `https://dokploy.example.com`).
+   * `DOKPLOY_APPLICATION_ID`: The unique application ID in Dokploy.
 
-```yaml
-- name: Trigger Dokploy Redeployment
-  run: |
-    curl -s -X POST "${{ secrets.DOKPLOY_URL }}/api/application.redeploy" \
-      -H "x-api-key: ${{ secrets.DOKPLOY_API_KEY }}" \
-      -H "Content-Type: application/json" \
-      -d '{"applicationId": "${{ secrets.DOKPLOY_APPLICATION_ID }}"}'
-```
+The `.github/workflows/deploy.yml` workflow automatically detects whichever secret is configured and triggers Dokploy redeployment using `curl -f -s -S` to fail fast on HTTP errors.
 
 
 ## Troubleshooting
