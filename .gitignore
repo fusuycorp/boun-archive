@@ -12,16 +12,20 @@ htmlcov/
 .pyre/
 .pytype/
 
-# Environments
+# Environments & Worktrees
 .venv/
 venv/
 ENV/
 env/
 backend/.venv/
+.worktrees/
 *.egg-info/
 .eggs/
 dist/
 build/
+
+# Data & Database files
+schedules.csv
 
 # Environment Variables & Secrets
 .env

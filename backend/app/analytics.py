@@ -1,5 +1,6 @@
 import math
 from collections import Counter
+from typing import Optional
 from sqlalchemy import func, distinct, extract, case, Integer
 from sqlalchemy.orm import Session
 from . import models
@@ -10,6 +11,16 @@ class TrendEngine:
         # slots is a list of dicts: [{'course_id': int, 'day': str, 'hour': int, 'term': str}]
         self.courses = courses
         self.slots = slots
+        self.current_year = self._latest_year()
+
+    def _latest_year(self) -> int:
+        years = []
+        for item in [*self.courses, *self.slots]:
+            try:
+                years.append(int(item['term'].split('/')[0]))
+            except Exception:
+                continue
+        return max(years) if years else 0
 
     def predict_offering(self, course_code: str):
         """
@@ -20,7 +31,7 @@ class TrendEngine:
         if not history:
             return None
         
-        current_year = 2026
+        current_year = self.current_year
         lookback_years = 5
         decay_lambda = 0.3
         
@@ -85,7 +96,7 @@ class TrendEngine:
         if not relevant_slots:
             return []
 
-        current_year = 2026
+        current_year = self.current_year
         decay_lambda = 0.3
         
         # Parse years for slots
@@ -135,12 +146,38 @@ class TrendEngine:
             
         return predicted
 
+def resolve_campus(room_name: str) -> str:
+    if not room_name:
+        return "Unknown"
+    name = room_name.strip().upper()
+    if name.startswith("TB") or name.startswith("IB") or name.startswith("OD") or name.startswith("DODGE") or name.startswith("BTS") or name.startswith("ALBERT") or name.startswith("JF"):
+        return "South"
+    elif name.startswith("KB") or name.startswith("NH") or name.startswith("ETA") or name.startswith("BM") or name.startswith("BİM") or name.startswith("BIM") or name.startswith("EF") or name.startswith("M ") or name.startswith("M-"):
+        return "North"
+    elif name.startswith("HB") or name.startswith("HC") or name.startswith("HD") or name.startswith("HK"):
+        return "Hisar"
+    elif name.startswith("KP") or name.startswith("KYD") or name.startswith("KİLYOS") or name.startswith("KILYOS") or name.startswith("SARITEPE") or name.startswith("SARI"):
+        return "Kilyos"
+    else:
+        if "KILYOS" in name or "SARITEPE" in name:
+            return "Kilyos"
+        if "HISAR" in name or "HİSAR" in name:
+            return "Hisar"
+        if name.startswith("M") and len(name) > 1 and (name[1].isdigit() or name[1] == ' '):
+            return "North"
+        return "South"
+
 class MacroEngine:
     """
     High-performance engine for university-wide historical analytics.
     Uses SQLAlchemy for direct DB aggregations.
     """
     
+    @staticmethod
+    def get_latest_data_year(db: Session) -> int:
+        latest = db.query(func.max(func.substr(models.Course.term_id, 1, 4))).scalar()
+        return int(latest) if latest else 0
+
     @staticmethod
     def get_department_evolution(db: Session):
         # We want count of courses per department per year
@@ -221,10 +258,10 @@ class MacroEngine:
 
     @staticmethod
     def get_course_lifecycles(db: Session, extinct_threshold: int = 10, new_threshold: int = 2):
-        # Current state: 2024/2025-1
+        # Current state is derived from the newest term in the data.
         # Extinct: Not offered in N years (extinct_threshold)
         # New: First offered in last M years (new_threshold)
-        current_year = 2024
+        current_year = MacroEngine.get_latest_data_year(db)
         year_expr = func.substr(models.Course.term_id, 1, 4)
         
         # Subquery to aggregate first_seen and last_seen per course_code in SQL
@@ -265,29 +302,6 @@ class MacroEngine:
             "total_evergreens": total_evergreens
         }
 
-def resolve_campus(room_name: str) -> str:
-    if not room_name:
-        return "Unknown"
-    name = room_name.strip().upper()
-    if name.startswith("TB") or name.startswith("IB") or name.startswith("OD") or name.startswith("DODGE") or name.startswith("BTS") or name.startswith("ALBERT") or name.startswith("JF"):
-        return "South"
-    elif name.startswith("KB") or name.startswith("NH") or name.startswith("ETA") or name.startswith("BM") or name.startswith("BİM") or name.startswith("BIM") or name.startswith("EF") or name.startswith("M ") or name.startswith("M-"):
-        return "North"
-    elif name.startswith("HB") or name.startswith("HC") or name.startswith("HD") or name.startswith("HK"):
-        return "Hisar"
-    elif name.startswith("KP") or name.startswith("KYD") or name.startswith("KİLYOS") or name.startswith("KILYOS") or name.startswith("SARITEPE") or name.startswith("SARI"):
-        return "Kilyos"
-    else:
-        if "KILYOS" in name or "SARITEPE" in name:
-            return "Kilyos"
-        if "HISAR" in name or "HİSAR" in name:
-            return "Hisar"
-        if name.startswith("M") and len(name) > 1 and (name[1].isdigit() or name[1] == ' '):
-            return "North"
-        return "South"
-
-# Add migration distribution and semantic shift to MacroEngine
-class MacroEngineCampusAndSemantic(MacroEngine):
     @staticmethod
     def get_campus_distribution(db: Session, lookback_years: Optional[int] = None):
         year_expr = func.substr(models.Course.term_id, 1, 4)
@@ -298,7 +312,7 @@ class MacroEngineCampusAndSemantic(MacroEngine):
         ).join(models.CourseSlot, models.Room.slots).join(models.Course, models.CourseSlot.course)
         
         if lookback_years:
-            current_year = 2024
+            current_year = MacroEngine.get_latest_data_year(db)
             start_year = str(current_year - lookback_years)
             query = query.filter(models.Course.term_id >= start_year)
             
@@ -375,8 +389,3 @@ class MacroEngineCampusAndSemantic(MacroEngine):
             "buckets": sorted_buckets,
             "shift": {b: shift_data[b] for b in sorted_buckets}
         }
-
-# Re-assign methods to MacroEngine to preserve references
-MacroEngine.get_campus_distribution = MacroEngineCampusAndSemantic.get_campus_distribution
-MacroEngine.get_semantic_shift = MacroEngineCampusAndSemantic.get_semantic_shift
-

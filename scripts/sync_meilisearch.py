@@ -54,7 +54,7 @@ def sync_meilisearch():
             'title': c.title,
             'section': c.section,
             'term': c.term_id,
-            'department': c.department.bolum,
+            'department': c.department.bolum if c.department else None,
             'dept_code': c.dept_kisaadi,
             'instructor': c.instructor.full_name if c.instructor else "TBA",
             'credits': c.credits,
@@ -69,12 +69,13 @@ def sync_meilisearch():
     chunk_size = 1000
     for i in range(0, len(documents), chunk_size):
         chunk = documents[i:i + chunk_size]
-        index.add_documents(chunk)
+        task = index.add_documents(chunk)
+        client.wait_for_task(task.task_uid)
         print(f"Pushed chunk {i//chunk_size + 1}")
     
     # 4. Configure Index (Facets/Searchable)
     print("Configuring index...")
-    index.update_settings({
+    task = index.update_settings({
         'filterableAttributes': [
             'term', 'dept_code', 'department', 'instructor', 'delivery_method'
         ],
@@ -86,6 +87,7 @@ def sync_meilisearch():
         },
         'sortableAttributes': ['term', 'course_code', 'title', 'instructor', 'credits', 'ects']
     })
+    client.wait_for_task(task.task_uid)
     
     print("Meilisearch sync completed!")
 

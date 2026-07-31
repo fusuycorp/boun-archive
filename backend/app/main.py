@@ -1,32 +1,23 @@
 import os
 import hashlib
 import meilisearch
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
-from typing import List, Optional
+from typing import Literal, List, Optional
 from redis import asyncio as aioredis
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from fastapi_cache.decorator import cache
 
 from . import models, schemas, database
+from .analytics import TrendEngine, MacroEngine
 
-app = FastAPI(title="BOUN Archive API")
+ALLOWED_SORTS = {"term", "course_code", "title", "instructor", "credits", "ects"}
 
-# Middlewares
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-
-cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 def custom_key_builder(
     func,
@@ -48,16 +39,38 @@ def custom_key_builder(
     ).hexdigest()
     return f"{namespace}:{cache_key}"
 
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
     redis = aioredis.from_url(redis_url, encoding="utf8", decode_responses=True)
     FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache", key_builder=custom_key_builder)
+    try:
+        yield
+    finally:
+        await redis.aclose()
+
+app = FastAPI(title="BOUN Archive API", lifespan=lifespan)
+
+# Middlewares
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+cors_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "*").split(",") if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 # Meilisearch Client
+MEILI_MASTER_KEY = os.getenv("MEILI_MASTER_KEY")
+if not MEILI_MASTER_KEY:
+    raise RuntimeError("MEILI_MASTER_KEY must be set")
+
 MEILI_CLIENT = meilisearch.Client(
     os.getenv("MEILI_URL", "http://localhost:7700"), 
-    os.getenv("MEILI_MASTER_KEY", "masterKeyLongEnough123")
+    MEILI_MASTER_KEY
 )
 
 @app.get("/")
@@ -76,10 +89,10 @@ def search_courses(
     term: List[str] = Query(None),
     dept: List[str] = Query(None),
     instructor: Optional[str] = None,
-    sort_by: Optional[str] = None,
-    sort_order: str = "asc",
-    limit: int = 20,
-    offset: int = 0
+    sort_by: Optional[str] = Query(None),
+    sort_order: Literal["asc", "desc"] = "asc",
+    limit: int = Query(20, ge=0, le=100),
+    offset: int = Query(0, ge=0, le=10_000)
 ):
     filter_list = []
     
@@ -103,6 +116,8 @@ def search_courses(
 
     sort_list = []
     if sort_by:
+        if sort_by not in ALLOWED_SORTS:
+            raise HTTPException(status_code=422, detail=f"sort_by must be one of {sorted(ALLOWED_SORTS)}")
         sort_list.append(f"{sort_by}:{sort_order}")
     else:
         # Default sort
@@ -150,8 +165,6 @@ def get_ghost_schedule(
     
     # Convert Row objects to dictionaries for JSON serialization
     return [r._asdict() for r in results]
-
-from .analytics import TrendEngine, MacroEngine
 
 # Macro Analytics Endpoints
 @app.get("/v1/analytics/macro/departments-evolution")
@@ -420,5 +433,7 @@ def get_course_history(course_code: str, db: Session = Depends(database.get_db))
             } for s in c.slots]
         })
         
-    # Sort by term (desc) and section (asc)
-    return sorted(result, key=lambda x: (x['term_id'], x['section']), reverse=True)
+    # Sort by term (desc) and section (asc), while tolerating nullable sections.
+    result.sort(key=lambda x: x['section'] or '')
+    result.sort(key=lambda x: x['term_id'], reverse=True)
+    return result

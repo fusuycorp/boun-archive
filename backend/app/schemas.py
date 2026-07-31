@@ -37,8 +37,8 @@ class Room(RoomBase):
         from_attributes = True
 
 class CourseSlotBase(BaseModel):
-    day_code: str
-    slot_hour: int
+    day_code: Optional[str] = None
+    slot_hour: Optional[int] = None
     slot_title: Optional[str] = None
     room_id: Optional[int] = None
 
@@ -54,7 +54,7 @@ class CourseBase(BaseModel):
     course_code: str
     section: Optional[str] = None
     title: Optional[str] = None
-    instructor_id: int
+    instructor_id: Optional[int] = None
     credits: Optional[int] = None
     ects: Optional[int] = None
     delivery_method: Optional[str] = None

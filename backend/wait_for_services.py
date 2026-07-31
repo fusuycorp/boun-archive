@@ -25,7 +25,10 @@ def wait_for_postgres():
 
 def wait_for_meilisearch():
     meili_url = os.getenv("MEILI_URL", "http://localhost:7700")
-    meili_key = os.getenv("MEILI_MASTER_KEY", "masterKey123")
+    meili_key = os.getenv("MEILI_MASTER_KEY")
+    if not meili_key:
+        print("MEILI_MASTER_KEY must be set.")
+        return False
     print(f"Waiting for Meilisearch to be ready on: {meili_url}...")
     client = meilisearch.Client(meili_url, meili_key)
     start_time = time.time()
@@ -109,4 +112,3 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "--mark-done":
         mark_init_done(r_client)
         sys.exit(0)
-

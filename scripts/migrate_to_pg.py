@@ -13,6 +13,21 @@ from app.models import Term, Department, Instructor, Room, Course, CourseSlot
 
 load_dotenv()
 
+def clean_value(value):
+    return None if pd.isna(value) else value
+
+def clean_string(value):
+    if pd.isna(value):
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+def clean_int(value):
+    if pd.isna(value):
+        return None
+    value_str = str(value).strip()
+    return int(value_str) if value_str.isdigit() else None
+
 def migrate():
     print("Starting migration from SQLite to PostgreSQL...")
     
@@ -93,24 +108,23 @@ def migrate():
     # Normalize course codes
     courses_df['course_code'] = courses_df['course_code'].str.replace(r'\s+', ' ', regex=True).str.strip()
     
-    # Convert to objects
-    course_objects = []
+    course_records = []
     for _, row in courses_df.iterrows():
-        course = Course(
-            id=row['id'],
-            term_id=row['term'],
-            dept_kisaadi=row['department'],
-            course_code=row['course_code'],
-            section=row['section'],
-            title=row['course_name'],
-            instructor_id=inst_map.get(row['instructor']),
-            credits=int(row['credits']) if row['credits'] and str(row['credits']).isdigit() else None,
-            ects=int(row['ects']) if row['ects'] and str(row['ects']).isdigit() else None,
-            delivery_method=row['delivery_method']
-        )
-        course_objects.append(course)
+        course_records.append({
+            "id": int(row['id']),
+            "term_id": clean_value(row['term']),
+            "dept_kisaadi": clean_value(row['department']),
+            "course_code": clean_value(row['course_code']),
+            "section": clean_string(row['section']),
+            "title": clean_value(row['course_name']),
+            "instructor_id": inst_map.get(row['instructor']) if pd.notna(row['instructor']) else None,
+            "credits": clean_int(row['credits']),
+            "ects": clean_int(row['ects']),
+            "delivery_method": clean_value(row['delivery_method']),
+        })
     
-    session.bulk_save_objects(course_objects)
+    session.bulk_insert_mappings(Course, course_records)
+    session.execute(text("SELECT setval(pg_get_serial_sequence('courses','id'), COALESCE((SELECT MAX(id) FROM courses), 1))"))
     session.commit()
 
     # 8. Migrate Slots
@@ -118,24 +132,18 @@ def migrate():
     slots_df = pd.read_sql_query("SELECT * FROM course_slots", sqlite_conn)
     room_map = {r.name: r.id for r in session.query(Room).all()}
     
-    slot_objects = []
+    slot_records = []
     for _, row in slots_df.iterrows():
-        # Map hour to int if possible
-        try:
-            hour_val = int(row['hour']) if row['hour'] and str(row['hour']).isdigit() else None
-        except:
-            hour_val = None
-            
-        slot = CourseSlot(
-            course_id=row['course_id'],
-            day_code=row['day'],
-            slot_hour=hour_val,
-            slot_title=row['slot_title'],
-            room_id=room_map.get(row['room'].strip()) if row['room'] else None
-        )
-        slot_objects.append(slot)
+        room_name = clean_string(row['room'])
+        slot_records.append({
+            "course_id": int(row['course_id']),
+            "day_code": clean_string(row['day']),
+            "slot_hour": clean_int(row['hour']),
+            "slot_title": clean_value(row['slot_title']),
+            "room_id": room_map.get(room_name) if room_name else None,
+        })
     
-    session.bulk_save_objects(slot_objects)
+    session.bulk_insert_mappings(CourseSlot, slot_records)
     session.commit()
 
     print("Migration completed successfully!")
