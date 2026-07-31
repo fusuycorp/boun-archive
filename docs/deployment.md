@@ -44,14 +44,14 @@ Programmatic redeployment on Dokploy after pushing container builds to a custom 
 1. Copy your application or stack Webhook URL from Dokploy.
 2. Save it as a GitHub Repository Secret named `DOKPLOY_WEBHOOK_URL`.
 
-### Option B: Dokploy REST API
+### Option B: Dokploy Compose REST API
 1. Create a Dokploy API key in **Settings > Profile > API/CLI**.
 2. Save credentials as Repository Secrets in GitHub:
    * `DOKPLOY_API_KEY`: Your generated API key.
-   * `DOKPLOY_URL`: Your Dokploy instance URL (e.g., `https://dokploy.example.com`).
-   * `DOKPLOY_APPLICATION_ID`: The unique application ID in Dokploy.
+   * `DOKPLOY_URL`: Dokploy instance URL (defaults to `https://dokploy.bogazici.app`).
+   * `DOKPLOY_COMPOSE_ID`: Unique compose stack ID (defaults to `FnoW3VW_TLpX8sXKPL60v`).
 
-The `.github/workflows/deploy.yml` workflow automatically detects whichever secret is configured and triggers Dokploy redeployment using `curl -f -s -S` to fail fast on HTTP errors.
+The `.github/workflows/deploy.yml` workflow calls `POST /api/compose.redeploy` passing `composeId`, using `curl -f -s -S` to fail fast on HTTP errors.
 
 
 ## Troubleshooting

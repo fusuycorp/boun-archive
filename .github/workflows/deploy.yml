@@ -91,19 +91,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Dokploy Redeployment
+        env:
+          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL || 'https://dokploy.bogazici.app' }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          DOKPLOY_COMPOSE_ID: ${{ secrets.DOKPLOY_COMPOSE_ID || 'FnoW3VW_TLpX8sXKPL60v' }}
+          DOKPLOY_WEBHOOK_URL: ${{ secrets.DOKPLOY_WEBHOOK_URL }}
         run: |
-          if [ -n "${{ secrets.DOKPLOY_WEBHOOK_URL }}" ]; then
+          if [ -n "$DOKPLOY_WEBHOOK_URL" ]; then
             echo "Triggering Dokploy deployment via Webhook URL..."
-            curl -f -s -S -X POST "${{ secrets.DOKPLOY_WEBHOOK_URL }}" \
+            curl -f -s -S -X POST "$DOKPLOY_WEBHOOK_URL" \
               -H "Content-Type: application/json" \
               -d '{"ref": "refs/heads/main"}'
-          elif [ -n "${{ secrets.DOKPLOY_API_KEY }}" ] && [ -n "${{ secrets.DOKPLOY_URL }}" ]; then
-            echo "Triggering Dokploy deployment via REST API..."
-            curl -f -s -S -X POST "${{ secrets.DOKPLOY_URL }}/api/application.redeploy" \
-              -H "x-api-key: ${{ secrets.DOKPLOY_API_KEY }}" \
+          elif [ -n "$DOKPLOY_API_KEY" ]; then
+            echo "Triggering Dokploy Compose redeployment..."
+            curl -f -s -S -X POST "$DOKPLOY_URL/api/compose.redeploy" \
+              -H "x-api-key: $DOKPLOY_API_KEY" \
               -H "Content-Type: application/json" \
-              -d '{"applicationId": "${{ secrets.DOKPLOY_APPLICATION_ID }}"}'
+              -d "{\"composeId\": \"$DOKPLOY_COMPOSE_ID\"}"
           else
-            echo "::error::Neither DOKPLOY_WEBHOOK_URL nor DOKPLOY_API_KEY/DOKPLOY_URL secrets are configured."
+            echo "::error::Neither DOKPLOY_WEBHOOK_URL nor DOKPLOY_API_KEY secret is configured."
             exit 1
           fi
