@@ -271,30 +271,43 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor not found")
     
-    courses = db.query(models.Course).filter(models.Course.instructor_id == instructor_id).all()
-    
-    # Calculate legacy metrics
-    from collections import Counter
-    total_semesters = len(set([c.term_id for c in courses]))
-    most_frequent = dict(Counter([c.course_code for c in courses]).most_common(5))
-    
-    # Preferred slots (joining with course_slots)
-    course_ids = [c.id for c in courses]
-    slots = db.query(
+    # Calculate legacy metrics using SQL GROUP BY
+    most_frequent_query = db.query(
+        models.Course.course_code,
+        func.count(models.Course.id).label("freq")
+    ).filter(
+        models.Course.instructor_id == instructor_id
+    ).group_by(
+        models.Course.course_code
+    ).order_by(
+        func.count(models.Course.id).desc()
+    ).limit(5).all()
+    most_frequent = {row.course_code: row.freq for row in most_frequent_query}
+
+    preferred_slots_query = db.query(
+        models.CourseSlot.day_code,
+        models.CourseSlot.slot_hour,
+        func.count(models.CourseSlot.id).label("freq")
+    ).join(
+        models.Course
+    ).filter(
+        models.Course.instructor_id == instructor_id,
+        models.CourseSlot.day_code.isnot(None),
+        models.CourseSlot.slot_hour.isnot(None)
+    ).group_by(
         models.CourseSlot.day_code,
         models.CourseSlot.slot_hour
-    ).filter(models.CourseSlot.course_id.in_(course_ids)).all()
-    
-    slots_list = []
-    for s in slots:
-        if s.day_code and s.slot_hour is not None:
-            slots_list.append((s.day_code, int(s.slot_hour)))
-            
-    slots_counter = Counter(slots_list)
+    ).order_by(
+        func.count(models.CourseSlot.id).desc()
+    ).limit(5).all()
+
     slots_count = [
-        {"day": day, "hour": hour, "frequency": freq}
-        for (day, hour), freq in slots_counter.most_common(5)
+        {"day": row.day_code, "hour": int(row.slot_hour), "frequency": row.freq}
+        for row in preferred_slots_query
     ]
+
+    courses = db.query(models.Course).filter(models.Course.instructor_id == instructor_id).all()
+    total_semesters = len(set([c.term_id for c in courses]))
 
     return {
         "instructor_name": instructor.full_name,

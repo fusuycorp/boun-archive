@@ -239,8 +239,8 @@
             </tr>
           </thead>
           <tbody>
-            <!-- We'll show a subset of rooms for performance/demo -->
-            {#each Array.from(new Set(filteredSchedule.map(s => s.room_name))).sort().slice(0, 50) as room}
+            <!-- We'll show all rooms in the matrix -->
+            {#each Array.from(new Set(filteredSchedule.map(s => s.room_name))).sort() as room}
               <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors dark:border-slate-800/60 dark:hover:bg-slate-850/30">
                 <td class="p-4 text-sm font-bold text-slate-700 dark:text-slate-300 border-r border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20">{room}</td>
                 {#each hours as hour}
@@ -264,25 +264,3 @@
     </div>
   {/if}
 </div>
-
-<style>
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 4px;
-  }
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #e2e8f0;
-    border-radius: 10px;
-  }
-  :global(.dark) .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #334155;
-  }
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #cbd5e1;
-  }
-  :global(.dark) .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #475569;
-  }
-</style>

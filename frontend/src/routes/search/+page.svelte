@@ -50,7 +50,14 @@
     goto(newUrl, { replaceState: true, keepFocus: true, noScroll: true });
   }
 
+  let searchAbortController: AbortController | null = null;
+
   async function performSearch(resetOffset = true) {
+    if (searchAbortController) {
+      searchAbortController.abort();
+    }
+    searchAbortController = new AbortController();
+
     loading = true;
     if (resetOffset) offset = 0;
     
@@ -70,16 +77,21 @@
       selectedTerms.forEach(t => params.append("term", t));
       selectedDepts.forEach(d => params.append("dept", d));
 
-      const response = await fetch(`${API_BASE}/v1/search?${params.toString()}`);
+      const response = await fetch(`${API_BASE}/v1/search?${params.toString()}`, {
+        signal: searchAbortController.signal
+      });
       const data = await response.json();
       results = data.hits;
       currentFacets = data.facetDistribution;
       // Meilisearch returns totalHits or estimatedTotalHits depending on configuration
       totalHits = data.totalHits ?? data.estimatedTotalHits ?? 0;
-    } catch (e) {
+    } catch (e: any) {
+      if (e.name === 'AbortError') return;
       console.error("Search failed", e);
     } finally {
-      loading = false;
+      if (!searchAbortController.signal.aborted) {
+        loading = false;
+      }
     }
   }
 
@@ -504,24 +516,3 @@
   </div>
 </div>
 
-<style>
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 4px;
-  }
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #e2e8f0;
-    border-radius: 10px;
-  }
-  :global(.dark) .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #334155;
-  }
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #cbd5e1;
-  }
-  :global(.dark) .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #475569;
-  }
-</style>

@@ -29,16 +29,19 @@ def sync_meilisearch():
     
     # 2. Fetch data from PG with joins, including slots and rooms
     print("Fetching courses from PostgreSQL...")
-    courses = session.query(Course).options(
+    query = session.query(Course).options(
         joinedload(Course.term),
         joinedload(Course.department),
         joinedload(Course.instructor),
         joinedload(Course.slots).joinedload(CourseSlot.room)
-    ).all()
+    )
     
-    print(f"Preparing {len(courses)} documents...")
+    print("Preparing and pushing documents to Meilisearch in chunks...")
+    chunk_size = 1000
+    chunk_count = 0
     documents = []
-    for c in courses:
+    
+    for c in query.yield_per(chunk_size):
         slots_data = []
         for s in c.slots:
             slots_data.append({
@@ -63,15 +66,19 @@ def sync_meilisearch():
             'slots': slots_data
         }
         documents.append(doc)
-    
-    # 3. Push to Meilisearch in chunks
-    print("Pushing to Meilisearch...")
-    chunk_size = 1000
-    for i in range(0, len(documents), chunk_size):
-        chunk = documents[i:i + chunk_size]
-        task = index.add_documents(chunk)
+        
+        if len(documents) >= chunk_size:
+            task = index.add_documents(documents)
+            client.wait_for_task(task.task_uid)
+            chunk_count += 1
+            print(f"Pushed chunk {chunk_count}")
+            documents = []
+            
+    if documents:
+        task = index.add_documents(documents)
         client.wait_for_task(task.task_uid)
-        print(f"Pushed chunk {i//chunk_size + 1}")
+        chunk_count += 1
+        print(f"Pushed final chunk {chunk_count}")
     
     # 4. Configure Index (Facets/Searchable)
     print("Configuring index...")
