@@ -113,7 +113,7 @@ services:
       - backend_net
       - frontend_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://127.0.0.1:$$PORT/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f -H \"Host: $${_APP_DOMAIN:-boun.bogazici.app}\" http://127.0.0.1:$$PORT/v1/terms || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

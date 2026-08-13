@@ -19,9 +19,12 @@
     PanelLeftClose,
     PanelLeftOpen
   } from "lucide-svelte";
+  import { auth } from "$lib/stores/auth.svelte";
+  import AuthModal from "$lib/components/AuthModal.svelte";
 
   let isDark = $state(false);
   let isSidebarOpen = $state(true);
+  let showAuthModal = $state(false);
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutGrid },
@@ -49,6 +52,8 @@
     if (savedSidebar !== null) {
       isSidebarOpen = savedSidebar === "true";
     }
+
+    auth.checkSession();
   });
 
   function toggleTheme() {
@@ -136,6 +141,27 @@
         </div>
       </div>
       <div class="flex items-center space-x-4">
+        {#if auth.loading}
+          <div class="h-6 w-16 animate-pulse rounded bg-slate-200 dark:bg-slate-800"></div>
+        {:else if auth.user}
+          <div class="flex items-center space-x-3">
+            <span class="text-sm font-medium text-slate-700 dark:text-slate-300">{auth.user.email}</span>
+            <button 
+              onclick={() => auth.logout()}
+              class="text-xs font-medium text-slate-500 hover:text-red-500 dark:text-slate-400"
+            >
+              Sign out
+            </button>
+          </div>
+        {:else}
+          <button 
+            onclick={() => (showAuthModal = true)}
+            class="rounded-lg bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            Sign in
+          </button>
+        {/if}
+
         <button 
           onclick={toggleTheme}
           class="p-2 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800/60 rounded-lg transition-all"
@@ -158,4 +184,6 @@
     </div>
   </main>
 </div>
+
+<AuthModal bind:show={showAuthModal} />
 
