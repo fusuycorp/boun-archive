@@ -1,11 +1,14 @@
 import { Client, Account, Databases, Storage } from 'appwrite';
-import { PUBLIC_APPWRITE_ENDPOINT, PUBLIC_APPWRITE_PROJECT_ID } from '$env/static/public';
+import { env } from '$env/dynamic/public';
+
+const endpoint = env.PUBLIC_APPWRITE_ENDPOINT || 'https://appwrite.bogazici.app/v1';
+const projectId = env.PUBLIC_APPWRITE_PROJECT_ID || 'boun-archive';
 
 export const client = new Client();
 
 client
-    .setEndpoint(PUBLIC_APPWRITE_ENDPOINT)
-    .setProject(PUBLIC_APPWRITE_PROJECT_ID);
+    .setEndpoint(endpoint)
+    .setProject(projectId);
 
 export const account = new Account(client);
 export const databases = new Databases(client);
