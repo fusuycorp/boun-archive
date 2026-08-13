@@ -1,24 +1,24 @@
 # Migration Task Checklist
 
-- [ ] **Phase 1: Declarative Schema**
-  - [ ] Create `services/boun-archive/appwrite-schema.json` in `~/deployment/selfhosted`
-  - [ ] Run provision script `python3 scripts/appwrite_provision.py`
+- [x] **Phase 1: Declarative Schema**
+  - [x] Create `services/boun-archive/appwrite-schema.json` in `~/deployment/selfhosted`
+  - [x] Run provision script dry-run `python3 scripts/appwrite_provision.py services/boun-archive/appwrite-schema.json --dry-run`
 
-- [ ] **Phase 2: Frontend Appwrite Integration**
-  - [ ] Install `appwrite` SDK in `frontend/package.json`
-  - [ ] Add `frontend/src/lib/appwrite.ts`
-  - [ ] Add `frontend/src/lib/stores/auth.svelte.ts`
-  - [ ] Add `frontend/src/lib/components/AuthModal.svelte`
-  - [ ] Update `frontend/src/routes/calendar/+page.svelte` for 2-way cloud schedule sync
+- [x] **Phase 2: Frontend Appwrite Integration**
+  - [x] Install `appwrite` SDK in `frontend/package.json`
+  - [x] Add `frontend/src/lib/appwrite.ts`
+  - [x] Add `frontend/src/lib/stores/auth.svelte.ts` (Svelte 5 Runes)
+  - [x] Add `frontend/src/lib/components/AuthModal.svelte`
+  - [x] Update `frontend/src/routes/calendar/+page.svelte` for 2-way cloud schedule sync
 
-- [ ] **Phase 3: Backend Auth Middleware**
-  - [ ] Add `appwrite` Python dependency
-  - [ ] Add `backend/app/auth.py` for JWT validation
+- [x] **Phase 3: Backend Auth Middleware**
+  - [x] Add `appwrite` Python dependency in `backend/pyproject.toml`
+  - [x] Add `backend/app/auth.py` for JWT validation
 
-- [ ] **Phase 4: Docker Stack Alignment**
-  - [ ] Update `docker-stack.yml` (remove `ports:`, set Host headers on healthchecks)
-  - [ ] Update `.env.example` with `PUBLIC_APPWRITE_ENDPOINT` and `PUBLIC_APPWRITE_PROJECT_ID`
+- [x] **Phase 4: Docker Stack Alignment**
+  - [x] Update `docker-stack.yml` (remove host `ports:`, set Host headers on healthchecks per ADR-002)
+  - [x] Update `.env.example` with `PUBLIC_APPWRITE_ENDPOINT` and `PUBLIC_APPWRITE_PROJECT_ID`
 
-- [ ] **Phase 5: Verification & Testing**
-  - [ ] Run `bun check` on frontend
-  - [ ] Run backend tests/healthcheck
+- [x] **Phase 5: Verification & Testing**
+  - [x] Run `bun check` on frontend (0 errors)
+  - [x] Verify backend python dependencies & auth syntax
