@@ -2,9 +2,6 @@
   import { onMount, untrack } from "svelte";
   import { Search, Calendar, Plus, Trash2, AlertTriangle, Filter, Check, X, MapPin } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
-  import { auth } from '$lib/stores/auth.svelte';
-  import { databases } from '$lib/appwrite';
-  import { ID, Query } from 'appwrite';
 
   // State
   let terms = $state<any[]>([]);
@@ -19,83 +16,27 @@
   // Commute Config State
   let commuteStrictness = $state("all"); // "all", "high", "impossible", "none"
 
-  let cloudDocId = $state("");
-  let loadingCloudData = $state(false);
-
-  // Persistence
+  // Persistence: Load courses when selectedTerm changes
   $effect(() => {
     if (selectedTerm) {
-      loadingCloudData = true;
-      cloudDocId = "";
-      
-      const loadData = async () => {
-        if (auth.user) {
-          try {
-            const docs = await databases.listDocuments('boun_archive_db', 'user_schedules', [
-              Query.equal('userId', auth.user.$id),
-              Query.equal('termId', selectedTerm),
-              Query.equal('name', 'My Weekly Schedule')
-            ]);
-            if (docs.total > 0) {
-              cloudDocId = docs.documents[0].$id;
-              const courseIds = JSON.parse(docs.documents[0].courseCodes || '[]');
-              const fetched = [];
-              for (const id of courseIds) {
-                const res = await fetch(`${API_BASE}/v1/courses/${id}`);
-                if (res.ok) fetched.push(await res.json());
-              }
-              myCourses = fetched;
-              loadingCloudData = false;
-              return;
-            }
-          } catch(e) { console.error("Cloud load error", e); }
-        }
-        
-        const saved = localStorage.getItem(`planner_${selectedTerm}`);
-        if (saved) {
+      const saved = localStorage.getItem(`planner_${selectedTerm}`);
+      if (saved) {
+        try {
           myCourses = JSON.parse(saved);
-        } else {
+        } catch (e) {
           myCourses = [];
         }
-        loadingCloudData = false;
-      };
-      
-      loadData();
+      } else {
+        myCourses = [];
+      }
     }
   });
 
-  async function syncToCloud(term: string, courses: any[]) {
-    if (!auth.user) return;
-    try {
-        const courseIds = JSON.stringify(courses.map(c => c.id));
-        if (cloudDocId) {
-            await databases.updateDocument('boun_archive_db', 'user_schedules', cloudDocId, {
-                courseCodes: courseIds,
-                updatedAt: new Date().toISOString()
-            });
-        } else {
-            const res = await databases.createDocument('boun_archive_db', 'user_schedules', ID.unique(), {
-                userId: auth.user.$id,
-                termId: term,
-                name: 'My Weekly Schedule',
-                courseCodes: courseIds,
-                isActive: true,
-                updatedAt: new Date().toISOString()
-            });
-            cloudDocId = res.$id;
-        }
-    } catch (e) {
-        console.error("Cloud sync error", e);
-    }
-  }
-
+  // Persistence: Save courses when myCourses changes
   $effect(() => {
-    // Save courses only when myCourses changes, untracking selectedTerm to prevent data-loss race condition on term switch
     const term = untrack(() => selectedTerm);
-    const isLoading = untrack(() => loadingCloudData);
-    if (term && !isLoading) {
+    if (term) {
       localStorage.setItem(`planner_${term}`, JSON.stringify(myCourses));
-      syncToCloud(term, myCourses);
     }
   });
 

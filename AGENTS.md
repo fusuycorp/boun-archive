@@ -9,6 +9,6 @@ Before pushing code changes to remote repositories or triggering CI/CD build pip
 - **Dynamic Env Imports**: Avoid `$env/static/public` for dynamic runtime variables; prefer `$env/dynamic/public` with default fallback values so container builds succeed when environment variables are omitted at image build-time.
 
 ### 2. Architecture & Code Quality
-- **Hybrid Data Model**: Maintain PostgreSQL 16 & Meilisearch for read-heavy public academic analytics, and Appwrite BaaS for user identity, cloud schedule sync, and bookmarks.
+- **Clean Data Architecture**: Maintain PostgreSQL 16 & Meilisearch for academic analytics, Redis for caching, and local storage for user weekly planner persistence.
 - **Simplest Implementation**: No obsolete compatibility layers or speculative abstractions.
 - **Clean Git Commits**: Write clean Conventional Git Commits (`feat:`, `fix:`, `docs:`, `refactor:`).
