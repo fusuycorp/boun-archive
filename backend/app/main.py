@@ -44,6 +44,13 @@ async def lifespan(app: FastAPI):
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
     redis = aioredis.from_url(redis_url, encoding="utf8", decode_responses=True)
     FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache", key_builder=custom_key_builder)
+    
+    # Ensure Meilisearch 'courses' index exists with primary key 'id'
+    try:
+        MEILI_CLIENT.create_index('courses', {'primaryKey': 'id'})
+    except Exception:
+        pass
+
     try:
         yield
     finally:
@@ -123,24 +130,42 @@ def search_courses(
         # Default sort
         sort_list = ['term:desc', 'course_code:asc']
 
-    results = MEILI_CLIENT.index('courses').search(q, {
-        'filter': " AND ".join(filter_list) if filter_list else None,
-        'limit': limit,
-        'offset': offset,
-        'facets': ['term', 'dept_code', 'instructor', 'delivery_method'],
-        'sort': sort_list
-    })
-    return results
+    try:
+        results = MEILI_CLIENT.index('courses').search(q, {
+            'filter': " AND ".join(filter_list) if filter_list else None,
+            'limit': limit,
+            'offset': offset,
+            'facets': ['term', 'dept_code', 'instructor', 'delivery_method'],
+            'sort': sort_list
+        })
+        return results
+    except Exception as e:
+        if 'index_not_found' in str(e):
+            return {
+                'hits': [],
+                'query': q,
+                'processingTimeMs': 0,
+                'limit': limit,
+                'offset': offset,
+                'estimatedTotalHits': 0,
+                'facetDistribution': {}
+            }
+        raise HTTPException(status_code=500, detail="Search service error")
 
 @app.get("/v1/facets")
 @cache(expire=3600)
 def get_global_facets():
-    # Return facets for all documents (empty search)
-    results = MEILI_CLIENT.index('courses').search("", {
-        'facets': ['term', 'dept_code', 'delivery_method'],
-        'limit': 0
-    })
-    return results['facetDistribution']
+    try:
+        # Return facets for all documents (empty search)
+        results = MEILI_CLIENT.index('courses').search("", {
+            'facets': ['term', 'dept_code', 'delivery_method'],
+            'limit': 0
+        })
+        return results.get('facetDistribution', {})
+    except Exception as e:
+        if 'index_not_found' in str(e):
+            return {}
+        raise HTTPException(status_code=500, detail="Search service error")
 
 @app.get("/v1/analytics/ghost-schedule/{term:path}")
 @cache(expire=3600)

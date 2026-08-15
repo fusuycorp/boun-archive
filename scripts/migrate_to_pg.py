@@ -6,12 +6,30 @@ from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
-# Add backend to path to import app modules when running from root or in container
-sys.path.append(os.path.join(os.getcwd(), 'backend'))
+# Add candidate paths to sys.path so app modules can always be found
+script_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(script_dir)
+cwd = os.getcwd()
+
+for p in [cwd, root_dir, os.path.join(root_dir, 'backend'), os.path.join(cwd, 'backend')]:
+    if os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
+
 from app.database import Base
 from app.models import Term, Department, Instructor, Room, Course, CourseSlot
 
 load_dotenv()
+
+def find_data_file(filename: str) -> str:
+    candidates = [
+        os.path.join(os.getcwd(), filename),
+        os.path.join(root_dir, filename),
+        os.path.join(script_dir, filename),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return filename
 
 def clean_value(value):
     return None if pd.isna(value) else value
@@ -32,7 +50,8 @@ def migrate():
     print("Starting migration from SQLite to PostgreSQL...")
     
     # 1. Setup Connections
-    sqlite_conn = sqlite3.connect('schedules.db')
+    schedules_db_path = find_data_file('schedules.db')
+    sqlite_conn = sqlite3.connect(schedules_db_path)
     pg_url = os.getenv("DATABASE_URL")
     engine = create_engine(pg_url)
     
@@ -59,7 +78,8 @@ def migrate():
 
     # 3. Load Departments (from CSV)
     print("Migrating Departments...")
-    depts_df = pd.read_csv('departments.csv')
+    depts_csv_path = find_data_file('departments.csv')
+    depts_df = pd.read_csv(depts_csv_path)
     depts_df = depts_df.drop_duplicates(subset=['kisaadi'], keep='first')
     for _, row in depts_df.iterrows():
         dept = Department(kisaadi=row['kisaadi'], bolum=row['bolum'])

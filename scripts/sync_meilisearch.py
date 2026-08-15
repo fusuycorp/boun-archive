@@ -5,8 +5,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, joinedload
 from dotenv import load_dotenv
 
-# Add backend to path to import models
-sys.path.append(os.path.join(os.getcwd(), 'backend'))
+# Add candidate paths to sys.path so app modules can always be found
+script_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(script_dir)
+cwd = os.getcwd()
+
+for p in [cwd, root_dir, os.path.join(root_dir, 'backend'), os.path.join(cwd, 'backend')]:
+    if os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
+
 from app.models import Course, Term, Department, Instructor, CourseSlot, Room
 
 load_dotenv()
