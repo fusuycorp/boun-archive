@@ -6,6 +6,7 @@
 Before pushing code changes to remote repositories or triggering CI/CD build pipelines, agents MUST empirically verify that the application compiles cleanly without errors:
 - **Frontend Build Verification**: Run `bun run build` in `frontend/` to test SvelteKit & Vite/Rolldown production bundling.
 - **Type Checking**: Run `bun check` in `frontend/` to verify TypeScript contracts.
+- **Backend Runtime Import Verification**: Run `uv run python -c "from app.main import app"` in `backend/` to verify all dynamic module imports and transitive dependencies resolve at runtime.
 - **Dynamic Env Imports**: Avoid `$env/static/public` for dynamic runtime variables; prefer `$env/dynamic/public` with default fallback values so container builds succeed when environment variables are omitted at image build-time.
 
 ### 2. Architecture & Code Quality
