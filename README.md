@@ -115,44 +115,36 @@ erDiagram
 
 ## 4. Ingestion & Initialization Pipeline
 
-To spin up the system reliably in multi-replica production environments (like Docker Swarm), the startup pipeline is strictly synchronized using a **Redis-based Distributed Lock**:
+To spin up the system reliably in multi-replica production environments (like Docker Swarm), batch data operations are completely decoupled from the HTTP serving path:
 
 ```mermaid
 sequenceDiagram
-    participant C as Container Startup
-    participant W as wait_for_services.py
-    participant R as Redis
+    autonumber
+    participant Init as Init Task (1 replica)
+    participant Backend as Backend Serving (4 replicas)
     participant DB as PostgreSQL
     participant M as Meilisearch
+    participant R as Redis
 
-    C->>W: Run checks
-    W->>DB: Ping PostgreSQL until active (timeout 120s)
-    W->>M: Ping Meilisearch until active (timeout 120s)
-    W->>R: Ping Redis until active (timeout 120s)
-    
-    C->>W: Acquire Lock (wait_for_services.py --check-lock)
-    W->>R: SET boun_archive_init_lock "locked" NX EX 600
-    
-    alt Lock Acquired (First Instance)
-        R-->>W: Success (Lock acquired)
-        W-->>C: Exit 0 (Proceed with init)
-        C->>DB: Run migrations (migrate_to_pg.py)
-        C->>M: Sync and configure indexes (sync_meilisearch.py)
-        C->>W: Release Lock (wait_for_services.py --mark-done)
-        W->>R: SET boun_archive_init_done "true"
-        W->>R: DEL boun_archive_init_lock
-    else Lock Failed (Subsequent Replicas)
-        R-->>W: Failure (Already locked/done)
-        W->>R: Poll boun_archive_init_done
-        Note over W,R: Wait until first replica completes migrations
-        W-->>C: Exit 1 (Skip init)
+    par Data Initialization Job
+        Init->>DB: Ping readiness (wait_for_services.py)
+        Init->>M: Ping readiness (wait_for_services.py)
+        Init->>R: Ping readiness (wait_for_services.py)
+        Init->>DB: Run migrations (migrate_to_pg.py)
+        Init->>M: Sync and configure indexes (sync_meilisearch.py)
+        Note over Init: Exits cleanly (Code 0)
+    and Application Serving
+        Backend->>DB: Ping socket readiness
+        Backend->>M: Ping socket readiness
+        Backend->>R: Ping socket readiness
+        Backend->>Backend: exec uvicorn app.main:app
+        Note over Backend: Responds 200 OK on /health in <2s
     end
-    
-    C->>C: exec uvicorn app.main:app --workers ${WEB_CONCURRENCY:-1}
 ```
 
 1.  **Migration (`scripts/migrate_to_pg.py`)**: Migrates raw SQL rows from SQLite `schedules.db` and the CSV metadata in `departments.csv` into PostgreSQL. It performs entity resolution, such as mapping instructor names and rooms, sanitizing spaces in course codes, and bulk-saving records.
-2.  **Indexing (`scripts/sync_meilisearch.py`)**: Queries PostgreSQL with optimized `joinedload` operators, maps relational objects into a flat document structure, and pushes documents in chunks of 1,000 into Meilisearch. It configures searchable attributes, filterable attributes, facets, and sort attributes.
+2.  **Indexing (`scripts/sync_meilisearch.py`)**: Queries PostgreSQL with optimized `joinedload` operators, maps relational objects into a flat document structure, and pushes documents in batch chunks into Meilisearch. It configures searchable attributes, filterable attributes, facets, and sort attributes.
+3.  **Job Orchestration (`scripts/init_all.py`)**: A dedicated container job running once per deployment to ensure data consistency without delaying or deadlocking HTTP serving replicas.
 
 ---
 

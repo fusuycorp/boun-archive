@@ -99,6 +99,32 @@ services:
           cpus: '4.0'
           memory: 6G
 
+  init:
+    image: ${BACKEND_IMAGE:-registry.bogazici.app/budok/boun-archive-backend:latest}
+    command: ["python", "scripts/init_all.py"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://boun_user:boun_password@db:5432/boun_archive}
+      MEILI_URL: ${MEILI_URL:-http://meilisearch:7700}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    networks:
+      - backend_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+      placement:
+        constraints:
+          - node.labels.type == worky
+      resources:
+        reservations:
+          cpus: '0.50'
+          memory: 1G
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
   backend:
     image: ${BACKEND_IMAGE:-registry.bogazici.app/budok/boun-archive-backend:latest}
     environment:
@@ -113,18 +139,18 @@ services:
       - backend_net
       - frontend_net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f -H \"Host: $${_APP_DOMAIN:-boun.bogazici.app}\" http://127.0.0.1:$$PORT/v1/terms || exit 1"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:$$PORT/health || exit 1"]
+      interval: 15s
+      timeout: 5s
       retries: 3
-      start_period: 60s
+      start_period: 30s
     deploy:
       replicas: 4
       update_config:
         parallelism: 1
         delay: 10s
       restart_policy:
-        condition: on-failure
+        condition: any
       placement:
         constraints:
           - node.labels.type == worky
@@ -149,7 +175,7 @@ services:
         parallelism: 1
         delay: 10s
       restart_policy:
-        condition: on-failure
+        condition: any
       placement:
         constraints:
           - node.labels.type == tanri
@@ -170,6 +196,8 @@ services:
       - frontend_net
     deploy:
       replicas: 2
+      restart_policy:
+        condition: any
       placement:
         constraints:
           - node.labels.type == tanri

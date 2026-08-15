@@ -35,7 +35,7 @@ The system uses a single entry point (Nginx) on port 3000 (mapped to 80/443 exte
 ## Key Stability Fixes
 1. **Meilisearch Pathing**: Always use the default `/data.ms` internal path for the database volume to avoid version inference errors.
 2. **Config Versioning**: Docker Swarm `configs` are immutable. The current stable version is **`nginx_config_v3`**. When updating `nginx.conf`, increment the version name in `docker-stack.yml`.
-3. **Wait for Services**: The backend includes a `wait_for_services.py` script that ensures PostgreSQL, Redis, and Meilisearch are healthy before starting the application. It uses a **Redis-based Distributed Lock** to coordinate initialization across multiple replicas.
+3. **Decoupled Service Initialization**: The backend relies on a lightweight `wait_for_services.py` script that verifies PostgreSQL, Redis, and Meilisearch socket readiness before Uvicorn binds port 8000. One-time database migrations and Meilisearch indexing are isolated into a dedicated `init` task service in `docker-stack.yml`, ensuring serving replicas immediately pass healthchecks without lock contention.
 
 ## GitHub Actions Deployment (Custom Registry Redeploys)
 Programmatic redeployment on Dokploy after pushing container builds to a custom registry is triggered via Dokploy's **Compose REST API** (`POST /api/compose.redeploy`).
