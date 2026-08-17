@@ -6,14 +6,10 @@ from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
-# Add candidate paths to sys.path so app modules can always be found
-script_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(script_dir)
-cwd = os.getcwd()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pathutil import add_import_paths, ROOT_DIR, SCRIPT_DIR
 
-for p in [cwd, root_dir, os.path.join(root_dir, 'backend'), os.path.join(cwd, 'backend')]:
-    if os.path.exists(p) and p not in sys.path:
-        sys.path.insert(0, p)
+add_import_paths()
 
 from app.database import Base
 from app.models import Term, Department, Instructor, Room, Course, CourseSlot
@@ -23,13 +19,13 @@ load_dotenv()
 def find_data_file(filename: str) -> str:
     candidates = [
         os.path.join(os.getcwd(), filename),
-        os.path.join(root_dir, filename),
-        os.path.join(script_dir, filename),
+        os.path.join(ROOT_DIR, filename),
+        os.path.join(SCRIPT_DIR, filename),
     ]
     for c in candidates:
         if os.path.exists(c):
             return c
-    return filename
+    raise FileNotFoundError(f"{filename} not found in any of: {candidates}")
 
 def clean_value(value):
     return None if pd.isna(value) else value
@@ -169,7 +165,4 @@ def migrate():
     print("Migration completed successfully!")
 
 if __name__ == "__main__":
-    # We need to be in the backend directory or add it to path
-    import sys
-    sys.path.append(os.path.join(os.getcwd(), 'backend'))
     migrate()

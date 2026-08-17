@@ -1,6 +1,8 @@
 import os
 import hashlib
+import logging
 import meilisearch
+from meilisearch.errors import MeilisearchApiError
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +19,8 @@ from . import models, schemas, database
 from .analytics import TrendEngine, MacroEngine
 
 ALLOWED_SORTS = {"term", "course_code", "title", "instructor", "credits", "ects"}
+
+logger = logging.getLogger(__name__)
 
 
 def custom_key_builder(
@@ -48,8 +52,9 @@ async def lifespan(app: FastAPI):
     # Ensure Meilisearch 'courses' index exists with primary key 'id'
     try:
         MEILI_CLIENT.create_index('courses', {'primaryKey': 'id'})
-    except Exception:
-        pass
+    except MeilisearchApiError as e:
+        if e.code != "index_already_exists":
+            logger.error("Failed to create Meilisearch 'courses' index: %s", e)
 
     try:
         yield
@@ -139,17 +144,9 @@ def search_courses(
             'sort': sort_list
         })
         return results
-    except Exception as e:
-        if 'index_not_found' in str(e):
-            return {
-                'hits': [],
-                'query': q,
-                'processingTimeMs': 0,
-                'limit': limit,
-                'offset': offset,
-                'estimatedTotalHits': 0,
-                'facetDistribution': {}
-            }
+    except MeilisearchApiError as e:
+        if e.code == "index_not_found":
+            raise HTTPException(status_code=503, detail="Search index not ready")
         raise HTTPException(status_code=500, detail="Search service error")
 
 @app.get("/v1/facets")
@@ -162,9 +159,9 @@ def get_global_facets():
             'limit': 0
         })
         return results.get('facetDistribution', {})
-    except Exception as e:
-        if 'index_not_found' in str(e):
-            return {}
+    except MeilisearchApiError as e:
+        if e.code == "index_not_found":
+            raise HTTPException(status_code=503, detail="Search index not ready")
         raise HTTPException(status_code=500, detail="Search service error")
 
 @app.get("/v1/analytics/ghost-schedule/{term:path}")

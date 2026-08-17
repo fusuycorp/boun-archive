@@ -2,17 +2,13 @@ import os
 import sys
 import meilisearch
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, joinedload
+from sqlalchemy.orm import sessionmaker, joinedload, selectinload
 from dotenv import load_dotenv
 
-# Add candidate paths to sys.path so app modules can always be found
-script_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(script_dir)
-cwd = os.getcwd()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pathutil import add_import_paths
 
-for p in [cwd, root_dir, os.path.join(root_dir, 'backend'), os.path.join(cwd, 'backend')]:
-    if os.path.exists(p) and p not in sys.path:
-        sys.path.insert(0, p)
+add_import_paths()
 
 from app.models import Course, Term, Department, Instructor, CourseSlot, Room
 
@@ -71,7 +67,7 @@ def sync_meilisearch(force: bool = False):
         joinedload(Course.term),
         joinedload(Course.department),
         joinedload(Course.instructor),
-        joinedload(Course.slots).joinedload(CourseSlot.room)
+        selectinload(Course.slots).joinedload(CourseSlot.room)
     )
     
     print("Preparing and pushing documents to Meilisearch in chunks...")
