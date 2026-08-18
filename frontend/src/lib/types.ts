@@ -73,3 +73,54 @@ export interface CommuteWarning {
   riskLevel: 'Impossible' | 'High' | 'Moderate' | 'Low';
   message: string;
 }
+
+export interface QuotaSnapshot {
+  id: number;
+  term_id: string;
+  course_code: string;
+  section?: string;
+  department?: string;
+  status?: string;
+  quota?: string;
+  current?: string;
+  quota_numeric?: number;
+  current_numeric?: number;
+  is_consent: boolean;
+  is_unlimited: boolean;
+  available?: number;
+  captured_at: string;
+}
+
+export interface CourseChange {
+  id: number;
+  change_type: string;
+  term_id: string;
+  dept_kisaadi?: string;
+  course_code: string;
+  section?: string;
+  timestamp: string;
+  old_value?: string;
+  new_value?: string;
+  details?: string;
+}
+
+export interface CourseHistorySlot {
+  day: string;
+  hour: number;
+  room: string;
+  title?: string;
+}
+
+export interface CourseHistoryItem {
+  id: number;
+  term_id: string;
+  section?: string;
+  title?: string;
+  instructor?: string;
+  credits?: number;
+  ects?: number;
+  delivery_method?: string;
+  slots: CourseHistorySlot[];
+}
+
+

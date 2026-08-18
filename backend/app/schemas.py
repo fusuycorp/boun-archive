@@ -64,3 +64,47 @@ class Course(CourseBase):
     slots: List[CourseSlot] = []
     class Config:
         from_attributes = True
+
+class QuotaSnapshotBase(BaseModel):
+    term_id: str
+    course_code: str
+    section: Optional[str] = None
+    department: Optional[str] = None
+    status: Optional[str] = None
+    quota: Optional[str] = None
+    current: Optional[str] = None
+    quota_numeric: Optional[int] = None
+    current_numeric: Optional[int] = None
+    is_consent: bool = False
+    is_unlimited: bool = False
+    available: Optional[int] = None
+    captured_at: str
+
+class QuotaSnapshot(QuotaSnapshotBase):
+    id: int
+    class Config:
+        from_attributes = True
+
+class CourseChangeBase(BaseModel):
+    change_type: str
+    term_id: str
+    dept_kisaadi: Optional[str] = None
+    course_code: str
+    section: Optional[str] = None
+    timestamp: str
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
+    details: Optional[str] = None
+
+class CourseChange(CourseChangeBase):
+    id: int
+    class Config:
+        from_attributes = True
+
+class SyncStateBase(BaseModel):
+    feed_name: str
+    last_cursor: Optional[str] = None
+
+class SyncState(SyncStateBase):
+    class Config:
+        from_attributes = True

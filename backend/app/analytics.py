@@ -339,6 +339,8 @@ class MacroEngine:
 
     @staticmethod
     def get_semantic_shift(db: Session, interval_years: int = 10):
+        if not interval_years or interval_years <= 0:
+            interval_years = 10
         year_expr = func.substr(models.Course.term_id, 1, 4)
         results = db.query(
             models.Course.title,

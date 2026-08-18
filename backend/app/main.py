@@ -22,6 +22,11 @@ ALLOWED_SORTS = {"term", "course_code", "title", "instructor", "credits", "ects"
 
 logger = logging.getLogger(__name__)
 
+def escape_meili_filter(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("'", "\\'")
+
+def escape_sql_wildcards(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 def custom_key_builder(
     func,
@@ -111,19 +116,19 @@ def search_courses(
     if term:
         term_filters = []
         for t in term:
-            escaped = t.replace("'", "\\'")
+            escaped = escape_meili_filter(t)
             term_filters.append(f"term = '{escaped}'")
         filter_list.append(f"({' OR '.join(term_filters)})")
         
     if dept:
         dept_filters = []
         for d in dept:
-            escaped = d.replace("'", "\\'")
+            escaped = escape_meili_filter(d)
             dept_filters.append(f"dept_code = '{escaped}'")
         filter_list.append(f"({' OR '.join(dept_filters)})")
         
     if instructor:
-        escaped_instructor = instructor.replace("'", "\\'")
+        escaped_instructor = escape_meili_filter(instructor)
         filter_list.append(f"instructor = '{escaped_instructor}'")
 
     sort_list = []
@@ -224,7 +229,7 @@ def get_campus_distribution(
 @app.get("/v1/analytics/macro/semantic-shift")
 @cache(expire=86400)
 def get_semantic_shift(
-    interval_years: int = Query(10, description="Grouping interval in years"),
+    interval_years: int = Query(10, ge=1, le=100, description="Grouping interval in years"),
     db: Session = Depends(database.get_db)
 ):
     return MacroEngine.get_semantic_shift(db, interval_years)
@@ -275,7 +280,8 @@ def get_course(course_id: int, db: Session = Depends(database.get_db)):
 def get_instructors(q: str = "", db: Session = Depends(database.get_db)):
     query = db.query(models.Instructor)
     if q:
-        query = query.filter(models.Instructor.full_name.ilike(f"%{q}%"))
+        clean_q = escape_sql_wildcards(q.strip())
+        query = query.filter(models.Instructor.full_name.ilike(f"%{clean_q}%"))
     return query.limit(50).all()
 
 @app.get("/v1/instructors/{instructor_id}", response_model=schemas.Instructor)
@@ -386,65 +392,49 @@ def get_department_unique_courses(dept_code: str, db: Session = Depends(database
 @app.get("/v1/departments/{dept_code}/instructors")
 @cache(expire=3600)
 def get_department_instructors(dept_code: str, db: Session = Depends(database.get_db)):
-    # Get all instructors who taught courses in this department
-    # and their most recent term
     results = db.query(
         models.Instructor.id,
         models.Instructor.full_name,
-        models.Course.term_id
-    ).join(models.Course).filter(models.Course.dept_kisaadi == dept_code).all()
+        func.max(models.Course.term_id).label("last_term"),
+        func.count(models.Course.id).label("course_count"),
+        func.count(func.distinct(models.Course.term_id)).label("total_semesters")
+    ).join(models.Course).filter(models.Course.dept_kisaadi == dept_code).group_by(
+        models.Instructor.id, models.Instructor.full_name
+    ).order_by(func.max(models.Course.term_id).desc()).all()
     
-    instructor_map = {}
-    for r in results:
-        if r.id not in instructor_map:
-            instructor_map[r.id] = {
-                "id": r.id,
-                "full_name": r.full_name,
-                "last_term": r.term_id,
-                "course_count": 0,
-                "terms": set()
-            }
-        
-        # Update last_term if this one is more recent (alphabetical sort works for term IDs like 2024/2025-1)
-        if r.term_id > instructor_map[r.id]["last_term"]:
-            instructor_map[r.id]["last_term"] = r.term_id
-            
-        instructor_map[r.id]["course_count"] += 1
-        instructor_map[r.id]["terms"].add(r.term_id)
-        
-    # Convert to list and calculate total unique semesters taught
-    final_results = []
-    for iid in instructor_map:
-        data = instructor_map[iid]
-        data["total_semesters"] = len(data["terms"])
-        del data["terms"] # Don't need the full set in the response
-        final_results.append(data)
-        
-    # Default sort by last_term desc
-    return sorted(final_results, key=lambda x: x['last_term'], reverse=True)
+    return [
+        {
+            "id": r.id,
+            "full_name": r.full_name,
+            "last_term": r.last_term,
+            "course_count": r.course_count,
+            "total_semesters": r.total_semesters
+        }
+        for r in results
+    ]
 
 @app.get("/v1/courses/history/{course_code}")
 @cache(expire=3600)
 def get_course_history(course_code: str, db: Session = Depends(database.get_db)):
-    # Normalize input
-    clean_code = course_code.strip()
+    clean_code = " ".join(course_code.strip().split())
+    if not clean_code:
+        raise HTTPException(status_code=404, detail="Course history not found")
     
-    # Get all instances of this course code across all terms
-    # We use ILIKE for case-insensitive matching, and eager-load relationships to avoid N+1 queries
     courses = db.query(models.Course).options(
         joinedload(models.Course.instructor),
         joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
-    ).filter(models.Course.course_code.ilike(clean_code)).all()
+    ).filter(
+        func.upper(models.Course.course_code) == clean_code.upper()
+    ).limit(300).all()
     
     if not courses:
-        # Try without spaces as a fallback
-        no_spaces = clean_code.replace(" ", "")
+        no_spaces = clean_code.replace(" ", "").upper()
         courses = db.query(models.Course).options(
             joinedload(models.Course.instructor),
             joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
         ).filter(
-            func.replace(models.Course.course_code, ' ', '').ilike(no_spaces)
-        ).all()
+            func.upper(func.replace(models.Course.course_code, ' ', '')) == no_spaces
+        ).limit(300).all()
         
     if not courses:
         raise HTTPException(status_code=404, detail="Course history not found")
@@ -468,7 +458,80 @@ def get_course_history(course_code: str, db: Session = Depends(database.get_db))
             } for s in c.slots]
         })
         
-    # Sort by term (desc) and section (asc), while tolerating nullable sections.
     result.sort(key=lambda x: x['section'] or '')
     result.sort(key=lambda x: x['term_id'], reverse=True)
     return result
+
+@app.get("/v1/courses/{course_code}/quota", response_model=List[schemas.QuotaSnapshot])
+@cache(expire=60)
+def get_course_quota(
+    course_code: str,
+    term: Optional[str] = Query(None),
+    history: bool = Query(False),
+    db: Session = Depends(database.get_db)
+):
+    clean_code = " ".join(course_code.strip().split())
+    if not clean_code:
+        return []
+
+    target_term = term
+    if not target_term:
+        latest_term = db.query(models.QuotaSnapshot.term_id).filter(
+            func.upper(models.QuotaSnapshot.course_code) == clean_code.upper()
+        ).order_by(models.QuotaSnapshot.term_id.desc()).first()
+        if latest_term:
+            target_term = latest_term[0]
+
+    query = db.query(models.QuotaSnapshot).filter(
+        func.upper(models.QuotaSnapshot.course_code) == clean_code.upper()
+    )
+    if target_term:
+        query = query.filter(models.QuotaSnapshot.term_id == target_term)
+
+    if history:
+        snapshots = query.order_by(
+            models.QuotaSnapshot.captured_at.desc()
+        ).limit(200).all()
+        return snapshots
+
+    try:
+        snapshots = query.distinct(
+            models.QuotaSnapshot.section,
+            models.QuotaSnapshot.department
+        ).order_by(
+            models.QuotaSnapshot.section,
+            models.QuotaSnapshot.department,
+            models.QuotaSnapshot.captured_at.desc()
+        ).all()
+    except Exception:
+        all_snaps = query.order_by(models.QuotaSnapshot.captured_at.desc()).limit(1000).all()
+        seen = set()
+        snapshots = []
+        for s in all_snaps:
+            k = (s.section, s.department)
+            if k not in seen:
+                seen.add(k)
+                snapshots.append(s)
+
+    snapshots.sort(key=lambda x: (x.section or '', x.department or ''))
+    return snapshots
+
+@app.get("/v1/courses/{course_code}/changes", response_model=List[schemas.CourseChange])
+@cache(expire=60)
+def get_course_changes(
+    course_code: str,
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(database.get_db)
+):
+    clean_code = " ".join(course_code.strip().split())
+    if not clean_code:
+        return []
+
+    changes = db.query(models.CourseChange).filter(
+        func.upper(models.CourseChange.course_code) == clean_code.upper()
+    ).order_by(
+        models.CourseChange.timestamp.desc()
+    ).limit(limit).all()
+
+    return changes
+

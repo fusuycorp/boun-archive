@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey, func, Index
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -31,6 +31,9 @@ class Room(Base):
 
 class Course(Base):
     __tablename__ = "courses"
+    __table_args__ = (
+        Index("idx_courses_lookup", "term_id", "course_code", "section"),
+    )
     id = Column(Integer, primary_key=True, index=True)
     term_id = Column(String(15), ForeignKey("terms.id"), index=True)
     dept_kisaadi = Column(String(10), ForeignKey("departments.kisaadi"), index=True)
@@ -62,4 +65,47 @@ class CourseSlot(Base):
     @property
     def room_name(self) -> str:
         return self.room.name if self.room else "N/A"
+
+class QuotaSnapshot(Base):
+    __tablename__ = "quota_snapshots"
+    __table_args__ = (
+        Index("idx_quota_code_term_captured", "course_code", "term_id", "captured_at"),
+    )
+    id = Column(Integer, primary_key=True, index=True)
+    term_id = Column(String(15), ForeignKey("terms.id"), index=True)
+    course_code = Column(String(20), nullable=False, index=True)
+    section = Column(String(5))
+    department = Column(String(100))
+    status = Column(String(50))
+    quota = Column(String(20))
+    current = Column(String(20))
+    quota_numeric = Column(Integer, nullable=True)
+    current_numeric = Column(Integer, nullable=True)
+    is_consent = Column(Boolean, default=False)
+    is_unlimited = Column(Boolean, default=False)
+    available = Column(Integer, nullable=True)
+    captured_at = Column(String(50), nullable=False, index=True)
+
+class CourseChange(Base):
+    __tablename__ = "course_changes"
+    __table_args__ = (
+        Index("idx_changes_code_timestamp", "course_code", "timestamp"),
+    )
+    id = Column(Integer, primary_key=True, index=True)
+    change_type = Column(String(20), nullable=False, index=True)
+    term_id = Column(String(15), nullable=False, index=True)
+    dept_kisaadi = Column(String(10), index=True)
+    course_code = Column(String(20), nullable=False, index=True)
+    section = Column(String(5))
+    timestamp = Column(String(50), nullable=False, index=True)
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
+    details = Column(String(255), nullable=True)
+
+class SyncState(Base):
+    __tablename__ = "sync_state"
+    feed_name = Column(String(50), primary_key=True)
+    last_cursor = Column(String(100), nullable=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
 

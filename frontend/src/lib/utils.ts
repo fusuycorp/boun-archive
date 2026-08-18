@@ -16,9 +16,12 @@ export function exportToCSV(data: any[], filename: string) {
     // Data rows
     ...data.map(row => 
       headers.map(header => {
-        const val = row[header];
-        // Handle values that contain commas by wrapping in quotes
-        const escaped = ('' + val).replace(/"/g, '""');
+        let val = ('' + (row[header] ?? ''));
+        // Neutralize CSV formula injection characters
+        if (/^[=+\-@\t\r]/.test(val)) {
+          val = "'" + val;
+        }
+        const escaped = val.replace(/"/g, '""');
         return `"${escaped}"`;
       }).join(',')
     )

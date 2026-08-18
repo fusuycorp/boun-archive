@@ -1,32 +1,51 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { page } from "$app/state";
-  import { Calendar, User, Clock, MapPin, Hash, BookOpen, ChevronRight, Info } from "lucide-svelte";
+  import { Calendar, User, Clock, MapPin, Hash, BookOpen, Info, Users, History, Activity } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import type { QuotaSnapshot, CourseChange, CourseHistoryItem } from "$lib/types";
 
   let courseCode = $derived(page.params.code);
-  let history = $state<any[]>([]);
+  let history = $state<CourseHistoryItem[]>([]);
+  let quotas = $state<QuotaSnapshot[]>([]);
+  let changes = $state<CourseChange[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
 
-  async function fetchHistory() {
-    if (!courseCode) return;
+  async function fetchCourseData(targetCode?: string) {
+    const code = targetCode || courseCode;
+    if (!code) return;
     
     loading = true;
     error = null;
     try {
-      // Use encodeURIComponent to handle spaces and special characters safely
-      const encodedCode = encodeURIComponent(courseCode.trim());
-      const res = await fetch(`${API_BASE}/v1/courses/history/${encodedCode}`);
+      const encodedCode = encodeURIComponent(code.trim());
       
-      if (!res.ok) {
-        if (res.status === 404) {
-          throw new Error("Course history not found");
-        }
+      const [histRes, quotaRes, changeRes] = await Promise.allSettled([
+        fetch(`${API_BASE}/v1/courses/history/${encodedCode}`),
+        fetch(`${API_BASE}/v1/courses/${encodedCode}/quota`),
+        fetch(`${API_BASE}/v1/courses/${encodedCode}/changes?limit=20`)
+      ]);
+
+      if (histRes.status === "fulfilled" && histRes.value.ok) {
+        history = await histRes.value.json();
+      } else if (histRes.status === "fulfilled" && histRes.value.status === 404) {
+        throw new Error("Course history not found");
+      } else {
         throw new Error("Failed to fetch course history");
       }
-      
-      history = await res.json();
+
+      if (quotaRes.status === "fulfilled" && quotaRes.value.ok) {
+        quotas = await quotaRes.value.json();
+      } else {
+        quotas = [];
+      }
+
+      if (changeRes.status === "fulfilled" && changeRes.value.ok) {
+        changes = await changeRes.value.json();
+      } else {
+        changes = [];
+      }
+
     } catch (e: any) {
       error = e.message;
     } finally {
@@ -34,11 +53,16 @@
     }
   }
 
-  onMount(fetchHistory);
+  // Reactively re-fetch when courseCode changes (including on client-side routing)
+  $effect(() => {
+    if (courseCode) {
+      fetchCourseData(courseCode);
+    }
+  });
 
   // Group by term
   const groupedHistory = $derived(
-    history.reduce((acc: any, curr: any) => {
+    history.reduce((acc: Record<string, CourseHistoryItem[]>, curr) => {
       if (!acc[curr.term_id]) acc[curr.term_id] = [];
       acc[curr.term_id].push(curr);
       return acc;
@@ -63,7 +87,7 @@
       <p class="text-slate-500 dark:text-slate-400 mt-2 max-w-sm">We couldn't find any historical data for the course code "{courseCode}".</p>
       <div class="flex space-x-4 mt-8">
         <a href="/search" class="px-8 py-3 bg-indigo-600 text-white rounded-2xl font-bold shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-colors">Back to Search</a>
-        <button onclick={fetchHistory} class="px-8 py-3 bg-white border border-slate-200 text-slate-600 rounded-2xl font-bold hover:bg-slate-50 transition-colors">Retry</button>
+        <button onclick={() => fetchCourseData()} class="px-8 py-3 bg-white border border-slate-200 text-slate-600 rounded-2xl font-bold hover:bg-slate-50 transition-colors">Retry</button>
       </div>
     </div>
   {:else}
@@ -93,6 +117,104 @@
         </div>
       </div>
     </header>
+
+    <!-- Live Quota Section (if available) -->
+    {#if quotas.length > 0}
+      <section class="bg-gradient-to-br from-indigo-50/50 to-white dark:from-slate-900 dark:to-slate-900/60 rounded-3xl border border-indigo-100 dark:border-indigo-950 p-8 shadow-sm space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-center space-x-3">
+            <span class="p-2 bg-indigo-600 text-white rounded-xl shadow-md shadow-indigo-200 dark:shadow-none">
+              <Users size={18} />
+            </span>
+            <div>
+              <h2 class="text-lg font-black text-slate-800 dark:text-slate-100 tracking-tight">Live Term Quotas</h2>
+              <p class="text-xs text-slate-500 dark:text-slate-400">Current registration portal snapshot for {quotas[0].term_id}</p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-2 text-xs font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 px-3 py-1.5 rounded-full w-fit">
+            <Activity size={14} class="animate-pulse" />
+            <span>Updated {quotas[0].captured_at}</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {#each quotas as q}
+            <div class="bg-white dark:bg-slate-950/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-5 space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-black rounded-lg">
+                  Sec {q.section || '01'}
+                </span>
+                <span class="text-xs font-bold px-2 py-0.5 rounded-full {q.status === 'Open' || (q.available ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'}">
+                  {q.status || (q.available && q.available > 0 ? 'Open' : 'Full')}
+                </span>
+              </div>
+
+              {#if q.department}
+                <p class="text-xs text-slate-500 dark:text-slate-400 font-medium">Department: <span class="font-bold text-slate-700 dark:text-slate-300">{q.department}</span></p>
+              {/if}
+
+              <div class="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/80 text-center">
+                <div class="p-2 bg-slate-50 dark:bg-slate-900 rounded-xl">
+                  <span class="block text-[10px] uppercase font-bold text-slate-400">Quota</span>
+                  <span class="text-sm font-black text-slate-800 dark:text-slate-200">{q.quota ?? '—'}</span>
+                </div>
+                <div class="p-2 bg-slate-50 dark:bg-slate-900 rounded-xl">
+                  <span class="block text-[10px] uppercase font-bold text-slate-400">Current</span>
+                  <span class="text-sm font-black text-slate-800 dark:text-slate-200">{q.current ?? '—'}</span>
+                </div>
+                <div class="p-2 bg-slate-50 dark:bg-slate-900 rounded-xl">
+                  <span class="block text-[10px] uppercase font-bold text-slate-400">Available</span>
+                  <span class="text-sm font-black {q.available && q.available > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}">
+                    {q.available ?? '0'}
+                  </span>
+                </div>
+              </div>
+
+              {#if q.is_consent || q.is_unlimited}
+                <div class="flex flex-wrap gap-1.5 pt-1">
+                  {#if q.is_consent}
+                    <span class="text-[10px] font-bold px-2 py-0.5 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 rounded-md">Consent Required</span>
+                  {/if}
+                  {#if q.is_unlimited}
+                    <span class="text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 rounded-md">Unlimited</span>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    <!-- Recent Schedule Changes (if available) -->
+    {#if changes.length > 0}
+      <section class="bg-white rounded-3xl border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-8 shadow-sm space-y-4">
+        <div class="flex items-center space-x-3">
+          <span class="p-2 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-xl">
+            <History size={18} />
+          </span>
+          <h2 class="text-lg font-black text-slate-800 dark:text-slate-100 tracking-tight">Recent Schedule Changes</h2>
+        </div>
+
+        <div class="space-y-3">
+          {#each changes as ch}
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 dark:bg-slate-950/50 rounded-2xl border border-slate-100 dark:border-slate-800 gap-2">
+              <div class="flex items-center space-x-3">
+                <span class="px-2 py-0.5 text-xs font-black uppercase rounded {ch.change_type === 'added' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : ch.change_type === 'modified' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'}">
+                  {ch.change_type}
+                </span>
+                <span class="text-xs font-bold text-slate-700 dark:text-slate-200">
+                  Section {ch.section || 'All'} · {ch.details || 'Course updated'}
+                </span>
+              </div>
+              <span class="text-[11px] text-slate-400 dark:text-slate-500 font-mono">
+                {ch.timestamp}
+              </span>
+            </div>
+          {/each}
+        </div>
+      </section>
+    {/if}
 
     <!-- History Timeline -->
     <div class="space-y-12">
@@ -151,3 +273,4 @@
     </div>
   {/if}
 </div>
+
