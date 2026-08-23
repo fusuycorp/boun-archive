@@ -98,6 +98,27 @@ services:
       - backend_net
     restart: "no"
 
+  sync_worker:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    command: ["python", "scripts/sync_from_scraper.py", "--mode", "incremental", "--daemon", "--daemon-interval", "60"]
+    restart: always
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MEILI_URL: ${MEILI_URL}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      REDIS_URL: ${REDIS_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend_net
+
   backend:
     build:
       context: .
