@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import argparse
 import urllib.request
 import urllib.parse
@@ -603,6 +604,8 @@ def main():
     parser.add_argument("--limit", type=int, default=500, help="Batch limit per polling request")
     parser.add_argument("--dry-run", action="store_true", help="Perform dry run without committing database changes")
     parser.add_argument("--scraper-url", type=str, default=None, help="Base URL for scraper API")
+    parser.add_argument("--daemon", action="store_true", help="Run continuously in the background")
+    parser.add_argument("--daemon-interval", type=int, default=60, help="Sleep interval in seconds for daemon mode")
     args = parser.parse_args()
 
     pg_url = os.getenv("DATABASE_URL")
@@ -629,15 +632,23 @@ def main():
             logger.warning("Could not connect to Meilisearch: %s. Proceeding with DB sync only.", e)
 
     try:
-        if args.mode == "backfill":
-            backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
-        elif args.mode == "full":
-            backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
-            sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
-            sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
-        else:
-            sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
-            sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+        while True:
+            if args.mode == "backfill":
+                backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
+            elif args.mode == "full":
+                backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
+                sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
+                sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+            else:
+                sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
+                sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+                
+            if not args.daemon:
+                break
+                
+            logger.info("Daemon sleep for %d seconds...", args.daemon_interval)
+            time.sleep(args.daemon_interval)
+            
     except Exception as e:
         session.rollback()
         logger.error("Sync run failed with error: %s", e)
