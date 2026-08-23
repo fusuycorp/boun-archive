@@ -253,10 +253,10 @@
         <div class="p-5 space-y-8 max-h-[calc(100vh-200px)] overflow-y-auto custom-scrollbar">
           <!-- Term Filter -->
           <div class="space-y-3">
-            <label class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center justify-between">
+            <div class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center justify-between">
               <span>Academic Term</span>
               <span class="text-indigo-500 dark:text-indigo-400">{selectedTerms.length || ''}</span>
-            </label>
+            </div>
             <div class="space-y-1 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
               {#if globalFacets.term}
                 {#each Object.keys(globalFacets.term).sort().reverse() as term}
@@ -289,10 +289,10 @@
 
           <!-- Department Filter -->
           <div class="space-y-3">
-            <label class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center justify-between">
+            <div class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center justify-between">
               <span>Department</span>
               <span class="text-indigo-500 dark:text-indigo-400">{selectedDepts.length || ''}</span>
-            </label>
+            </div>
             
             <div class="relative">
               <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} />

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Calendar, Layers, Map, ChevronLeft, ChevronRight, Search, Filter, Check, X, Download } from "lucide-svelte";
+  import { Search, Filter, Check, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { exportToCSV } from "$lib/utils";
 
@@ -18,6 +18,8 @@
   // Grouped data for visualization
   let activeDay = $state("M");
   let filteredSchedule = $derived(scheduleData.filter(s => s.day_code === activeDay));
+  let slotMap = $derived(new Map(filteredSchedule.map(s => [`${s.room_name}|${s.slot_hour}`, s])));
+  let uniqueRooms = $derived(Array.from(new Set(filteredSchedule.map(s => s.room_name))).sort());
 
   const filteredDepts = $derived(
     globalFacets.dept_code 
@@ -108,8 +110,9 @@
   <!-- Control Bar -->
   <div class="flex flex-wrap items-center gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm dark:bg-slate-900 dark:border-slate-800">
     <div class="flex flex-col space-y-1">
-      <label class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Academic Term</label>
+      <label for="ghost-term-select" class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Academic Term</label>
       <select 
+        id="ghost-term-select"
         bind:value={selectedTerm} 
         onchange={fetchSchedule}
         class="min-w-[200px] p-2 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all dark:bg-slate-950 dark:border-slate-800 dark:text-slate-200"
@@ -123,7 +126,7 @@
     <div class="h-10 w-px bg-slate-100 dark:bg-slate-800 mx-2 hidden md:block"></div>
 
     <div class="flex flex-col space-y-1">
-      <label class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Active Day</label>
+      <span class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Active Day</span>
       <div class="flex bg-slate-50 p-1 rounded-xl border border-slate-100 dark:bg-slate-950 dark:border-slate-800">
         {#each days as day}
           <button 
@@ -142,7 +145,7 @@
     <div class="h-10 w-px bg-slate-100 dark:bg-slate-800 mx-2 hidden md:block"></div>
 
     <div class="flex flex-col space-y-1 relative">
-      <label class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Department Filter</label>
+      <span class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Department Filter</span>
       
       <!-- Custom Searchable Multi-select -->
       <div class="relative">
@@ -239,12 +242,12 @@
             </tr>
           </thead>
           <tbody>
-            <!-- We'll show all rooms in the matrix -->
-            {#each Array.from(new Set(filteredSchedule.map(s => s.room_name))).sort() as room}
+            <!-- Show all rooms in the matrix -->
+            {#each uniqueRooms as room}
               <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors dark:border-slate-800/60 dark:hover:bg-slate-850/30">
                 <td class="p-4 text-sm font-bold text-slate-700 dark:text-slate-300 border-r border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20">{room}</td>
                 {#each hours as hour}
-                  {@const slot = filteredSchedule.find(s => s.room_name === room && s.slot_hour === hour)}
+                  {@const slot = slotMap.get(`${room}|${hour}`)}
                   <td class="p-1 text-center h-16">
                     {#if slot}
                       <div class="h-full w-full bg-indigo-100 border border-indigo-200 rounded p-1 flex flex-col justify-center items-center shadow-sm dark:bg-indigo-950/40 dark:border-indigo-900/50">

@@ -7,7 +7,6 @@
     Search, 
     History, 
     LayoutGrid, 
-    TrendingUp, 
     User, 
     CalendarDays, 
     BookOpen,
@@ -29,7 +28,6 @@
     { href: "/departments", label: "Departments", icon: BookOpen },
     { href: "/calendar", label: "Weekly Planner", icon: CalendarDays },
     { href: "/ghost-schedule", label: "Ghost Schedule", icon: History },
-    { href: "/trends", label: "Trends", icon: TrendingUp },
     { href: "/instructors", label: "Instructors", icon: User },
   ];
 

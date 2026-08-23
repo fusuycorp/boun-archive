@@ -16,7 +16,7 @@ from fastapi_cache.backends.redis import RedisBackend
 from fastapi_cache.decorator import cache
 
 from . import models, schemas, database
-from .analytics import TrendEngine, MacroEngine
+from .analytics import MacroEngine
 
 ALLOWED_SORTS = {"term", "course_code", "title", "instructor", "credits", "ects"}
 
@@ -199,71 +199,10 @@ def get_ghost_schedule(
 def get_dept_evolution(db: Session = Depends(database.get_db)):
     return MacroEngine.get_department_evolution(db)
 
-@app.get("/v1/analytics/macro/delivery-evolution")
-@cache(expire=86400)
-def get_delivery_evolution(db: Session = Depends(database.get_db)):
-    return MacroEngine.get_delivery_evolution(db)
-
 @app.get("/v1/analytics/macro/scheduling-heatmap")
 @cache(expire=86400)
 def get_heatmap(decade: Optional[int] = Query(None), db: Session = Depends(database.get_db)):
     return MacroEngine.get_scheduling_heatmap(db, decade)
-
-@app.get("/v1/analytics/macro/course-lifecycles")
-@cache(expire=86400)
-def get_lifecycles(
-    extinct_threshold: int = Query(10, description="Not offered in N years"),
-    new_threshold: int = Query(2, description="First offered in last M years"),
-    db: Session = Depends(database.get_db)
-):
-    return MacroEngine.get_course_lifecycles(db, extinct_threshold, new_threshold)
-
-@app.get("/v1/analytics/macro/campus-distribution")
-@cache(expire=86400)
-def get_campus_distribution(
-    lookback_years: Optional[int] = Query(None, description="Lookback window in years"),
-    db: Session = Depends(database.get_db)
-):
-    return MacroEngine.get_campus_distribution(db, lookback_years)
-
-@app.get("/v1/analytics/macro/semantic-shift")
-@cache(expire=86400)
-def get_semantic_shift(
-    interval_years: int = Query(10, ge=1, le=100, description="Grouping interval in years"),
-    db: Session = Depends(database.get_db)
-):
-    return MacroEngine.get_semantic_shift(db, interval_years)
-
-@app.get("/v1/predict/course/{course_code}")
-@cache(expire=3600)
-def predict_course(course_code: str, db: Session = Depends(database.get_db)):
-    # Query only the relevant history
-    history = db.query(models.Course).filter(models.Course.course_code == course_code).all()
-    if not history:
-        raise HTTPException(status_code=404, detail="Course not found")
-    
-    course_ids = [c.id for c in history]
-    slots = db.query(models.CourseSlot, models.Course.term_id).join(models.Course).filter(models.CourseSlot.course_id.in_(course_ids)).all()
-    
-    c_list = [{
-        'id': c.id, 
-        'course_code': c.course_code, 
-        'term': c.term_id
-    } for c in history]
-    
-    s_list = [{
-        'course_id': s.CourseSlot.course_id,
-        'day': s.CourseSlot.day_code,
-        'hour': s.CourseSlot.slot_hour,
-        'term': s.term_id
-    } for s in slots]
-    
-    engine = TrendEngine(c_list, s_list)
-    return {
-        "course_code": course_code,
-        "offering_probability": engine.predict_offering(course_code),
-        "predicted_slots": engine.predict_slots(course_code)
-    }
 
 @app.get("/v1/courses/{course_id}", response_model=schemas.Course)
 @cache(expire=3600)
@@ -363,31 +302,29 @@ def get_departments(db: Session = Depends(database.get_db)):
 @app.get("/v1/departments/{dept_code}/unique-courses")
 @cache(expire=3600)
 def get_department_unique_courses(dept_code: str, db: Session = Depends(database.get_db)):
-    # Get all unique courses for this department and the terms they were offered in
+    # Query distinct course_code, title, term_id to minimize row transfer and in-memory deduplication
     courses = db.query(
         models.Course.course_code,
         models.Course.title,
         models.Course.term_id
-    ).filter(models.Course.dept_kisaadi == dept_code).all()
+    ).filter(
+        models.Course.dept_kisaadi == dept_code
+    ).distinct().order_by(
+        models.Course.course_code,
+        models.Course.term_id.desc()
+    ).all()
     
     unique_courses = {}
-    for c in courses:
-        if c.course_code not in unique_courses:
-            unique_courses[c.course_code] = {
-                "course_code": c.course_code,
-                "title": c.title,
-                "terms": set()
+    for code, title, term_id in courses:
+        if code not in unique_courses:
+            unique_courses[code] = {
+                "course_code": code,
+                "title": title or "",
+                "terms": []
             }
-        unique_courses[c.course_code]["terms"].add(c.term_id)
+        unique_courses[code]["terms"].append(term_id)
         
-    # Convert sets to sorted lists for JSON
-    result = []
-    for code in sorted(unique_courses.keys()):
-        course_data = unique_courses[code]
-        course_data["terms"] = sorted(list(course_data["terms"]), reverse=True)
-        result.append(course_data)
-        
-    return result
+    return [unique_courses[code] for code in sorted(unique_courses.keys())]
 
 @app.get("/v1/departments/{dept_code}/instructors")
 @cache(expire=3600)

@@ -65,15 +65,6 @@ export interface SearchResponse {
   processingTimeMs?: number;
 }
 
-export interface CommuteWarning {
-  fromSlot: string;
-  toSlot: string;
-  fromCampus: string;
-  toCampus: string;
-  riskLevel: 'Impossible' | 'High' | 'Moderate' | 'Low';
-  message: string;
-}
-
 export interface QuotaSnapshot {
   id: number;
   term_id: string;
