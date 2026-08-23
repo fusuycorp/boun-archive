@@ -118,6 +118,7 @@ services:
         condition: service_healthy
     networks:
       - backend_net
+      - frontend_net
 
   backend:
     build:
