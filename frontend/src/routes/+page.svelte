@@ -111,28 +111,28 @@
   ]);
 </script>
 
-<div class="space-y-8">
-  <div class="flex items-end justify-between">
+<div class="space-y-6 sm:space-y-8">
+  <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
     <div>
-      <h2 class="text-3xl font-bold text-slate-800 dark:text-slate-100">University Overview</h2>
-      <p class="text-slate-500 mt-2 dark:text-slate-400">Historical trends and global university metrics.</p>
+      <h2 class="text-2xl sm:text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tight">University Overview</h2>
+      <p class="text-xs sm:text-sm text-slate-500 mt-1 sm:mt-2 dark:text-slate-400">Historical trends and global university metrics across 50 years.</p>
     </div>
   </div>
 
   <!-- Stats Grid -->
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
     {#each statsList as stat}
-      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm transition-all duration-200 dark:bg-slate-900 dark:border-slate-800 hover:shadow-md flex items-center justify-between">
-        <div class="space-y-2">
-          <p class="text-xs text-slate-400 font-bold uppercase tracking-wider dark:text-slate-500">{stat.label}</p>
+      <div class="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-xs transition-all duration-200 dark:bg-slate-900 dark:border-slate-800 hover:shadow-md flex items-center justify-between">
+        <div class="space-y-1 sm:space-y-2">
+          <p class="text-[10px] sm:text-xs text-slate-400 font-bold uppercase tracking-wider dark:text-slate-500">{stat.label}</p>
           {#if loadingStats}
-            <div class="h-8 w-24 bg-slate-100 animate-pulse rounded dark:bg-slate-800"></div>
+            <div class="h-7 sm:h-8 w-20 sm:w-24 bg-slate-100 animate-pulse rounded dark:bg-slate-800"></div>
           {:else}
-            <h3 class="text-2xl font-black text-slate-900 dark:text-white leading-none">{stat.value}</h3>
+            <h3 class="text-xl sm:text-2xl font-black text-slate-900 dark:text-white leading-none">{stat.value}</h3>
           {/if}
         </div>
-        <div class="p-4 rounded-xl {stat.color}">
-          <stat.icon size={24} />
+        <div class="p-3 sm:p-4 rounded-xl {stat.color} shrink-0">
+          <stat.icon size={22} />
         </div>
       </div>
     {/each}
@@ -141,20 +141,20 @@
   <!-- Charts Grid -->
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <!-- Department Evolution Line Chart -->
-    <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col dark:bg-slate-900 dark:border-slate-800 animate-fade-in">
-      <div class="mb-6">
-        <h3 class="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-          <TrendingUp size={20} class="text-indigo-500" />
+    <div class="lg:col-span-2 bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col dark:bg-slate-900 dark:border-slate-800 animate-fade-in">
+      <div class="mb-4 sm:mb-6">
+        <h3 class="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+          <TrendingUp size={20} class="text-indigo-500 shrink-0" />
           <span>Department Growth (1970 - 2024)</span>
         </h3>
         <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Course offering frequencies for top departments over 50 years.</p>
       </div>
       
-      <div class="flex-1 min-h-[300px] flex items-center justify-center">
+      <div class="flex-1 min-h-[260px] sm:min-h-[300px] flex items-center justify-center">
         {#if loadingChart}
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 dark:border-indigo-500"></div>
         {:else}
-          <div class="w-full h-full min-h-[300px]">
+          <div class="w-full h-full min-h-[260px] sm:min-h-[300px]">
             {#if evolutionChartData}
               <Line 
                 data={evolutionChartData} 
@@ -177,10 +177,10 @@
     </div>
     
     <!-- Scheduling Heatmap -->
-    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col dark:bg-slate-900 dark:border-slate-800">
-      <div class="mb-6">
-        <h3 class="text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-          <LayoutGrid size={20} class="text-indigo-500" />
+    <div class="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col dark:bg-slate-900 dark:border-slate-800">
+      <div class="mb-4 sm:mb-6">
+        <h3 class="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+          <LayoutGrid size={20} class="text-indigo-500 shrink-0" />
           <span>Global Campus Activity</span>
         </h3>
         <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Heatmap of peak scheduling hours across all time.</p>
@@ -193,23 +193,23 @@
           </div>
         {:else}
           <div class="overflow-x-auto no-scrollbar">
-            <table class="w-full border-separate border-spacing-[3px]">
+            <table class="w-full border-separate border-spacing-[2px] sm:border-spacing-[3px] min-w-[240px]">
               <thead>
                 <tr>
-                  <th class="w-8"></th>
+                  <th class="w-6 sm:w-8"></th>
                   {#each days as day}
-                    <th class="p-1 text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{day}</th>
+                    <th class="p-0.5 sm:p-1 text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">{day}</th>
                   {/each}
                 </tr>
               </thead>
               <tbody>
                 {#each hours as hour}
                   <tr>
-                    <td class="text-right pr-2 text-[8px] font-black text-slate-300 dark:text-slate-650 uppercase tracking-widest leading-none">{hour}</td>
+                    <td class="text-right pr-1 sm:pr-2 text-[8px] font-black text-slate-300 dark:text-slate-650 uppercase tracking-widest leading-none">{hour}</td>
                     {#each days as day}
                       {@const count = getSlotCount(day, hour)}
                       <td 
-                        class="h-5 rounded-md border border-slate-100/50 dark:border-slate-800/50 transition-all hover:ring-2 hover:ring-indigo-500 group relative cursor-help"
+                        class="h-4 sm:h-5 rounded-md border border-slate-100/50 dark:border-slate-800/50 transition-all hover:ring-2 hover:ring-indigo-500 group relative cursor-help"
                         style="background-color: {getHeatColor(count)}"
                       >
                          {#if count > 0}
