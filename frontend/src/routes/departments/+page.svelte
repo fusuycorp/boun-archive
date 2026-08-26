@@ -21,8 +21,14 @@
   let instructorSortDirection = $state<"asc" | "desc">("desc");
 
   async function fetchDepartments() {
-    const res = await fetch(`${API_BASE}/v1/departments`);
-    departments = await res.json();
+    try {
+      const res = await fetch(`${API_BASE}/v1/departments`);
+      if (res.ok) {
+        departments = await res.json();
+      }
+    } catch (e) {
+      console.error("Failed to fetch departments", e);
+    }
     
     // Restore state if available
     const savedDept = sessionStorage.getItem("dept_selected");

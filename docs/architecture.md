@@ -75,5 +75,7 @@ Tracks section capacity snapshots (`quota_snapshots`) and records audit logs of 
 | **Meilisearch Streaming** | Use `selectinload(Course.slots).joinedload(CourseSlot.room)` with `.yield_per(chunk_size)`. | Prevents SQLAlchemy `InvalidRequestError` while eliminating N+1 queries across 136k+ course instances. |
 | **Container Multi-Targeting** | Preserve `if [ "$#" -gt 0 ]; then exec "$@"; fi` in `backend/entrypoint.sh`. | Allows one-off migration and sync CLI executions without starting the full uvicorn web server. |
 | **SvelteKit Runtime Env** | Use `$env/dynamic/public` with default fallbacks instead of static env imports. | Enables container images to compile cleanly even if public env vars are omitted at build-time. |
+| **Client API Resolution** | Fallback to `/api` when `PUBLIC_API_URL` contains loopback/internal hosts on remote clients. | Prevents remote mobile devices and external clients from attempting to query device-local loopback ports. |
+| **Resilient Hydration** | Use `Promise.allSettled` and safe `res.ok` checks with baseline constants in client fetchers. | Prevents single-endpoint or Meilisearch warm-up failures from wiping out dashboard metrics to `0`. |
 | **Responsive Matrix Panes** | Keep sticky left columns for Room / Hour in timetable and ghost schedule matrices. | Ensures critical row identifiers remain legible while panning wide 14-hour grids on mobile screens. |
 

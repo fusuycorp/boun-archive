@@ -13,8 +13,14 @@
       instructors = [];
       return;
     }
-    const res = await fetch(`${API_BASE}/v1/instructors?q=${query}`);
-    instructors = await res.json();
+    try {
+      const res = await fetch(`${API_BASE}/v1/instructors?q=${encodeURIComponent(query)}`);
+      if (res.ok) {
+        instructors = await res.json();
+      }
+    } catch (e) {
+      console.error("Failed to search instructors", e);
+    }
   }
 
   function selectInstructor(id: number) {

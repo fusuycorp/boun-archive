@@ -21,21 +21,34 @@
   async function fetchStats() {
     loadingStats = true;
     try {
-      const [searchRes, termsRes, deptsRes] = await Promise.all([
+      const [searchRes, termsRes, deptsRes] = await Promise.allSettled([
         fetch(`${API_BASE}/v1/search?limit=0`),
         fetch(`${API_BASE}/v1/terms`),
         fetch(`${API_BASE}/v1/departments`)
       ]);
       
-      const searchData = await searchRes.json();
-      const termsData = await termsRes.json();
-      const deptsData = await deptsRes.json();
-      
-      totalCourses = searchData.totalHits ?? searchData.estimatedTotalHits ?? 136939;
-      totalTerms = termsData.length || 50;
-      totalDepts = deptsData.length || 72;
+      let searchData: any = null;
+      let termsData: any[] = [];
+      let deptsData: any[] = [];
+
+      if (searchRes.status === "fulfilled" && searchRes.value.ok) {
+        searchData = await searchRes.value.json();
+      }
+      if (termsRes.status === "fulfilled" && termsRes.value.ok) {
+        termsData = await termsRes.value.json();
+      }
+      if (deptsRes.status === "fulfilled" && deptsRes.value.ok) {
+        deptsData = await deptsRes.value.json();
+      }
+
+      totalCourses = searchData?.totalHits ?? searchData?.estimatedTotalHits ?? (totalCourses || 136939);
+      totalTerms = Array.isArray(termsData) && termsData.length > 0 ? termsData.length : (totalTerms || 50);
+      totalDepts = Array.isArray(deptsData) && deptsData.length > 0 ? deptsData.length : (totalDepts || 72);
     } catch (e) {
       console.error("Failed to fetch dashboard stats", e);
+      totalCourses = totalCourses || 136939;
+      totalTerms = totalTerms || 50;
+      totalDepts = totalDepts || 72;
     } finally {
       loadingStats = false;
     }
@@ -45,7 +58,9 @@
     loadingChart = true;
     try {
       const res = await fetch(`${API_BASE}/v1/analytics/macro/departments-evolution`);
-      evolutionData = await res.json();
+      if (res.ok) {
+        evolutionData = await res.json();
+      }
     } catch (e) {
       console.error("Failed to fetch evolution data", e);
     } finally {
@@ -57,7 +72,9 @@
     loadingHeatmap = true;
     try {
       const res = await fetch(`${API_BASE}/v1/analytics/macro/scheduling-heatmap`);
-      heatmapData = await res.json();
+      if (res.ok) {
+        heatmapData = await res.json();
+      }
     } catch (e) {
       console.error("Failed to fetch heatmap data", e);
     } finally {

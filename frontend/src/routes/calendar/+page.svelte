@@ -39,10 +39,16 @@
   });
 
   async function fetchTerms() {
-    const res = await fetch(`${API_BASE}/v1/terms`);
-    terms = await res.json();
-    if (terms.length > 0) {
-      selectedTerm = terms[0].id;
+    try {
+      const res = await fetch(`${API_BASE}/v1/terms`);
+      if (res.ok) {
+        terms = await res.json();
+        if (terms.length > 0 && !selectedTerm) {
+          selectedTerm = terms[0].id;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch terms", e);
     }
   }
 
@@ -56,8 +62,12 @@
         limit: "200"
       });
       const res = await fetch(`${API_BASE}/v1/search?${params.toString()}`);
-      const data = await res.json();
-      searchResults = data.hits;
+      if (res.ok) {
+        const data = await res.json();
+        searchResults = data.hits || [];
+      }
+    } catch (e) {
+      console.error("Search failed", e);
     } finally {
       loading = false;
     }

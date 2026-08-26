@@ -40,19 +40,23 @@
 
   async function fetchInitialData() {
     try {
-      const [termsRes, facetsRes] = await Promise.all([
+      const [termsRes, facetsRes] = await Promise.allSettled([
         fetch(`${API_BASE}/v1/terms`),
         fetch(`${API_BASE}/v1/facets`)
       ]);
-      terms = await termsRes.json();
-      globalFacets = await facetsRes.json();
+      if (termsRes.status === "fulfilled" && termsRes.value.ok) {
+        terms = await termsRes.value.json();
+      }
+      if (facetsRes.status === "fulfilled" && facetsRes.value.ok) {
+        globalFacets = await facetsRes.value.json();
+      }
       
-      if (terms.length > 0) {
+      if (terms.length > 0 && !selectedTerm) {
         selectedTerm = terms[0].id;
         fetchSchedule();
       }
     } catch (e) {
-      console.error(e);
+      console.error("Failed to load ghost schedule initial data", e);
     }
   }
 
@@ -64,9 +68,11 @@
       selectedDepts.forEach(d => params.append("dept", d));
       
       const res = await fetch(`${API_BASE}/v1/analytics/ghost-schedule/${selectedTerm}?${params.toString()}`);
-      scheduleData = await res.json();
+      if (res.ok) {
+        scheduleData = await res.json();
+      }
     } catch (e) {
-      console.error(e);
+      console.error("Failed to fetch ghost schedule", e);
     } finally {
       loading = false;
     }
