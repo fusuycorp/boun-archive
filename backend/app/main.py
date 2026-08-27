@@ -292,12 +292,14 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
 @app.get("/v1/terms", response_model=List[schemas.Term])
 @cache(expire=86400)
 def get_terms(db: Session = Depends(database.get_db)):
-    return db.query(models.Term).order_by(models.Term.id.desc()).all()
+    terms = db.query(models.Term).order_by(models.Term.id.desc()).all()
+    return [schemas.Term.model_validate(t).model_dump() for t in terms]
 
 @app.get("/v1/departments", response_model=List[schemas.Department])
 @cache(expire=86400)
 def get_departments(db: Session = Depends(database.get_db)):
-    return db.query(models.Department).order_by(models.Department.kisaadi).all()
+    depts = db.query(models.Department).order_by(models.Department.kisaadi).all()
+    return [schemas.Department.model_validate(d).model_dump() for d in depts]
 
 @app.get("/v1/departments/{dept_code}/unique-courses")
 @cache(expire=3600)
@@ -451,7 +453,7 @@ def get_course_quota(
                 snapshots.append(s)
 
     snapshots.sort(key=lambda x: (x.section or '', x.department or ''))
-    return snapshots
+    return [schemas.QuotaSnapshot.model_validate(s).model_dump() for s in snapshots]
 
 @app.get("/v1/courses/{course_code}/changes", response_model=List[schemas.CourseChange])
 @cache(expire=60)
@@ -470,5 +472,5 @@ def get_course_changes(
         models.CourseChange.timestamp.desc()
     ).limit(limit).all()
 
-    return changes
+    return [schemas.CourseChange.model_validate(c).model_dump() for c in changes]
 
