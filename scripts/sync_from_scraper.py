@@ -52,6 +52,13 @@ def normalize_code(code: Optional[str]) -> Optional[str]:
     return " ".join(str(code).split()).strip().upper()
 
 
+def normalize_section(section: Any) -> Optional[str]:
+    if section is None:
+        return None
+    sec_str = str(section).strip()
+    return sec_str if sec_str else None
+
+
 class StrictRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Prevent cross-domain redirects that could leak authorization headers."""
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -241,6 +248,7 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
         for item in data:
             term_id = item.get("term")
             course_code = normalize_code(item.get("course_code"))
+            section = normalize_section(item.get("section"))
             if not term_id or not course_code:
                 continue
 
@@ -250,7 +258,7 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
             snapshot = QuotaSnapshot(
                 term_id=term_id,
                 course_code=course_code,
-                section=item.get("section"),
+                section=section,
                 department=item.get("department"),
                 status=item.get("status"),
                 quota=str(item.get("quota")) if item.get("quota") is not None else None,
@@ -329,7 +337,7 @@ def sync_deltas_feed(
             term_id = item.get("term")
             dept_kisaadi = item.get("department")
             course_code = normalize_code(item.get("course_code"))
-            section = item.get("section")
+            section = normalize_section(item.get("section"))
             timestamp = item.get("timestamp") or ""
             old_val = item.get("old_value")
             new_val = item.get("new_value")
@@ -515,7 +523,7 @@ def backfill_term(
     for item in courses_raw:
         dept_kisaadi = item.get("department")
         course_code = normalize_code(item.get("course_code"))
-        section = item.get("section")
+        section = normalize_section(item.get("section"))
         title = item.get("course_name") or item.get("title")
         instructor_name = item.get("instructor")
         credits = clean_int(item.get("credits"))
@@ -596,6 +604,25 @@ def backfill_term(
     return len(touched_courses)
 
 
+def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) -> None:
+    session = session_factory()
+    try:
+        if args.mode == "backfill":
+            backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
+        elif args.mode == "full":
+            backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
+            sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
+            sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+        else:
+            sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
+            sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Ingest courses, deltas, and quota snapshots from boun-scrape")
     parser.add_argument("--mode", choices=["incremental", "backfill", "full"], default="incremental",
@@ -613,12 +640,10 @@ def main():
         logger.error("DATABASE_URL environment variable is required.")
         sys.exit(1)
 
-    engine = create_engine(pg_url)
+    engine = create_engine(pg_url, pool_pre_ping=True)
     Base.metadata.create_all(engine)
 
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
     client = ScraperClient(base_url=args.scraper_url)
 
     meili_index = None
@@ -631,30 +656,24 @@ def main():
         except Exception as e:
             logger.warning("Could not connect to Meilisearch: %s. Proceeding with DB sync only.", e)
 
-    try:
+    if args.daemon:
+        logger.info("Starting sync_worker daemon (interval: %ds, mode: %s)...", args.daemon_interval, args.mode)
+        consecutive_errors = 0
         while True:
-            if args.mode == "backfill":
-                backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
-            elif args.mode == "full":
-                backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
-                sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
-                sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
-            else:
-                sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
-                sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
-                
-            if not args.daemon:
-                break
-                
+            try:
+                run_sync_cycle(Session, client, meili_index, args)
+                consecutive_errors = 0
+            except Exception as e:
+                consecutive_errors += 1
+                sleep_time = min(args.daemon_interval * (2 ** min(consecutive_errors - 1, 4)), 300)
+                logger.warning("Transient sync cycle error (#%d): %s. Retrying in %ds...", consecutive_errors, e, sleep_time)
+                time.sleep(sleep_time)
+                continue
+
             logger.info("Daemon sleep for %d seconds...", args.daemon_interval)
             time.sleep(args.daemon_interval)
-            
-    except Exception as e:
-        session.rollback()
-        logger.error("Sync run failed with error: %s", e)
-        raise
-    finally:
-        session.close()
+    else:
+        run_sync_cycle(Session, client, meili_index, args)
 
 
 if __name__ == "__main__":

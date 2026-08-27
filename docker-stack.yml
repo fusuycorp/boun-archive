@@ -125,6 +125,32 @@ services:
           cpus: '2.0'
           memory: 2G
 
+  sync_worker:
+    image: ${BACKEND_IMAGE:-registry.bogazici.app/budok/boun-archive-backend:latest}
+    command: ["python", "scripts/sync_from_scraper.py", "--mode", "incremental", "--daemon", "--daemon-interval", "60"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://boun_user:boun_password@db:5432/boun_archive}
+      MEILI_URL: ${MEILI_URL:-http://meilisearch:7700}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    networks:
+      - backend_net
+      - frontend_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.labels.type == worky
+      resources:
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
   backend:
     image: ${BACKEND_IMAGE:-registry.bogazici.app/budok/boun-archive-backend:latest}
     environment:
