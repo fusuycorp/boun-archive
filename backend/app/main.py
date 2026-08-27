@@ -51,7 +51,7 @@ def custom_key_builder(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-    redis = aioredis.from_url(redis_url, encoding="utf8", decode_responses=True)
+    redis = aioredis.from_url(redis_url)
     FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache", key_builder=custom_key_builder)
     
     # Ensure Meilisearch 'courses' index exists with primary key 'id'
@@ -64,7 +64,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        await redis.aclose()
+        if hasattr(redis, "aclose"):
+            await redis.aclose()
+        elif hasattr(redis, "close"):
+            await redis.close()
 
 app = FastAPI(title="BOUN Archive API", lifespan=lifespan)
 
