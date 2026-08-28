@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 class TermBase(BaseModel):
     id: str
@@ -108,3 +108,12 @@ class SyncStateBase(BaseModel):
 class SyncState(SyncStateBase):
     class Config:
         from_attributes = True
+
+class FeedState(BaseModel):
+    last_cursor: Optional[str] = None
+    updated_at: Optional[str] = None
+
+class SystemStatusResponse(BaseModel):
+    status: str
+    latest_scrape_time: Optional[str] = None
+    feeds: Dict[str, FeedState] = {}

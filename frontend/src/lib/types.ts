@@ -114,4 +114,15 @@ export interface CourseHistoryItem {
   slots: CourseHistorySlot[];
 }
 
+export interface FeedState {
+  last_cursor?: string | null;
+  updated_at?: string | null;
+}
+
+export interface SystemStatus {
+  status: string;
+  latest_scrape_time?: string | null;
+  feeds?: Record<string, FeedState>;
+}
+
 

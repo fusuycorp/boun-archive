@@ -87,13 +87,30 @@
     myCourses = myCourses.filter(c => c.id !== id);
   }
 
-  // Conflict Logic
+  // Memoized Timetable Map
+  const scheduleMatrix = $derived.by(() => {
+    const map = new Map<string, any[]>();
+    for (const c of myCourses) {
+      if (!c.slots) continue;
+      for (const s of c.slots) {
+        const key = `${s.day_code}_${s.slot_hour}`;
+        const item = {
+          ...c,
+          slot_type: s.slot_title || "",
+          room_name: s.room_name || "N/A"
+        };
+        if (!map.has(key)) {
+          map.set(key, [item]);
+        } else {
+          map.get(key)!.push(item);
+        }
+      }
+    }
+    return map;
+  });
+
   function getCoursesAt(day: string, hour: number) {
-    return myCourses.flatMap(c => 
-      c.slots
-        .filter((s: any) => s.day_code === day && s.slot_hour === hour)
-        .map((s: any) => ({ ...c, slot_type: s.slot_title || "", room_name: s.room_name || "N/A" }))
-    );
+    return scheduleMatrix.get(`${day}_${hour}`) || [];
   }
 
   function isLabOrPS(slotType: string) {
@@ -125,7 +142,7 @@
         <select 
           id="semester-select"
           bind:value={selectedTerm} 
-          class="w-full sm:min-w-[180px] p-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200 shadow-xs cursor-pointer"
+          class="w-full sm:min-w-[180px] p-2 bg-white border border-slate-200/80 rounded-xl text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-[#0080c9] dark:bg-[#0f172a] dark:border-slate-800/80 dark:text-slate-200 shadow-2xs cursor-pointer"
         >
           {#each terms as term}
             <option value={term.id}>{term.id}</option>
@@ -141,7 +158,7 @@
       onclick={() => mobileTab = "schedule"}
       class="flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center space-x-2 cursor-pointer
       {mobileTab === 'schedule' 
-        ? 'bg-white text-indigo-600 shadow-xs dark:bg-slate-700 dark:text-white' 
+        ? 'bg-white text-[#002d72] shadow-2xs dark:bg-slate-700 dark:text-white' 
         : 'text-slate-600 dark:text-slate-400'}"
     >
       <Clock size={14} />
@@ -151,7 +168,7 @@
       onclick={() => mobileTab = "courses"}
       class="flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center space-x-2 cursor-pointer
       {mobileTab === 'courses' 
-        ? 'bg-white text-indigo-600 shadow-xs dark:bg-slate-700 dark:text-white' 
+        ? 'bg-white text-[#002d72] shadow-2xs dark:bg-slate-700 dark:text-white' 
         : 'text-slate-600 dark:text-slate-400'}"
     >
       <BookOpen size={14} />
@@ -164,7 +181,7 @@
     <!-- Left Sidebar: Search & List -->
     <aside class="w-full lg:w-80 flex flex-col space-y-4 shrink-0 overflow-y-auto pr-0 lg:pr-1 custom-scrollbar {mobileTab === 'courses' ? 'flex' : 'hidden lg:flex'}">
       <!-- Search Box -->
-      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3 dark:bg-slate-900 dark:border-slate-800">
+      <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs space-y-3 dark:bg-[#0f172a] dark:border-slate-800/80">
         <div class="relative">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
           <input 
@@ -172,7 +189,7 @@
             bind:value={searchQuery}
             oninput={handleInput}
             placeholder="Find a course to add..."
-            class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-950 dark:border-slate-800 dark:text-white"
+            class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200/80 rounded-xl text-xs sm:text-sm outline-none focus:ring-2 focus:ring-[#0080c9] focus:border-[#0080c9] dark:bg-slate-950 dark:border-slate-800 dark:text-white"
           />
         </div>
 
@@ -184,20 +201,20 @@
                 onclick={() => toggleCourse(course.id)}
                 class="w-full p-3 border rounded-xl text-left transition-all group cursor-pointer
                 {isAdded 
-                  ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-500/10 dark:bg-indigo-950/40 dark:border-indigo-900/50 dark:ring-indigo-500/20' 
-                  : 'bg-slate-50 border-slate-100 hover:bg-indigo-50 hover:border-indigo-200 dark:bg-slate-950 dark:border-slate-800 dark:hover:bg-indigo-950/20 dark:hover:border-indigo-900/40'}"
+                  ? 'bg-[#002d72]/10 border-[#002d72]/30 ring-2 ring-[#002d72]/10 dark:bg-sky-500/15 dark:border-sky-500/30 dark:ring-sky-500/20' 
+                  : 'bg-slate-50 border-slate-100 hover:bg-[#002d72]/5 hover:border-[#002d72]/20 dark:bg-slate-950 dark:border-slate-800 dark:hover:bg-sky-500/10'}"
               >
                 <div class="flex justify-between items-start">
                   <div class="flex items-center space-x-2">
-                    <span class="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase">{course.course_code}</span>
+                    <span class="text-xs font-black text-[#002d72] dark:text-sky-400 uppercase">{course.course_code}</span>
                     <span class="text-[10px] text-slate-400 dark:text-slate-500 font-bold">Sec {course.section}</span>
                   </div>
                   {#if isAdded}
-                    <div class="w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center text-white shadow-xs">
+                    <div class="w-5 h-5 bg-[#002d72] dark:bg-sky-500 rounded-full flex items-center justify-center text-white shadow-2xs">
                        <Check size={12} strokeWidth={4} />
                     </div>
                   {:else}
-                    <Plus size={14} class="text-slate-300 group-hover:text-indigo-600 dark:text-slate-650 dark:group-hover:text-indigo-400" />
+                    <Plus size={14} class="text-slate-300 group-hover:text-[#002d72] dark:text-slate-600 dark:group-hover:text-sky-400" />
                   {/if}
                 </div>
                 <div class="text-xs font-bold text-slate-700 dark:text-slate-300 mt-1 line-clamp-1">{course.title}</div>
@@ -208,13 +225,13 @@
       </div>
 
       <!-- Selected List -->
-      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex-1 space-y-3 dark:bg-slate-900 dark:border-slate-800">
+      <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex-1 space-y-3 dark:bg-[#0f172a] dark:border-slate-800/80">
         <h3 class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">My Courses ({myCourses.length})</h3>
         <div class="space-y-2 max-h-72 lg:max-h-none overflow-y-auto pr-1 custom-scrollbar">
           {#each myCourses as course}
             <div class="p-3 bg-white border border-slate-100 rounded-xl group relative dark:bg-slate-950 dark:border-slate-800/80 shadow-2xs">
               <div class="flex items-center space-x-2">
-                <div class="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase">{course.course_code}</div>
+                <div class="text-xs font-black text-[#002d72] dark:text-sky-400 uppercase">{course.course_code}</div>
                 <div class="text-[10px] text-slate-400 dark:text-slate-500 font-bold">Section {course.section}</div>
               </div>
               <div class="text-xs font-bold text-slate-700 dark:text-slate-300 mt-1 pr-6">{course.title}</div>
@@ -238,7 +255,7 @@
     </aside>
 
     <!-- Main Calendar Grid -->
-    <div class="flex-1 bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col min-w-0 dark:bg-slate-900 dark:border-slate-800 {mobileTab === 'schedule' ? 'flex' : 'hidden lg:flex'}">
+    <div class="flex-1 bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden flex flex-col min-w-0 dark:bg-[#0f172a] dark:border-slate-800/80 {mobileTab === 'schedule' ? 'flex' : 'hidden lg:flex'}">
       <div class="overflow-auto flex-1 custom-scrollbar">
         <table class="w-full border-collapse table-fixed min-w-[620px]">
           <thead class="sticky top-0 z-20 bg-slate-50 border-b border-slate-200 dark:bg-slate-950 dark:border-slate-800">
@@ -262,10 +279,10 @@
                         <div 
                           class="p-1.5 rounded-lg border text-[9px] sm:text-[10px] leading-tight flex-1 flex flex-col justify-center
                           {slotCourses.length > 1 
-                            ? 'bg-red-50 border-red-200 text-red-700 dark:bg-red-950/40 dark:border-red-900/50 dark:text-red-400' 
+                            ? 'bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-900/50 dark:text-rose-300' 
                             : isSpecial 
-                              ? 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/40 dark:border-amber-900/50 dark:text-amber-400' 
-                              : 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-950/40 dark:border-indigo-900/50 dark:text-indigo-300'}"
+                              ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-900/50 dark:text-amber-300' 
+                              : 'bg-[#002d72]/10 border-[#002d72]/20 text-[#002d72] dark:bg-sky-500/15 dark:border-sky-500/30 dark:text-sky-300'}"
                         >
                           <div class="flex justify-between items-start">
                             <div class="font-black truncate">{course.course_code}</div>
@@ -273,13 +290,13 @@
                           </div>
                           <!-- Display room name directly inside slot -->
                           <div class="text-[8px] font-bold opacity-70 mt-0.5 truncate flex items-center space-x-0.5">
-                            <MapPin size={8} class="shrink-0 text-indigo-500" />
+                            <MapPin size={8} class="shrink-0 text-[#0080c9] dark:text-sky-400" />
                             <span>{course.room_name}</span>
                           </div>
-                          <div class="flex justify-between items-center mt-0.5 border-t border-slate-100/50 dark:border-slate-850/50 pt-0.5">
+                          <div class="flex justify-between items-center mt-0.5 border-t border-slate-100/50 dark:border-slate-800/50 pt-0.5">
                             <span class="text-[7px] sm:text-[8px] font-bold uppercase opacity-75">{course.slot_type || 'Lecture'}</span>
                             {#if slotCourses.length > 1}
-                              <AlertTriangle size={8} class="text-red-500" />
+                              <AlertTriangle size={8} class="text-rose-500" />
                             {/if}
                           </div>
                         </div>

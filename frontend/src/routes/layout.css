@@ -2,6 +2,18 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+  --color-boun-navy: #002d72;
+  --color-boun-navy-dark: #001f52;
+  --color-boun-blue: #005696;
+  --color-boun-sky: #0080c9;
+  --color-boun-sky-light: #e6f4fb;
+  --color-boun-gold: #c5a059;
+  --color-boun-gold-light: #fbf7ee;
+  --color-boun-surface-dark: #0a0f1d;
+  --color-boun-card-dark: #0f172a;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;

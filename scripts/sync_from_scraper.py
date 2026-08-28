@@ -7,6 +7,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import logging
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Set
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, joinedload, selectinload
@@ -293,6 +294,198 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
     return total_synced
 
 
+def _sync_course_slots(
+    session,
+    course_id: int,
+    slots_payload: Optional[List[Dict[str, Any]]],
+    room_cache: Dict[str, int],
+    dry_run: bool = False
+) -> None:
+    if slots_payload is None or dry_run:
+        return
+    session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete()
+    for s in slots_payload:
+        room_id = ensure_room(session, s.get("room"), room_cache)
+        slot = CourseSlot(
+            course_id=course_id,
+            day_code=s.get("day") or s.get("day_code"),
+            slot_hour=clean_int(s.get("hour") or s.get("slot_hour")),
+            slot_title=s.get("slot_title"),
+            room_id=room_id
+        )
+        session.add(slot)
+    session.flush()
+
+
+def _upsert_course(
+    session,
+    term_id: str,
+    dept_kisaadi: Optional[str],
+    course_code: str,
+    section: Optional[str],
+    val_payload: Dict[str, Any],
+    inst_cache: Dict[str, int],
+    room_cache: Dict[str, int],
+    dept_cache: Dict[str, str],
+    term_cache: Set[str],
+    dry_run: bool = False
+) -> Optional[Course]:
+    ensure_term(session, term_id, term_cache)
+    if dept_kisaadi:
+        ensure_department(session, dept_kisaadi, dept_cache=dept_cache)
+
+    title = val_payload.get("course_name") or val_payload.get("title")
+    instructor_name = val_payload.get("instructor")
+    instructor_id = ensure_instructor(session, instructor_name, inst_cache)
+    credits = clean_int(val_payload.get("credits"))
+    ects = clean_int(val_payload.get("ects"))
+    delivery_method = val_payload.get("delivery_method")
+
+    course_q = session.query(Course).filter(
+        Course.term_id == term_id,
+        Course.course_code == course_code,
+        Course.section == section
+    )
+    if dept_kisaadi:
+        course_q = course_q.filter(Course.dept_kisaadi == dept_kisaadi)
+    course = course_q.first()
+
+    if not course:
+        course = Course(
+            term_id=term_id,
+            dept_kisaadi=dept_kisaadi,
+            course_code=course_code,
+            section=section,
+            title=title,
+            instructor_id=instructor_id,
+            credits=credits,
+            ects=ects,
+            delivery_method=delivery_method
+        )
+        if not dry_run:
+            session.add(course)
+            session.flush()
+    else:
+        if title is not None:
+            course.title = title
+        if instructor_id is not None:
+            course.instructor_id = instructor_id
+        if credits is not None:
+            course.credits = credits
+        if ects is not None:
+            course.ects = ects
+        if delivery_method is not None:
+            course.delivery_method = delivery_method
+        if not dry_run:
+            session.flush()
+
+    slots_payload = val_payload.get("slots") or val_payload.get("course_slots")
+    if course and course.id:
+        _sync_course_slots(session, course.id, slots_payload, room_cache, dry_run=dry_run)
+
+    return course
+
+
+def _apply_delta_event(
+    session,
+    item: Dict[str, Any],
+    inst_cache: Dict[str, int],
+    room_cache: Dict[str, int],
+    dept_cache: Dict[str, str],
+    term_cache: Set[str],
+    touched_course_ids: Set[int],
+    meili_index,
+    dry_run: bool = False
+) -> None:
+    change_type = item.get("change_type")
+    term_id = item.get("term")
+    dept_kisaadi = item.get("department")
+    course_code = normalize_code(item.get("course_code"))
+    section = normalize_section(item.get("section"))
+    timestamp = item.get("timestamp") or ""
+
+    if not change_type or not term_id or not course_code:
+        return
+
+    if not dry_run:
+        change_log = CourseChange(
+            change_type=change_type,
+            term_id=term_id,
+            dept_kisaadi=dept_kisaadi,
+            course_code=course_code,
+            section=section,
+            timestamp=timestamp,
+            old_value=json.dumps(item.get("old_value")) if item.get("old_value") else None,
+            new_value=json.dumps(item.get("new_value")) if item.get("new_value") else None,
+            details=item.get("details")
+        )
+        session.add(change_log)
+
+    if change_type in ("added", "modified"):
+        val_payload = item.get("new_value") or {}
+        course = _upsert_course(
+            session=session,
+            term_id=term_id,
+            dept_kisaadi=dept_kisaadi,
+            course_code=course_code,
+            section=section,
+            val_payload=val_payload,
+            inst_cache=inst_cache,
+            room_cache=room_cache,
+            dept_cache=dept_cache,
+            term_cache=term_cache,
+            dry_run=dry_run
+        )
+        if course and course.id:
+            touched_course_ids.add(course.id)
+
+    elif change_type == "removed":
+        course_q = session.query(Course).filter(
+            Course.term_id == term_id,
+            Course.course_code == course_code,
+            Course.section == section
+        )
+        if dept_kisaadi:
+            course_q = course_q.filter(Course.dept_kisaadi == dept_kisaadi)
+        course = course_q.first()
+
+        if course and not dry_run:
+            course_id = course.id
+            session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete()
+            session.delete(course)
+            session.flush()
+            if meili_index:
+                try:
+                    meili_index.delete_document(course_id)
+                except Exception as e:
+                    logger.warning("Meilisearch delete error for course %s: %s", course_id, e)
+
+
+def _fetch_term_courses(client: ScraperClient, term_id: str) -> List[Dict[str, Any]]:
+    export_term_param = term_id.replace("/", "-")
+    data = client.get(f"feeds/exports/{export_term_param}/json")
+    if data and isinstance(data, list):
+        return data
+
+    logger.info("Export feed not available, pulling paginated /courses for term %s...", term_id)
+    courses_raw = []
+    page = 1
+    page_size = 100
+    while True:
+        resp = client.get("courses", params={"term": term_id, "page": page, "size": page_size})
+        if not resp:
+            break
+        items = resp.get("items", []) if isinstance(resp, dict) else resp
+        if not items:
+            break
+        courses_raw.extend(items)
+        total = resp.get("total", len(courses_raw)) if isinstance(resp, dict) else len(courses_raw)
+        if len(courses_raw) >= total or len(items) < page_size:
+            break
+        page += 1
+    return courses_raw
+
+
 def sync_deltas_feed(
     session,
     client: ScraperClient,
@@ -326,128 +519,28 @@ def sync_deltas_feed(
             logger.info("No new delta change events available.")
             break
 
-        # Sort delta events ascending by timestamp to replay state changes in correct chronological order
+        # Sort delta events ascending by timestamp to replay state changes in causal order
         data.sort(key=lambda x: x.get("timestamp") or "")
 
         last_timestamp = cursor
-        touched_course_ids = set()
+        touched_course_ids: Set[int] = set()
 
         for item in data:
-            change_type = item.get("change_type")
-            term_id = item.get("term")
-            dept_kisaadi = item.get("department")
-            course_code = normalize_code(item.get("course_code"))
-            section = normalize_section(item.get("section"))
-            timestamp = item.get("timestamp") or ""
-            old_val = item.get("old_value")
-            new_val = item.get("new_value")
-            details = item.get("details")
+            ts = item.get("timestamp") or ""
+            if ts and (last_timestamp is None or ts > last_timestamp):
+                last_timestamp = ts
 
-            if not change_type or not term_id or not course_code:
-                continue
-
-            if timestamp and (last_timestamp is None or timestamp > last_timestamp):
-                last_timestamp = timestamp
-
-            # Record course change history log
-            if not dry_run:
-                change_log = CourseChange(
-                    change_type=change_type,
-                    term_id=term_id,
-                    dept_kisaadi=dept_kisaadi,
-                    course_code=course_code,
-                    section=section,
-                    timestamp=timestamp,
-                    old_value=json.dumps(old_val) if old_val else None,
-                    new_value=json.dumps(new_val) if new_val else None,
-                    details=details
-                )
-                session.add(change_log)
-
-            # Look up course by natural key
-            course_q = session.query(Course).filter(
-                Course.term_id == term_id,
-                Course.course_code == course_code,
-                Course.section == section
+            _apply_delta_event(
+                session=session,
+                item=item,
+                inst_cache=inst_cache,
+                room_cache=room_cache,
+                dept_cache=dept_cache,
+                term_cache=term_cache,
+                touched_course_ids=touched_course_ids,
+                meili_index=meili_index,
+                dry_run=dry_run
             )
-            if dept_kisaadi:
-                course_q = course_q.filter(Course.dept_kisaadi == dept_kisaadi)
-            course = course_q.first()
-
-            if change_type in ("added", "modified"):
-                val_payload = new_val or {}
-                course_title = val_payload.get("course_name") or val_payload.get("title")
-                instructor_name = val_payload.get("instructor")
-                credits = clean_int(val_payload.get("credits"))
-                ects = clean_int(val_payload.get("ects"))
-                delivery_method = val_payload.get("delivery_method")
-
-                ensure_term(session, term_id, term_cache)
-                if dept_kisaadi:
-                    ensure_department(session, dept_kisaadi, dept_cache=dept_cache)
-
-                instructor_id = ensure_instructor(session, instructor_name, inst_cache)
-
-                if not course:
-                    course = Course(
-                        term_id=term_id,
-                        dept_kisaadi=dept_kisaadi,
-                        course_code=course_code,
-                        section=section,
-                        title=course_title,
-                        instructor_id=instructor_id,
-                        credits=credits,
-                        ects=ects,
-                        delivery_method=delivery_method
-                    )
-                    if not dry_run:
-                        session.add(course)
-                        session.flush()
-                else:
-                    if course_title is not None:
-                        course.title = course_title
-                    if instructor_id is not None:
-                        course.instructor_id = instructor_id
-                    if credits is not None:
-                        course.credits = credits
-                    if ects is not None:
-                        course.ects = ects
-                    if delivery_method is not None:
-                        course.delivery_method = delivery_method
-                    if not dry_run:
-                        session.flush()
-
-                # Handle slots
-                slots_payload = val_payload.get("slots") or val_payload.get("course_slots")
-                if slots_payload is not None and not dry_run:
-                    session.query(CourseSlot).filter(CourseSlot.course_id == course.id).delete()
-                    for s in slots_payload:
-                        room_id = ensure_room(session, s.get("room"), room_cache)
-                        slot = CourseSlot(
-                            course_id=course.id,
-                            day_code=s.get("day") or s.get("day_code"),
-                            slot_hour=clean_int(s.get("hour") or s.get("slot_hour")),
-                            slot_title=s.get("slot_title"),
-                            room_id=room_id
-                        )
-                        session.add(slot)
-                    session.flush()
-
-                if course and course.id:
-                    touched_course_ids.add(course.id)
-
-            elif change_type == "removed" and course:
-                course_id = course.id
-                if not dry_run:
-                    session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete()
-                    session.delete(course)
-                    session.flush()
-                    if meili_index:
-                        try:
-                            meili_index.delete_document(course_id)
-                        except Exception as e:
-                            logger.warning("Meilisearch delete error for course %s: %s", course_id, e)
-
             total_synced += 1
 
         if not dry_run and last_timestamp:
@@ -459,7 +552,7 @@ def sync_deltas_feed(
             session.commit()
             cursor = last_timestamp
 
-            # Update Meilisearch for modified courses
+            # Push batch updates to Meilisearch
             if meili_index and touched_course_ids:
                 updated_courses = session.query(Course).options(
                     joinedload(Course.term),
@@ -486,29 +579,7 @@ def backfill_term(
     logger.info("Starting backfill for term: %s", term_id)
     ensure_term(session, term_id)
 
-    export_term_param = term_id.replace("/", "-")
-    data = client.get(f"feeds/exports/{export_term_param}/json")
-
-    courses_raw = []
-    if data and isinstance(data, list):
-        courses_raw = data
-    else:
-        logger.info("Export feed not available, pulling paginated /courses for term %s...", term_id)
-        page = 1
-        page_size = 100
-        while True:
-            resp = client.get("courses", params={"term": term_id, "page": page, "size": page_size})
-            if not resp:
-                break
-            items = resp.get("items", []) if isinstance(resp, dict) else resp
-            if not items:
-                break
-            courses_raw.extend(items)
-            total = resp.get("total", len(courses_raw)) if isinstance(resp, dict) else len(courses_raw)
-            if len(courses_raw) >= total or len(items) < page_size:
-                break
-            page += 1
-
+    courses_raw = _fetch_term_courses(client, term_id)
     if not courses_raw:
         logger.warning("No courses retrieved for term: %s", term_id)
         return 0
@@ -518,75 +589,32 @@ def backfill_term(
     inst_cache: Dict[str, int] = {i.full_name: i.id for i in session.query(Instructor).all()}
     room_cache: Dict[str, int] = {r.name: r.id for r in session.query(Room).all()}
     dept_cache: Dict[str, str] = {d.kisaadi: d.bolum for d in session.query(Department).all()}
-    touched_courses = []
+    term_cache: Set[str] = {t.id for t in session.query(Term.id).all()}
+    touched_courses: List[Course] = []
 
     for item in courses_raw:
         dept_kisaadi = item.get("department")
         course_code = normalize_code(item.get("course_code"))
         section = normalize_section(item.get("section"))
-        title = item.get("course_name") or item.get("title")
-        instructor_name = item.get("instructor")
-        credits = clean_int(item.get("credits"))
-        ects = clean_int(item.get("ects"))
-        delivery_method = item.get("delivery_method")
 
         if not course_code:
             continue
 
-        if dept_kisaadi:
-            ensure_department(session, dept_kisaadi, dept_cache=dept_cache)
-
-        instructor_id = ensure_instructor(session, instructor_name, inst_cache)
-
-        course_q = session.query(Course).filter(
-            Course.term_id == term_id,
-            Course.course_code == course_code,
-            Course.section == section
+        course = _upsert_course(
+            session=session,
+            term_id=term_id,
+            dept_kisaadi=dept_kisaadi,
+            course_code=course_code,
+            section=section,
+            val_payload=item,
+            inst_cache=inst_cache,
+            room_cache=room_cache,
+            dept_cache=dept_cache,
+            term_cache=term_cache,
+            dry_run=dry_run
         )
-        if dept_kisaadi:
-            course_q = course_q.filter(Course.dept_kisaadi == dept_kisaadi)
-        course = course_q.first()
-
-        if not course:
-            course = Course(
-                term_id=term_id,
-                dept_kisaadi=dept_kisaadi,
-                course_code=course_code,
-                section=section,
-                title=title,
-                instructor_id=instructor_id,
-                credits=credits,
-                ects=ects,
-                delivery_method=delivery_method
-            )
-            if not dry_run:
-                session.add(course)
-                session.flush()
-        else:
-            course.title = title
-            course.instructor_id = instructor_id
-            course.credits = credits
-            course.ects = ects
-            course.delivery_method = delivery_method
-            if not dry_run:
-                session.flush()
-
-        slots_payload = item.get("slots") or item.get("course_slots")
-        if slots_payload is not None and not dry_run:
-            session.query(CourseSlot).filter(CourseSlot.course_id == course.id).delete()
-            for s in slots_payload:
-                room_id = ensure_room(session, s.get("room"), room_cache)
-                slot = CourseSlot(
-                    course_id=course.id,
-                    day_code=s.get("day") or s.get("day_code"),
-                    slot_hour=clean_int(s.get("hour") or s.get("slot_hour")),
-                    slot_title=s.get("slot_title"),
-                    room_id=room_id
-                )
-                session.add(slot)
-            session.flush()
-
-        touched_courses.append(course)
+        if course:
+            touched_courses.append(course)
 
     if not dry_run:
         session.commit()
@@ -616,6 +644,17 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
         else:
             sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
             sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+
+        if not args.dry_run:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            state = session.query(SyncState).filter(SyncState.feed_name == "scraper").first()
+            if not state:
+                state = SyncState(feed_name="scraper", last_cursor=now_iso)
+                session.add(state)
+            else:
+                state.last_cursor = now_iso
+                state.updated_at = func.now()
+            session.commit()
     except Exception:
         session.rollback()
         raise

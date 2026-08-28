@@ -13,14 +13,15 @@
     Sun, 
     Moon,
     Menu,
-    X,
-    ChevronLeft,
-    ChevronRight
+    X
   } from "lucide-svelte";
 
+  import { API_BASE } from "$lib/config";
+  import type { SystemStatus } from "$lib/types";
+
   let isDark = $state(false);
-  let isSidebarOpen = $state(true);
   let isMobileDrawerOpen = $state(false);
+  let systemStatus = $state<SystemStatus | null>(null);
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutGrid },
@@ -31,7 +32,50 @@
     { href: "/instructors", label: "Instructors", icon: User },
   ];
 
+  function formatScrapeTime(isoString?: string | null): string {
+    if (!isoString) return "Scraped: Live";
+    try {
+      const date = new Date(isoString.includes("T") ? isoString : isoString.replace(" ", "T") + "Z");
+      if (isNaN(date.getTime())) return `Scraped: ${isoString}`;
+
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffSecs = Math.floor(diffMs / 1000);
+      const diffMins = Math.floor(diffSecs / 60);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+
+      if (diffSecs >= 0 && diffSecs < 60) {
+        return "Scraped just now";
+      } else if (diffMins > 0 && diffMins < 60) {
+        return `Scraped ${diffMins}m ago`;
+      } else if (diffHours > 0 && diffHours < 24) {
+        return `Scraped ${diffHours}h ago`;
+      } else if (diffDays > 0 && diffDays < 7) {
+        return `Scraped ${diffDays}d ago`;
+      } else {
+        return `Scraped ${date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+      }
+    } catch {
+      return `Scraped: ${isoString}`;
+    }
+  }
+
+  async function fetchSystemStatus() {
+    try {
+      const res = await fetch(`${API_BASE}/v1/system/status`);
+      if (res.ok) {
+        systemStatus = await res.json();
+      }
+    } catch {
+      // Retain existing state on transient fetch failure
+    }
+  }
+
   onMount(() => {
+    fetchSystemStatus();
+    const statusInterval = setInterval(fetchSystemStatus, 60000);
+
     const savedTheme = localStorage.getItem("theme");
     const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     
@@ -43,10 +87,9 @@
       document.documentElement.classList.remove("dark");
     }
 
-    const savedSidebar = localStorage.getItem("sidebar_open");
-    if (savedSidebar !== null) {
-      isSidebarOpen = savedSidebar === "true";
-    }
+    return () => {
+      clearInterval(statusInterval);
+    };
   });
 
   function toggleTheme() {
@@ -60,43 +103,121 @@
     }
   }
 
-  function toggleSidebar() {
-    isSidebarOpen = !isSidebarOpen;
-    localStorage.setItem("sidebar_open", String(isSidebarOpen));
-  }
-
   function closeMobileDrawer() {
     isMobileDrawerOpen = false;
   }
 </script>
 
 <svelte:head>
-  <title>BOUN Archive</title>
+  <title>BOUN Archive • Boğaziçi University Academic Catalog</title>
 </svelte:head>
 
-<div class="flex h-screen w-full bg-slate-50 font-sans text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-100 overflow-hidden relative">
-  <!-- Mobile Backdrop Overlay -->
+<div class="min-h-screen w-full bg-slate-50 font-sans text-slate-900 transition-colors duration-200 dark:bg-[#0a0f1d] dark:text-slate-100 flex flex-col antialiased selection:bg-[#0080c9]/20 selection:text-[#002d72] dark:selection:bg-sky-500/30 dark:selection:text-sky-200">
+  <!-- Top Navigation Header -->
+  <header class="sticky top-0 z-40 w-full bg-white/95 dark:bg-[#0a0f1d]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800/80 shadow-2xs transition-colors duration-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <!-- Left: Logo & Brand -->
+      <a href="/" class="flex items-center space-x-3 group shrink-0" aria-label="BOUN Archive Home">
+        <img 
+          src="/logo.png" 
+          alt="Boğaziçi University Crest" 
+          class="h-9 w-9 rounded-lg shadow-2xs border border-slate-200/80 dark:border-slate-700/80 object-cover shrink-0 group-hover:scale-105 transition-transform duration-200" 
+        />
+        <div class="flex flex-col">
+          <div class="flex items-center gap-1.5">
+            <span class="text-base font-black tracking-tight text-[#002d72] dark:text-white leading-none">
+              BOUN Archive
+            </span>
+            <span class="hidden sm:inline-block text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300 border border-amber-500/20">
+              50y
+            </span>
+          </div>
+          <span class="text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mt-0.5">
+            Boğaziçi University
+          </span>
+        </div>
+      </a>
+
+      <!-- Center: Desktop Navigation Links -->
+      <nav class="hidden lg:flex items-center space-x-1 xl:space-x-1.5" aria-label="Main Navigation">
+        {#each navItems as item}
+          {@const isActive = page.url.pathname === item.href}
+          <a 
+            href={item.href} 
+            class="flex items-center space-x-2 px-3 py-2 rounded-lg text-xs xl:text-sm font-semibold transition-all duration-150
+            {isActive 
+              ? 'bg-[#002d72]/10 text-[#002d72] dark:bg-sky-500/15 dark:text-sky-300 shadow-2xs' 
+              : 'text-slate-600 hover:text-[#002d72] hover:bg-slate-100/80 dark:text-slate-400 dark:hover:text-sky-300 dark:hover:bg-slate-800/60'}"
+          >
+            <item.icon size={16} class="shrink-0 {isActive ? 'text-[#002d72] dark:text-sky-300' : 'text-slate-400 dark:text-slate-500'}" />
+            <span>{item.label}</span>
+          </a>
+        {/each}
+      </nav>
+
+      <!-- Right: Utilities (Scrape Time, Theme Toggle, Mobile Menu) -->
+      <div class="flex items-center space-x-2 sm:space-x-3 shrink-0">
+        <!-- Live Scrape Time Badge -->
+        <div 
+          class="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200/80 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/60 shadow-2xs select-none"
+          title={systemStatus?.latest_scrape_time ? `Latest scrape: ${systemStatus.latest_scrape_time}` : "Scraper status: Live sync"}
+        >
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+          <span class="tracking-tight">{formatScrapeTime(systemStatus?.latest_scrape_time)}</span>
+        </div>
+
+        <!-- Dark/Light Theme Toggle -->
+        <button 
+          onclick={toggleTheme}
+          class="p-2 text-slate-500 hover:text-[#002d72] hover:bg-slate-100 dark:text-slate-400 dark:hover:text-sky-300 dark:hover:bg-slate-800/70 rounded-lg transition-colors cursor-pointer"
+          aria-label="Toggle dark/light theme"
+          title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+        >
+          {#if isDark}
+            <Sun size={18} class="text-amber-400" />
+          {:else}
+            <Moon size={18} class="text-slate-600" />
+          {/if}
+        </button>
+
+        <!-- Mobile Menu Trigger -->
+        <button 
+          onclick={() => isMobileDrawerOpen = !isMobileDrawerOpen}
+          class="lg:hidden p-2 text-slate-600 hover:text-[#002d72] hover:bg-slate-100 dark:text-slate-400 dark:hover:text-sky-300 dark:hover:bg-slate-800/70 rounded-lg transition-colors cursor-pointer"
+          aria-label="Open mobile navigation menu"
+        >
+          {#if isMobileDrawerOpen}
+            <X size={20} />
+          {:else}
+            <Menu size={20} />
+          {/if}
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Mobile Off-Canvas Drawer Backdrop -->
   {#if isMobileDrawerOpen}
     <div 
       role="button"
       tabindex="0"
-      aria-label="Close navigation"
+      aria-label="Close navigation overlay"
       onclick={closeMobileDrawer}
       onkeydown={(e) => (e.key === 'Escape' || e.key === 'Enter') && closeMobileDrawer()}
-      class="md:hidden fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-xs transition-opacity duration-300 cursor-pointer"
+      class="lg:hidden fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-xs transition-opacity duration-300 cursor-pointer"
     ></div>
   {/if}
 
   <!-- Mobile Off-Canvas Drawer -->
   <aside 
-    class="md:hidden fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col transition-transform duration-300 ease-in-out transform {isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}"
-    aria-label="Mobile Navigation"
+    class="lg:hidden fixed inset-y-0 left-0 z-50 w-72 bg-white dark:bg-[#0f172a] border-r border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col transition-transform duration-300 ease-in-out transform {isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}"
+    aria-label="Mobile Navigation Drawer"
   >
-    <div class="p-5 flex items-center justify-between border-b border-slate-100 dark:border-slate-800 shrink-0">
+    <div class="p-5 flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 shrink-0">
       <div class="flex items-center space-x-3">
-        <img src="/logo.png" alt="BOUN Archive Logo" class="h-9 w-9 rounded-lg shadow-sm border border-slate-100 dark:border-slate-800 object-cover shrink-0" />
+        <img src="/logo.png" alt="BOUN Logo" class="h-9 w-9 rounded-lg shadow-2xs border border-slate-100 dark:border-slate-800 object-cover shrink-0" />
         <div>
-          <h1 class="text-base font-extrabold text-slate-900 tracking-tight leading-none dark:text-white">BOUN Archive</h1>
+          <h2 class="text-base font-extrabold text-[#002d72] tracking-tight leading-none dark:text-white">BOUN Archive</h2>
           <p class="text-[9px] text-slate-400 mt-1 uppercase tracking-widest font-black dark:text-slate-500">Academic Analytics</p>
         </div>
       </div>
@@ -109,118 +230,54 @@
       </button>
     </div>
 
-    <nav class="flex-1 px-4 py-4 space-y-1.5 overflow-y-auto custom-scrollbar">
+    <!-- Scrape status banner in mobile drawer -->
+    <div class="px-4 py-3 bg-slate-50 dark:bg-slate-900/60 border-b border-slate-100 dark:border-slate-800/60 flex items-center justify-between text-xs font-semibold">
+      <span class="text-slate-500 dark:text-slate-400">Portal Sync Status</span>
+      <div class="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-bold">
+        <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span>{formatScrapeTime(systemStatus?.latest_scrape_time)}</span>
+      </div>
+    </div>
+
+    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto custom-scrollbar">
       {#each navItems as item}
+        {@const isActive = page.url.pathname === item.href}
         <a 
           href={item.href} 
           onclick={closeMobileDrawer}
           class="flex items-center space-x-3 px-4 py-3 rounded-xl font-semibold text-sm transition-all
-          {page.url.pathname === item.href 
-            ? 'bg-indigo-50 text-indigo-700 shadow-xs dark:bg-indigo-950/50 dark:text-indigo-300' 
-            : 'text-slate-600 hover:bg-slate-50 hover:text-indigo-600 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-indigo-400'}"
+          {isActive 
+            ? 'bg-[#002d72]/10 text-[#002d72] shadow-2xs dark:bg-sky-500/15 dark:text-sky-300' 
+            : 'text-slate-600 hover:bg-slate-50 hover:text-[#002d72] dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-sky-300'}"
         >
-          <item.icon size={20} class="shrink-0" />
+          <item.icon size={18} class="shrink-0 {isActive ? 'text-[#002d72] dark:text-sky-300' : 'text-slate-400 dark:text-slate-500'}" />
           <span>{item.label}</span>
         </a>
       {/each}
     </nav>
 
     <div class="p-4 border-t border-slate-100 text-[10px] text-slate-400 text-center dark:border-slate-800/60 dark:text-slate-500 shrink-0">
-      v1.0.0-alpha • 50 Years of Data
+      Boğaziçi University Academic Catalog • 50 Years
     </div>
   </aside>
 
-  <!-- Desktop Sidebar -->
-  <aside 
-    class="hidden md:flex bg-white border-r border-slate-200 flex-col transition-all duration-300 ease-in-out dark:bg-slate-900 dark:border-slate-800 relative z-20 shrink-0 {isSidebarOpen ? 'w-64' : 'w-20'}"
-    aria-label="Desktop Navigation"
-  >
-    <!-- Strict internal wrapper to prevent children from forcing width -->
-    <div class="flex flex-col h-full w-full overflow-hidden">
-        <div class="p-6 flex items-center {isSidebarOpen ? 'space-x-3' : 'justify-center'} shrink-0">
-          <img src="/logo.png" alt="BOUN Archive Logo" class="h-10 w-10 rounded-lg shadow-sm border border-slate-100 dark:border-slate-800 object-cover shrink-0" />
-          {#if isSidebarOpen}
-            <div class="overflow-hidden whitespace-nowrap">
-              <h1 class="text-base font-extrabold text-slate-900 tracking-tight leading-none dark:text-white">BOUN Archive</h1>
-              <p class="text-[9px] text-slate-400 mt-1 uppercase tracking-widest font-black dark:text-slate-500">Academic Analytics</p>
-            </div>
-          {/if}
-        </div>
-
-        <nav class="flex-1 px-4 space-y-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
-          {#each navItems as item}
-            <a 
-              href={item.href} 
-              title={!isSidebarOpen ? item.label : ""}
-              class="flex items-center {isSidebarOpen ? 'space-x-3 px-4' : 'justify-center'} py-3 rounded-lg font-medium transition-all
-              {page.url.pathname === item.href 
-                ? 'bg-indigo-50 text-indigo-700 shadow-sm dark:bg-indigo-950/40 dark:text-indigo-400' 
-                : 'text-slate-600 hover:bg-slate-50 hover:text-indigo-600 dark:text-slate-400 dark:hover:bg-slate-800/40 dark:hover:text-indigo-400'}"
-            >
-              <item.icon size={20} class="shrink-0" />
-              {#if isSidebarOpen}
-                <span class="overflow-hidden whitespace-nowrap">{item.label}</span>
-              {/if}
-            </a>
-          {/each}
-        </nav>
-
-        {#if isSidebarOpen}
-          <div class="p-4 border-t border-slate-100 text-[10px] text-slate-400 text-center dark:border-slate-800/60 dark:text-slate-500 shrink-0 overflow-hidden whitespace-nowrap">
-            v1.0.0-alpha • 50 Years of Data
-          </div>
-        {/if}
-    </div>
-
-    <!-- Collapse Toggle Button (Outside hidden wrapper) -->
-    <button 
-      onclick={toggleSidebar}
-      class="absolute -right-3 top-20 bg-white border border-slate-200 rounded-full p-1 text-slate-400 hover:text-indigo-600 shadow-sm dark:bg-slate-800 dark:border-slate-700 z-50 cursor-pointer"
-    >
-      {#if isSidebarOpen}
-        <ChevronLeft size={14} />
-      {:else}
-        <ChevronRight size={14} />
-      {/if}
-    </button>
-  </aside>
-
-  <!-- Main Content -->
-  <main class="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-    <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 lg:px-8 shrink-0 transition-colors duration-200 dark:bg-slate-900 dark:border-slate-800 z-10">
-      <div class="flex items-center space-x-3 min-w-0">
-        <button 
-          onclick={() => isMobileDrawerOpen = !isMobileDrawerOpen}
-          class="md:hidden p-2 text-slate-600 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800/60 rounded-lg transition-colors cursor-pointer shrink-0"
-          aria-label="Open mobile navigation menu"
-        >
-          <Menu size={20} />
-        </button>
-        <div class="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400 truncate">
-          Bogazici University Historical Course Archive
-        </div>
-      </div>
-      <div class="flex items-center space-x-2 sm:space-x-4 shrink-0">
-        <button 
-          onclick={toggleTheme}
-          class="p-2 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-slate-800/60 rounded-lg transition-all"
-          aria-label="Toggle theme"
-        >
-          {#if isDark}
-            <Sun size={18} />
-          {:else}
-            <Moon size={18} />
-          {/if}
-        </button>
-        <div class="hidden sm:block text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-2 py-1 rounded border border-emerald-100 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-950/50">
-          System Online
-        </div>
-      </div>
-    </header>
-
-    <div class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar">
-      {@render children()}
-    </div>
+  <!-- Main Content Container -->
+  <main class="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 transition-colors duration-200">
+    {@render children()}
   </main>
+
+  <!-- Subtle Footer -->
+  <footer class="w-full border-t border-slate-200/70 dark:border-slate-800/70 py-6 text-center text-xs text-slate-400 dark:text-slate-500 transition-colors duration-200">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <div class="flex items-center space-x-2">
+        <span class="font-bold text-slate-600 dark:text-slate-300">BOUN Course Archive</span>
+        <span>•</span>
+        <span>Boğaziçi University Academic Analytics</span>
+      </div>
+      <div class="text-[11px] text-slate-400 dark:text-slate-500">
+        Historical Data (1970–Present) & Real-time Scraper Feeds
+      </div>
+    </div>
+  </footer>
 </div>
 

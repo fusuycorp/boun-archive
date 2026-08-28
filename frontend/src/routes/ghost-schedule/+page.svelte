@@ -114,7 +114,7 @@
   </div>
 
   <!-- Control Bar -->
-  <div class="flex flex-col md:flex-row md:items-center gap-3 sm:gap-4 bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-xs dark:bg-slate-900 dark:border-slate-800">
+  <div class="flex flex-col md:flex-row md:items-center gap-3 sm:gap-4 bg-white p-3 sm:p-4 rounded-2xl border border-slate-200/80 shadow-2xs dark:bg-[#0f172a] dark:border-slate-800/80">
     <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
       <div class="flex flex-col space-y-1">
         <label for="ghost-term-select" class="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-1">Academic Term</label>
@@ -122,7 +122,7 @@
           id="ghost-term-select"
           bind:value={selectedTerm} 
           onchange={fetchSchedule}
-          class="w-full sm:min-w-[180px] p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all dark:bg-slate-950 dark:border-slate-800 dark:text-slate-200 cursor-pointer"
+          class="w-full sm:min-w-[180px] p-2 bg-slate-50 border border-slate-200/80 rounded-xl text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-[#0080c9] transition-all dark:bg-slate-950 dark:border-slate-800 dark:text-slate-200 cursor-pointer"
         >
           {#each terms as term}
             <option value={term.id}>{term.id}</option>
@@ -137,7 +137,7 @@
         <div class="relative">
           <button 
             onclick={() => isDeptOpen = !isDeptOpen}
-            class="w-full sm:min-w-[180px] flex items-center justify-between p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none hover:border-indigo-300 transition-all dark:bg-slate-950 dark:border-slate-800 dark:text-slate-300 cursor-pointer"
+            class="w-full sm:min-w-[180px] flex items-center justify-between p-2 bg-slate-50 border border-slate-200/80 rounded-xl text-xs font-bold text-slate-700 outline-none hover:border-[#0080c9] transition-all dark:bg-slate-950 dark:border-slate-800 dark:text-slate-300 cursor-pointer"
           >
             <span class="truncate">
               {selectedDepts.length === 0 ? 'All Departments' : `${selectedDepts.length} Selected`}
@@ -146,7 +146,7 @@
           </button>
 
           {#if isDeptOpen}
-            <div class="absolute top-full left-0 mt-2 w-72 max-w-[90vw] bg-white border border-slate-200 rounded-2xl shadow-xl z-50 overflow-hidden dark:bg-slate-900 dark:border-slate-800">
+            <div class="absolute top-full left-0 mt-2 w-72 max-w-[90vw] bg-white border border-slate-200/80 rounded-2xl shadow-xl z-50 overflow-hidden dark:bg-[#0f172a] dark:border-slate-800/80">
               <div class="p-3 border-b border-slate-100 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-950/50">
                 <div class="relative">
                   <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
@@ -154,7 +154,7 @@
                     type="text" 
                     bind:value={deptSearch}
                     placeholder="Search departments..."
-                    class="w-full pl-8 pr-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-950 dark:border-slate-800 dark:text-white"
+                    class="w-full pl-8 pr-2 py-1.5 bg-white border border-slate-200/80 rounded-lg text-xs outline-none focus:ring-2 focus:ring-[#0080c9] dark:bg-slate-950 dark:border-slate-800 dark:text-white"
                   />
                 </div>
               </div>
@@ -165,13 +165,13 @@
                     onclick={() => toggleDept(dept)}
                     class="w-full flex items-center justify-between p-2 rounded-lg text-xs transition-all cursor-pointer
                     {selectedDepts.includes(dept) 
-                      ? 'bg-indigo-50 text-indigo-700 font-bold dark:bg-indigo-950/40 dark:text-indigo-400' 
+                      ? 'bg-[#002d72]/10 text-[#002d72] font-bold dark:bg-sky-500/15 dark:text-sky-300' 
                       : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/40'}"
                   >
                     <div class="flex items-center space-x-2">
                       <div class="w-3.5 h-3.5 rounded border flex items-center justify-center
                         {selectedDepts.includes(dept) 
-                          ? 'bg-indigo-600 border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500' 
+                          ? 'bg-[#002d72] border-[#002d72] dark:bg-sky-500 dark:border-sky-500' 
                           : 'bg-white border-slate-300 dark:bg-slate-800 dark:border-slate-700'}">
                         {#if selectedDepts.includes(dept)}
                           <Check size={10} class="text-white" />
@@ -187,7 +187,7 @@
                 <div class="p-2 border-t border-slate-100 bg-slate-50/30 dark:border-slate-800 dark:bg-slate-950/30">
                   <button 
                     onclick={() => { selectedDepts = []; isDeptOpen = false; fetchSchedule(); }}
-                    class="w-full py-1.5 text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest hover:bg-white dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                    class="w-full py-1.5 text-[10px] font-black text-[#002d72] dark:text-sky-400 uppercase tracking-widest hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
                   >
                     Clear Selection
                   </button>
@@ -207,7 +207,7 @@
             onclick={() => activeDay = day}
             class="px-3.5 sm:px-4 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer
             {activeDay === day 
-              ? 'bg-indigo-600 text-white shadow-xs' 
+              ? 'bg-[#002d72] text-white shadow-2xs' 
               : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'}"
           >
             {day}
@@ -218,7 +218,7 @@
 
     <div class="md:ml-auto flex items-center space-x-4 pt-1 md:pt-0">
       <div class="flex items-center space-x-1.5">
-        <div class="w-2.5 h-2.5 bg-indigo-100 border border-indigo-200 rounded dark:bg-indigo-950/40 dark:border-indigo-900/50"></div>
+        <div class="w-2.5 h-2.5 bg-[#002d72]/15 border border-[#002d72]/30 rounded dark:bg-sky-500/20 dark:border-sky-500/40"></div>
         <span class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Occupied</span>
       </div>
       <div class="flex items-center space-x-1.5">
@@ -230,11 +230,11 @@
 
   {#if loading}
     <div class="flex justify-center py-20">
-      <div class="animate-spin rounded-full h-10 w-10 border-4 border-slate-100 border-t-indigo-600 dark:border-slate-800 dark:border-t-indigo-500"></div>
+      <div class="animate-spin rounded-full h-10 w-10 border-4 border-slate-100 border-t-[#002d72] dark:border-slate-800 dark:border-t-sky-400"></div>
     </div>
   {:else}
     <!-- Matrix View with Sticky Room Header -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden dark:bg-slate-900 dark:border-slate-800">
+    <div class="bg-white rounded-2xl border border-slate-200/80 shadow-2xs overflow-hidden dark:bg-[#0f172a] dark:border-slate-800/80">
       <div class="overflow-x-auto custom-scrollbar">
         <table class="w-full border-collapse min-w-[900px]">
           <thead>
@@ -254,9 +254,9 @@
                   {@const slot = slotMap.get(`${room}|${hour}`)}
                   <td class="p-1 text-center h-14 sm:h-16">
                     {#if slot}
-                      <div class="h-full w-full bg-indigo-100 border border-indigo-200 rounded-lg p-1 flex flex-col justify-center items-center shadow-2xs dark:bg-indigo-950/40 dark:border-indigo-900/50">
-                        <span class="text-[9px] sm:text-[10px] font-black text-indigo-700 dark:text-indigo-300 leading-tight truncate max-w-[75px]">{slot.course_code}</span>
-                        <span class="text-[7px] sm:text-[8px] text-indigo-500 dark:text-indigo-400 font-bold uppercase">{slot.dept_kisaadi}</span>
+                      <div class="h-full w-full bg-[#002d72]/10 border border-[#002d72]/20 rounded-lg p-1 flex flex-col justify-center items-center shadow-2xs dark:bg-sky-500/15 dark:border-sky-500/30">
+                        <span class="text-[9px] sm:text-[10px] font-black text-[#002d72] dark:text-sky-300 leading-tight truncate max-w-[75px]">{slot.course_code}</span>
+                        <span class="text-[7px] sm:text-[8px] text-[#0080c9] dark:text-sky-400 font-bold uppercase">{slot.dept_kisaadi}</span>
                       </div>
                     {:else}
                       <div class="h-full w-full bg-slate-50/30 dark:bg-slate-950/10 rounded-lg border border-transparent"></div>

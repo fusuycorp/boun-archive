@@ -102,6 +102,40 @@ def read_root():
 def health_check():
     return {"status": "healthy"}
 
+@app.get("/v1/system/status", response_model=schemas.SystemStatusResponse)
+@app.get("/v1/sync/status", response_model=schemas.SystemStatusResponse)
+@cache(expire=30)
+def get_system_status(db: Session = Depends(database.get_db)):
+    sync_states = db.query(models.SyncState).all()
+    feed_map = {}
+    latest_ts = None
+
+    for s in sync_states:
+        feed_map[s.feed_name] = {
+            "last_cursor": s.last_cursor,
+            "updated_at": s.updated_at.isoformat() if s.updated_at else None
+        }
+        if s.last_cursor:
+            if latest_ts is None or s.last_cursor > latest_ts:
+                latest_ts = s.last_cursor
+        elif s.updated_at:
+            iso_u = s.updated_at.isoformat()
+            if latest_ts is None or iso_u > latest_ts:
+                latest_ts = iso_u
+
+    if not latest_ts:
+        latest_change = db.query(func.max(models.CourseChange.timestamp)).scalar()
+        latest_quota = db.query(func.max(models.QuotaSnapshot.captured_at)).scalar()
+        candidates = [c for c in [latest_change, latest_quota] if c]
+        if candidates:
+            latest_ts = max(candidates)
+
+    return {
+        "status": "healthy",
+        "latest_scrape_time": latest_ts,
+        "feeds": feed_map
+    }
+
 @app.get("/v1/search")
 @cache(expire=600)
 def search_courses(
