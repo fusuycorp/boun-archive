@@ -1,32 +1,18 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { page } from "$app/state";
   import { User, History, BookOpen, Clock, Calendar, Download, Info, ArrowLeft } from "lucide-svelte";
-  import { API_BASE } from "$lib/config";
   import { exportToCSV } from "$lib/utils";
+  import type { PageData } from "./$types";
 
-  let instructorId = $derived(page.params.id);
-  let legacyData = $state<any>(null);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  let { data }: { data: PageData } = $props();
 
-  async function fetchInstructorDNA() {
-    if (!instructorId) return;
-    loading = true;
-    error = null;
-    try {
-      const res = await fetch(`${API_BASE}/v1/analytics/instructor/${instructorId}/legacy`);
-      if (!res.ok) throw new Error("Instructor DNA not found");
-      legacyData = await res.json();
-    } catch (e: any) {
-      error = e.message;
-    } finally {
-      loading = false;
-    }
-  }
+  let instructorId = $derived(data.instructorId || page.params.id);
+  let legacyData = $derived(data.legacyData);
+  let loading = $state(false);
+  let error = $derived(data.error);
 
   function handleExport() {
-    if (!legacyData || legacyData.history.length === 0) return;
+    if (!legacyData || !legacyData.history || legacyData.history.length === 0) return;
     
     const exportData = legacyData.history.map((item: any) => ({
       instructor: legacyData.instructor_name,
@@ -37,8 +23,6 @@
     
     exportToCSV(exportData, `boun_instructor_${legacyData.instructor_name.replace(/\s+/g, '_')}_history_${new Date().toISOString().split('T')[0]}`);
   }
-
-  onMount(fetchInstructorDNA);
 </script>
 
 <div class="max-w-6xl mx-auto space-y-6 sm:space-y-8">

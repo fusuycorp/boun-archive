@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { User, Search, History, BookOpen, Clock, Calendar, ArrowRight } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { goto } from "$app/navigation";
+  import type { PageData } from "./$types";
+
+  let { data }: { data: PageData } = $props();
 
   let query = $state("");
   let instructors = $state<any[]>([]);
@@ -13,6 +15,7 @@
       instructors = [];
       return;
     }
+    loading = true;
     try {
       const res = await fetch(`${API_BASE}/v1/instructors?q=${encodeURIComponent(query)}`);
       if (res.ok) {
@@ -20,6 +23,8 @@
       }
     } catch (e) {
       console.error("Failed to search instructors", e);
+    } finally {
+      loading = false;
     }
   }
 

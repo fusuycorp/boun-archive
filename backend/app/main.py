@@ -639,7 +639,7 @@ def get_course_quota(
         snapshots = query.order_by(
             models.QuotaSnapshot.captured_at.desc()
         ).limit(200).all()
-        return snapshots
+        return [schemas.QuotaSnapshot.model_validate(s).model_dump() for s in snapshots]
 
     try:
         snapshots = query.distinct(
@@ -650,15 +650,9 @@ def get_course_quota(
             models.QuotaSnapshot.department,
             models.QuotaSnapshot.captured_at.desc()
         ).all()
-    except Exception:
-        all_snaps = query.order_by(models.QuotaSnapshot.captured_at.desc()).limit(1000).all()
-        seen = set()
-        snapshots = []
-        for s in all_snaps:
-            k = (s.section, s.department)
-            if k not in seen:
-                seen.add(k)
-                snapshots.append(s)
+    except Exception as e:
+        logger.error(f"Failed to query quota snapshots for {clean_code}: {e}")
+        raise HTTPException(status_code=500, detail="Database error retrieving quota snapshots")
 
     snapshots.sort(key=lambda x: (x.section or '', x.department or ''))
     return [schemas.QuotaSnapshot.model_validate(s).model_dump() for s in snapshots]

@@ -3,13 +3,23 @@
   import { Calendar, User, Clock, MapPin, Hash, BookOpen, Info, Users, History, Activity } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import type { QuotaSnapshot, CourseChange, CourseHistoryItem } from "$lib/types";
+  import type { PageData } from "./$types";
 
-  let courseCode = $derived(page.params.code);
+  let { data }: { data: PageData } = $props();
+
+  let courseCode = $derived(data.courseCode || page.params.code);
   let history = $state<CourseHistoryItem[]>([]);
   let quotas = $state<QuotaSnapshot[]>([]);
   let changes = $state<CourseChange[]>([]);
-  let loading = $state(true);
+  let loading = $state(false);
   let error = $state<string | null>(null);
+
+  $effect(() => {
+    history = data.history ?? [];
+    quotas = data.quotas ?? [];
+    changes = data.changes ?? [];
+    error = data.error ?? null;
+  });
 
   async function fetchCourseData(targetCode?: string) {
     const code = targetCode || courseCode;
@@ -52,13 +62,6 @@
       loading = false;
     }
   }
-
-  // Reactively re-fetch when courseCode changes (including on client-side routing)
-  $effect(() => {
-    if (courseCode) {
-      fetchCourseData(courseCode);
-    }
-  });
 
   // Group by term
   const groupedHistory = $derived(

@@ -1,92 +1,31 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { TrendingUp, LayoutGrid, Award, BookOpen, Calendar } from "lucide-svelte";
-  import { API_BASE } from "$lib/config";
+  import { TrendingUp, LayoutGrid, Award, BookOpen, Calendar, RotateCcw, AlertTriangle } from "lucide-svelte";
+  import { invalidateAll } from "$app/navigation";
   import { Chart, registerables } from 'chart.js';
   import { Line } from 'svelte-chartjs';
+  import type { PageData } from './$types';
 
   Chart.register(...registerables);
 
-  let totalCourses = $state(0);
-  let totalDepts = $state(0);
-  let totalTerms = $state(0);
-  let loadingStats = $state(true);
+  let { data }: { data: PageData } = $props();
+
+  let totalCourses = $derived(data.totalCourses);
+  let totalDepts = $derived(data.totalDepts);
+  let totalTerms = $derived(data.totalTerms);
+  let isRetrying = $state(false);
 
   // Chart & Heatmap State
-  let evolutionData = $state<any>(null);
-  let heatmapData = $state<any[]>([]);
-  let loadingChart = $state(true);
-  let loadingHeatmap = $state(true);
+  let evolutionData = $derived(data.evolutionData);
+  let heatmapData = $derived(data.heatmapData ?? []);
 
-  async function fetchStats() {
-    loadingStats = true;
+  async function handleRetry() {
+    isRetrying = true;
     try {
-      const [searchRes, termsRes, deptsRes] = await Promise.allSettled([
-        fetch(`${API_BASE}/v1/search?limit=0`),
-        fetch(`${API_BASE}/v1/terms`),
-        fetch(`${API_BASE}/v1/departments`)
-      ]);
-      
-      let searchData: any = null;
-      let termsData: any[] = [];
-      let deptsData: any[] = [];
-
-      if (searchRes.status === "fulfilled" && searchRes.value.ok) {
-        searchData = await searchRes.value.json();
-      }
-      if (termsRes.status === "fulfilled" && termsRes.value.ok) {
-        termsData = await termsRes.value.json();
-      }
-      if (deptsRes.status === "fulfilled" && deptsRes.value.ok) {
-        deptsData = await deptsRes.value.json();
-      }
-
-      totalCourses = searchData?.totalHits ?? searchData?.estimatedTotalHits ?? (totalCourses || 136939);
-      totalTerms = Array.isArray(termsData) && termsData.length > 0 ? termsData.length : (totalTerms || 50);
-      totalDepts = Array.isArray(deptsData) && deptsData.length > 0 ? deptsData.length : (totalDepts || 72);
-    } catch (e) {
-      console.error("Failed to fetch dashboard stats", e);
-      totalCourses = totalCourses || 136939;
-      totalTerms = totalTerms || 50;
-      totalDepts = totalDepts || 72;
+      await invalidateAll();
     } finally {
-      loadingStats = false;
+      isRetrying = false;
     }
   }
-
-  async function fetchChartData() {
-    loadingChart = true;
-    try {
-      const res = await fetch(`${API_BASE}/v1/analytics/macro/departments-evolution`);
-      if (res.ok) {
-        evolutionData = await res.json();
-      }
-    } catch (e) {
-      console.error("Failed to fetch evolution data", e);
-    } finally {
-      loadingChart = false;
-    }
-  }
-
-  async function fetchHeatmapData() {
-    loadingHeatmap = true;
-    try {
-      const res = await fetch(`${API_BASE}/v1/analytics/macro/scheduling-heatmap`);
-      if (res.ok) {
-        heatmapData = await res.json();
-      }
-    } catch (e) {
-      console.error("Failed to fetch heatmap data", e);
-    } finally {
-      loadingHeatmap = false;
-    }
-  }
-
-  onMount(() => {
-    fetchStats();
-    fetchChartData();
-    fetchHeatmapData();
-  });
 
   // Chart preparation
   const evolutionChartData = $derived(evolutionData ? {
@@ -120,11 +59,33 @@
     return slot ? slot.count : 0;
   }
 
+  const hasStatsError = $derived(totalCourses === null && totalDepts === null && totalTerms === null);
+
   const statsList = $derived([
-    { label: "Total Courses", value: totalCourses.toLocaleString(), icon: BookOpen, color: "text-[#002d72] bg-[#002d72]/10 dark:text-sky-400 dark:bg-sky-500/10" },
-    { label: "Unique Departments", value: totalDepts.toString(), icon: Award, color: "text-[#0080c9] bg-[#0080c9]/10 dark:text-sky-300 dark:bg-sky-400/10" },
-    { label: "Semesters Logged", value: totalTerms.toString(), icon: Calendar, color: "text-[#c5a059] bg-[#c5a059]/15 dark:text-amber-300 dark:bg-amber-400/10" },
-    { label: "Historical Range", value: "50+ Years", icon: TrendingUp, color: "text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-950/40" }
+    { 
+      label: "Total Courses", 
+      value: totalCourses != null ? totalCourses.toLocaleString() : null, 
+      icon: BookOpen, 
+      color: "text-[#002d72] bg-[#002d72]/10 dark:text-sky-400 dark:bg-sky-500/10" 
+    },
+    { 
+      label: "Unique Departments", 
+      value: totalDepts != null ? totalDepts.toString() : null, 
+      icon: Award, 
+      color: "text-[#0080c9] bg-[#0080c9]/10 dark:text-sky-300 dark:bg-sky-400/10" 
+    },
+    { 
+      label: "Semesters Logged", 
+      value: totalTerms != null ? totalTerms.toString() : null, 
+      icon: Calendar, 
+      color: "text-[#c5a059] bg-[#c5a059]/15 dark:text-amber-300 dark:bg-amber-400/10" 
+    },
+    { 
+      label: "Historical Range", 
+      value: "50+ Years", 
+      icon: TrendingUp, 
+      color: "text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-950/40" 
+    }
   ]);
 </script>
 
@@ -134,6 +95,16 @@
       <h1 class="font-serif text-2xl sm:text-3xl font-bold text-[#1c1b18] dark:text-neutral-50 tracking-tight">University Overview</h1>
       <p class="font-sans text-xs sm:text-sm text-[#746f65] mt-1 sm:mt-1.5 dark:text-neutral-400">Historical offerings, faculty distribution, and scheduling patterns across 50 years.</p>
     </div>
+    {#if hasStatsError || data.hasError}
+      <button 
+        onclick={handleRetry}
+        disabled={isRetrying}
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#002d72] bg-[#002d72]/10 hover:bg-[#002d72]/20 dark:text-sky-400 dark:bg-sky-500/10 dark:hover:bg-sky-500/20 rounded-lg transition-colors cursor-pointer disabled:opacity-50 w-fit"
+      >
+        <RotateCcw size={13} class={isRetrying ? "animate-spin" : ""} />
+        <span>{isRetrying ? "Retrying..." : "Retry Overview"}</span>
+      </button>
+    {/if}
   </div>
 
   <!-- Stats Grid -->
@@ -142,10 +113,12 @@
       <div class="bg-[#f7f5ee] p-4 sm:p-5 rounded-xl border border-[#dbd7cc] shadow-2xs transition-all duration-200 dark:bg-[#18181b] dark:border-[#27272a] hover:border-[#c8c3b5] dark:hover:border-neutral-700 flex items-center justify-between">
         <div class="space-y-1 sm:space-y-1.5">
           <p class="font-sans text-[10px] sm:text-[11px] text-[#746f65] font-semibold uppercase tracking-wider dark:text-neutral-500">{stat.label}</p>
-          {#if loadingStats}
+          {#if isRetrying}
             <div class="h-7 sm:h-8 w-20 sm:w-24 bg-[#e7e4d9] animate-pulse rounded dark:bg-[#27272a]"></div>
-          {:else}
+          {:else if stat.value !== null}
             <h3 class="font-serif text-2xl sm:text-3xl font-bold text-[#1c1b18] dark:text-neutral-100 leading-none">{stat.value}</h3>
+          {:else}
+            <span class="font-mono text-base font-semibold text-[#8a857a] dark:text-neutral-500">—</span>
           {/if}
         </div>
         <div class="p-3 rounded-lg {stat.color} shrink-0">
@@ -168,26 +141,35 @@
       </div>
       
       <div class="flex-1 min-h-[260px] sm:min-h-[300px] flex items-center justify-center">
-        {#if loadingChart}
+        {#if isRetrying}
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[#002d72] dark:border-amber-400"></div>
-        {:else}
+        {:else if evolutionChartData}
           <div class="w-full h-full min-h-[260px] sm:min-h-[300px]">
-            {#if evolutionChartData}
-              <Line 
-                data={evolutionChartData} 
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10, family: 'Plus Jakarta Sans' } } }
-                  },
-                  scales: {
-                    y: { grid: { color: 'rgba(120,110,95,0.1)' } },
-                    x: { grid: { display: false } }
-                  }
-                }} 
-              />
-            {/if}
+            <Line 
+              data={evolutionChartData} 
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10, family: 'Plus Jakarta Sans' } } }
+                },
+                scales: {
+                  y: { grid: { color: 'rgba(120,110,95,0.1)' } },
+                  x: { grid: { display: false } }
+                }
+              }} 
+            />
+          </div>
+        {:else}
+          <div class="flex flex-col items-center justify-center text-center p-6 space-y-2 text-[#746f65] dark:text-neutral-400">
+            <AlertTriangle size={24} class="opacity-40" />
+            <p class="text-xs">Department evolution data unavailable.</p>
+            <button 
+              onclick={handleRetry}
+              class="text-xs font-semibold text-[#0080c9] dark:text-sky-400 hover:underline cursor-pointer"
+            >
+              Retry
+            </button>
           </div>
         {/if}
       </div>
@@ -204,9 +186,20 @@
       </div>
       
       <div class="flex-1 flex flex-col justify-center">
-        {#if loadingHeatmap}
+        {#if isRetrying}
           <div class="flex items-center justify-center h-48">
             <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[#002d72] dark:border-amber-400"></div>
+          </div>
+        {:else if heatmapData.length === 0}
+          <div class="flex flex-col items-center justify-center h-48 text-center p-6 space-y-2 text-[#746f65] dark:text-neutral-400">
+            <AlertTriangle size={24} class="opacity-40" />
+            <p class="text-xs">Scheduling heatmap data unavailable.</p>
+            <button 
+              onclick={handleRetry}
+              class="text-xs font-semibold text-[#0080c9] dark:text-sky-400 hover:underline cursor-pointer"
+            >
+              Retry
+            </button>
           </div>
         {:else}
           <div class="overflow-x-auto no-scrollbar">

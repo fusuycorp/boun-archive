@@ -2,13 +2,14 @@
   import { onMount } from "svelte";
   import { Search, Calendar, Plus, Trash2, AlertTriangle, Check, MapPin, BookOpen, Clock, RotateCcw } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import { safeParsePlannerCourses, type CoursePlannerItem } from "$lib/schemas/planner";
 
   // State
   let terms = $state<any[]>([]);
   let selectedTerm = $state("");
   let searchQuery = $state("");
   let searchResults = $state<any[]>([]);
-  let myCourses = $state<any[]>([]);
+  let myCourses = $state<CoursePlannerItem[]>([]);
   let loading = $state(false);
   let mobileTab = $state<"schedule" | "courses">("schedule");
   let days = ["M", "T", "W", "Th", "F", "St", "Su"];
@@ -19,17 +20,33 @@
       myCourses = [];
       return;
     }
+    const key = `planner_${term}`;
     try {
-      const saved = localStorage.getItem(`planner_${term}`);
+      const saved = localStorage.getItem(key);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          myCourses = parsed.filter(c => c && (c.id != null || c.course_code != null));
-          return;
+        const validated = safeParsePlannerCourses(saved);
+        myCourses = validated;
+
+        // Clean corrupt storage key if parsing returned nothing or sanitize if items were pruned
+        if (validated.length === 0) {
+          localStorage.removeItem(key);
+        } else {
+          try {
+            const raw = JSON.parse(saved);
+            if (!Array.isArray(raw) || raw.length !== validated.length) {
+              saveCoursesForTerm(term, validated);
+            }
+          } catch {
+            saveCoursesForTerm(term, validated);
+          }
         }
+        return;
       }
     } catch (e) {
       console.error("Failed to parse saved planner courses", e);
+      try {
+        localStorage.removeItem(key);
+      } catch {}
     }
     myCourses = [];
   }
@@ -120,7 +137,7 @@
     }
   }
 
-  function removeCourse(id: any, code?: string, sec?: string) {
+  function removeCourse(id: any, code?: string | null, sec?: string | null) {
     myCourses = myCourses.filter(c => {
       if (id != null && c.id != null && String(c.id) === String(id)) return false;
       if (code && sec && c.course_code === code && c.section === sec) return false;

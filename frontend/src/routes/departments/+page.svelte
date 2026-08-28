@@ -3,8 +3,11 @@
   import { BookOpen, Search, ArrowRight, ChevronRight, Hash, ArrowUpDown, User, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { exportToCSV } from "$lib/utils";
+  import type { PageData } from "./$types";
 
-  let departments = $state<any[]>([]);
+  let { data }: { data: PageData } = $props();
+
+  let departments = $derived(data.departments ?? []);
   let selectedDept = $state<string | null>(null);
   let uniqueCourses = $state<any[]>([]);
   let deptInstructors = $state<any[]>([]);
@@ -20,16 +23,7 @@
   let instructorSortColumn = $state("last_term");
   let instructorSortDirection = $state<"asc" | "desc">("desc");
 
-  async function fetchDepartments() {
-    try {
-      const res = await fetch(`${API_BASE}/v1/departments`);
-      if (res.ok) {
-        departments = await res.json();
-      }
-    } catch (e) {
-      console.error("Failed to fetch departments", e);
-    }
-    
+  function restoreSessionState() {
     // Restore state if available
     const savedDept = sessionStorage.getItem("dept_selected");
     const savedView = sessionStorage.getItem("dept_view_mode") as any;
@@ -137,7 +131,7 @@
     }
   }
 
-  onMount(fetchDepartments);
+  onMount(restoreSessionState);
 
   const filteredDepts = $derived(
     departments.filter(d => 

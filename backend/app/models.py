@@ -33,6 +33,7 @@ class Course(Base):
     __tablename__ = "courses"
     __table_args__ = (
         Index("idx_courses_lookup", "term_id", "course_code", "section"),
+        Index("idx_courses_term_dept", "term_id", "dept_kisaadi"),
     )
     id = Column(Integer, primary_key=True, index=True)
     term_id = Column(String(15), ForeignKey("terms.id"), index=True)
@@ -52,6 +53,9 @@ class Course(Base):
 
 class CourseSlot(Base):
     __tablename__ = "course_slots"
+    __table_args__ = (
+        Index("idx_slots_course_room", "course_id", "room_id"),
+    )
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, ForeignKey("courses.id"), index=True)
     day_code = Column(String(10), index=True)
@@ -70,6 +74,7 @@ class QuotaSnapshot(Base):
     __tablename__ = "quota_snapshots"
     __table_args__ = (
         Index("idx_quota_code_term_captured", "course_code", "term_id", "captured_at"),
+        Index("idx_quota_course_captured", "course_code", "captured_at"),
     )
     id = Column(Integer, primary_key=True, index=True)
     term_id = Column(String(15), ForeignKey("terms.id"), index=True)
