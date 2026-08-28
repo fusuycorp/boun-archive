@@ -35,43 +35,43 @@
 </script>
 
 <div class="space-y-6 sm:space-y-8 max-w-4xl mx-auto">
-  <div class="text-center space-y-3 sm:space-y-4 py-6 sm:py-12">
-    <div class="inline-flex p-3 sm:p-4 bg-[#002d72]/10 dark:bg-sky-500/15 rounded-3xl text-[#002d72] dark:text-sky-400 mb-1 sm:mb-2">
-      <User size={36} class="sm:w-12 sm:h-12" />
+  <div class="text-center space-y-3 sm:space-y-4 py-6 sm:py-10">
+    <div class="inline-flex p-3 sm:p-3.5 bg-[#002d72]/10 dark:bg-amber-400/10 rounded-2xl text-[#002d72] dark:text-amber-400 mb-1 sm:mb-2">
+      <User size={32} class="sm:w-10 sm:h-10" />
     </div>
-    <h2 class="text-2xl sm:text-4xl font-black text-slate-800 dark:text-slate-100 tracking-tight">Instructor Archive</h2>
-    <p class="text-slate-500 max-w-lg mx-auto dark:text-slate-400 font-medium text-xs sm:text-base px-4">Search and explore the historical teaching history and academic footprints of Bogazici faculty.</p>
+    <h1 class="font-serif text-2xl sm:text-4xl font-bold text-[#1c1b18] dark:text-neutral-50 tracking-tight">Instructor Archive</h1>
+    <p class="font-sans text-[#746f65] max-w-lg mx-auto dark:text-neutral-400 text-xs sm:text-sm px-4">Search and explore the historical teaching footprints and course offerings of Boğaziçi faculty.</p>
   </div>
 
   <!-- Search -->
   <div class="relative group">
-    <Search class="absolute left-4 sm:left-6 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#0080c9] dark:group-focus-within:text-sky-400 transition-colors" size={20} />
+    <Search class="absolute left-4 sm:left-5 top-1/2 -translate-y-1/2 text-[#746f65] group-focus-within:text-[#002d72] dark:group-focus-within:text-amber-400 transition-colors" size={18} />
     <input
       type="text"
       bind:value={query}
       oninput={handleInput}
-      placeholder="Search instructor (e.g. SEMA SAKARYA)..."
-      class="w-full pl-12 sm:pl-16 pr-4 sm:pr-6 py-4 sm:py-5 bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl shadow-2xs outline-none focus:ring-4 focus:ring-[#0080c9]/10 focus:border-[#0080c9] text-base sm:text-xl transition-all dark:bg-[#0f172a] dark:border-slate-800/80 dark:text-white dark:focus:border-sky-400"
+      placeholder="Search faculty name (e.g. SEMA SAKARYA)..."
+      class="w-full pl-11 sm:pl-14 pr-4 sm:pr-6 py-3.5 sm:py-4 bg-[#f7f5ee] border border-[#dbd7cc] rounded-xl shadow-2xs outline-none focus:ring-2 focus:ring-[#c5a059]/20 focus:border-[#c5a059] text-sm sm:text-base transition-all dark:bg-[#18181b] dark:border-[#27272a] dark:text-white dark:focus:border-amber-400"
     />
     
     {#if instructors.length > 0}
-      <div class="absolute w-full mt-2 sm:mt-4 bg-white border border-slate-200/80 rounded-2xl sm:rounded-3xl shadow-2xl z-50 overflow-hidden dark:bg-[#0f172a] dark:border-slate-800/80">
-        <div class="p-3 border-b border-slate-50 bg-slate-50/50 dark:bg-slate-950/50 dark:border-slate-800">
-           <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest px-3">Top Matches ({instructors.length})</span>
+      <div class="absolute w-full mt-2 bg-[#f7f5ee] border border-[#dbd7cc] rounded-xl shadow-xl z-50 overflow-hidden dark:bg-[#18181b] dark:border-[#27272a]">
+        <div class="p-2.5 border-b border-[#dbd7cc] bg-[#e7e4d9]/50 dark:bg-[#121214] dark:border-[#27272a]">
+           <span class="font-mono text-[10px] font-bold text-[#746f65] uppercase tracking-wider px-2">Top Matches ({instructors.length})</span>
         </div>
-        <div class="max-h-80 overflow-y-auto custom-scrollbar">
+        <div class="max-h-80 overflow-y-auto custom-scrollbar divide-y divide-[#dbd7cc]/70 dark:divide-[#27272a]">
           {#each instructors as inst}
             <button 
               onclick={() => selectInstructor(inst.id)}
-              class="w-full text-left px-4 sm:px-6 py-3.5 sm:py-4 hover:bg-[#002d72]/5 border-b border-slate-50 last:border-0 flex items-center justify-between group dark:hover:bg-sky-500/10 dark:border-slate-800/80 transition-colors cursor-pointer"
+              class="w-full text-left px-4 py-3 hover:bg-[#edeae0] flex items-center justify-between group dark:hover:bg-[#232328] transition-colors cursor-pointer"
             >
-              <div class="flex items-center space-x-3 sm:space-x-4">
-                <div class="w-8 sm:w-10 h-8 sm:h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 group-hover:bg-white dark:bg-slate-800 dark:text-slate-600 transition-colors shrink-0">
-                   <User size={18} />
+              <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 bg-[#e7e4d9] rounded-full flex items-center justify-center text-[#746f65] group-hover:bg-[#f7f5ee] dark:bg-[#27272a] dark:text-neutral-400 transition-colors shrink-0">
+                   <User size={15} />
                 </div>
-                <span class="text-sm sm:text-base font-bold text-slate-700 dark:text-slate-200 group-hover:text-[#002d72] dark:group-hover:text-sky-300 transition-colors">{inst.full_name}</span>
+                <span class="text-sm font-semibold text-[#1c1b18] dark:text-neutral-200 group-hover:text-[#002d72] dark:group-hover:text-amber-400 transition-colors">{inst.full_name}</span>
               </div>
-              <ArrowRight size={18} class="text-slate-300 opacity-60 sm:opacity-0 group-hover:opacity-100 -translate-x-2 sm:-translate-x-4 group-hover:translate-x-0 transition-all shrink-0" />
+              <ArrowRight size={15} class="text-[#746f65] opacity-60 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all shrink-0" />
             </button>
           {/each}
         </div>
@@ -80,14 +80,14 @@
   </div>
 
   <!-- Featured Stats Cards -->
-  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-6 sm:pt-12">
-     <div class="p-5 sm:p-8 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 shadow-2xs dark:bg-[#0f172a] dark:border-slate-800/80">
-        <h4 class="text-xs sm:text-sm font-black text-slate-400 uppercase tracking-widest mb-2 sm:mb-4">Historical Reach</h4>
-        <p class="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-100">Across 50 years of academic cycles.</p>
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-4 sm:pt-8">
+     <div class="p-5 sm:p-6 bg-[#f7f5ee] rounded-xl border border-[#dbd7cc] shadow-2xs dark:bg-[#18181b] dark:border-[#27272a]">
+        <h2 class="font-mono text-[10px] font-bold text-[#746f65] uppercase tracking-wider mb-2">Historical Reach</h2>
+        <p class="font-serif text-xl sm:text-2xl font-bold text-[#1c1b18] dark:text-neutral-100">Across 50 years of academic terms and curricular evolution.</p>
      </div>
-     <div class="p-5 sm:p-8 bg-[#002d72] rounded-2xl sm:rounded-3xl text-white shadow-md dark:shadow-none">
-        <h4 class="text-xs sm:text-sm font-black text-sky-200 uppercase tracking-widest mb-2 sm:mb-4">Data Coverage</h4>
-        <p class="text-xl sm:text-2xl font-bold">140,000+ course instances mapped to instructors.</p>
+     <div class="p-5 sm:p-6 bg-[#272521] text-white rounded-xl shadow-2xs dark:bg-[#1f1f23] dark:border dark:border-[#27272a]">
+        <h2 class="font-mono text-[10px] font-bold text-amber-300 dark:text-amber-400 uppercase tracking-wider mb-2">Curriculum Coverage</h2>
+        <p class="font-serif text-xl sm:text-2xl font-bold">Over 140,000 course records mapped across all faculty rosters.</p>
      </div>
   </div>
 </div>

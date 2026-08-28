@@ -74,43 +74,43 @@
 
 <div class="max-w-6xl mx-auto space-y-6 sm:space-y-8">
   {#if loading}
-    <div class="py-20 flex flex-col items-center justify-center space-y-4">
-      <div class="animate-spin rounded-full h-10 w-10 border-4 border-slate-100 border-t-[#002d72] dark:border-slate-800 dark:border-t-sky-400"></div>
-      <p class="text-slate-500 dark:text-slate-400 font-medium text-sm">Retrieving historical records...</p>
+    <div class="py-20 flex flex-col items-center justify-center space-y-3">
+      <div class="animate-spin rounded-full h-8 w-8 border-3 border-[#dbd7cc] border-t-[#002d72] dark:border-neutral-800 dark:border-t-amber-400"></div>
+      <p class="text-[#746f65] dark:text-neutral-400 font-medium text-xs">Retrieving historical records...</p>
     </div>
   {:else if error}
-    <div class="bg-white rounded-3xl border-2 border-dashed border-red-200 p-12 sm:p-24 flex flex-col items-center justify-center text-center dark:bg-[#0f172a] dark:border-red-900/30">
-      <div class="w-16 sm:w-20 h-16 sm:h-20 bg-red-50 rounded-full flex items-center justify-center text-red-300 mb-4 sm:mb-6 dark:bg-red-950 dark:text-red-900">
-        <Info size={36} />
+    <div class="bg-[#f7f5ee] rounded-xl border border-dashed border-red-200 p-12 sm:p-20 flex flex-col items-center justify-center text-center dark:bg-[#18181b] dark:border-red-900/30">
+      <div class="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center text-red-400 mb-4 dark:bg-red-950/40 dark:text-red-400">
+        <Info size={28} />
       </div>
-      <h3 class="text-xl sm:text-2xl font-bold text-slate-800 dark:text-slate-200">{error}</h3>
-      <p class="text-slate-500 dark:text-slate-400 mt-2 max-w-sm text-xs sm:text-sm">We couldn't find any historical data for the course code "{courseCode}".</p>
-      <div class="flex flex-wrap justify-center gap-3 mt-6 sm:mt-8">
-        <a href="/search" class="px-6 sm:px-8 py-2.5 sm:py-3 bg-[#002d72] text-white rounded-2xl text-xs sm:text-sm font-bold shadow-xs hover:bg-[#001f52] transition-colors">Back to Search</a>
-        <button onclick={() => fetchCourseData()} class="px-6 sm:px-8 py-2.5 sm:py-3 bg-white border border-slate-200 text-slate-600 rounded-2xl text-xs sm:text-sm font-bold hover:bg-slate-50 transition-colors cursor-pointer">Retry</button>
+      <h2 class="font-serif text-xl sm:text-2xl font-bold text-[#1c1b18] dark:text-neutral-200">{error}</h2>
+      <p class="text-[#746f65] dark:text-neutral-400 mt-2 max-w-sm text-xs sm:text-sm">We couldn't find any historical data for the course code "{courseCode}".</p>
+      <div class="flex flex-wrap justify-center gap-3 mt-6">
+        <a href="/search" class="px-6 py-2.5 bg-[#002d72] text-white rounded-lg text-xs font-semibold shadow-2xs hover:bg-[#001f52] transition-colors">Back to Search</a>
+        <button onclick={() => fetchCourseData()} class="px-6 py-2.5 bg-[#f7f5ee] border border-[#dbd7cc] text-[#45423b] rounded-lg text-xs font-semibold hover:bg-[#dedacb] dark:bg-[#27272a] dark:border-[#3f3f46] dark:text-neutral-200 transition-colors cursor-pointer">Retry</button>
       </div>
     </div>
   {:else}
     <!-- Header -->
-    <header class="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 p-5 sm:p-8 shadow-2xs dark:bg-[#0f172a] dark:border-slate-800/80">
+    <header class="bg-[#f7f5ee] rounded-xl border border-[#dbd7cc] p-5 sm:p-7 shadow-2xs dark:bg-[#18181b] dark:border-[#27272a]">
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div class="space-y-3 sm:space-y-4">
+        <div class="space-y-3">
           <div class="flex items-center space-x-3">
-            <span class="px-3 py-1 bg-[#002d72] text-white text-xs font-black rounded-lg uppercase tracking-wider shadow-xs dark:shadow-none">{courseCode}</span>
-            <span class="text-xs font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">Historical Archive</span>
+            <span class="px-2.5 py-1 bg-[#002d72] text-white font-mono text-xs font-bold rounded uppercase tracking-wider shadow-2xs dark:bg-amber-400/10 dark:text-amber-300 dark:border dark:border-amber-400/20">{courseCode}</span>
+            <span class="font-mono text-[10px] font-bold text-[#746f65] dark:text-neutral-500 uppercase tracking-widest">Academic Catalog</span>
           </div>
-          <h1 class="text-2xl sm:text-4xl font-black text-slate-800 dark:text-slate-100 leading-tight">{latestInfo?.title}</h1>
-          <div class="flex flex-wrap gap-4 sm:gap-6 text-xs sm:text-sm">
-             <div class="flex items-center space-x-1.5 text-slate-500 dark:text-slate-400 font-bold">
-               <BookOpen size={16} class="text-[#0080c9] dark:text-sky-400 shrink-0" />
+          <h1 class="font-serif text-2xl sm:text-4xl font-bold text-[#1c1b18] dark:text-neutral-50 leading-tight">{latestInfo?.title}</h1>
+          <div class="flex flex-wrap gap-4 sm:gap-6 text-xs font-mono">
+             <div class="flex items-center space-x-1.5 text-[#5c5850] dark:text-neutral-400">
+               <BookOpen size={14} class="text-[#0080c9] dark:text-amber-400 shrink-0" />
                <span>{latestInfo?.credits} Credits</span>
              </div>
-             <div class="flex items-center space-x-1.5 text-slate-500 dark:text-slate-400 font-bold">
-               <Hash size={16} class="text-[#0080c9] dark:text-sky-400 shrink-0" />
+             <div class="flex items-center space-x-1.5 text-[#5c5850] dark:text-neutral-400">
+               <Hash size={14} class="text-[#0080c9] dark:text-amber-400 shrink-0" />
                <span>{latestInfo?.ects} ECTS</span>
              </div>
-             <div class="flex items-center space-x-1.5 text-slate-500 dark:text-slate-400 font-bold">
-               <Calendar size={16} class="text-[#0080c9] dark:text-sky-400 shrink-0" />
+             <div class="flex items-center space-x-1.5 text-[#5c5850] dark:text-neutral-400">
+               <Calendar size={14} class="text-[#0080c9] dark:text-amber-400 shrink-0" />
                <span>Offered in {Object.keys(groupedHistory).length} Semesters</span>
              </div>
           </div>
@@ -120,63 +120,63 @@
 
     <!-- Live Quota Section (if available) -->
     {#if quotas.length > 0}
-      <section class="bg-gradient-to-br from-[#002d72]/5 to-white dark:from-[#0f172a] dark:to-[#0f172a]/60 rounded-2xl sm:rounded-3xl border border-[#002d72]/15 dark:border-slate-800 p-5 sm:p-8 shadow-2xs space-y-4 sm:space-y-6">
+      <section class="bg-[#f7f5ee] dark:bg-[#18181b] rounded-xl border border-[#dbd7cc] dark:border-[#27272a] p-5 sm:p-6 shadow-2xs space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div class="flex items-center space-x-3">
-            <span class="p-2 bg-[#002d72] text-white rounded-xl shadow-xs shrink-0">
-              <Users size={18} />
+            <span class="p-2 bg-[#002d72] dark:bg-[#27272a] text-white dark:text-amber-400 rounded-lg shadow-2xs shrink-0">
+              <Users size={16} />
             </span>
             <div>
-              <h2 class="text-base sm:text-lg font-black text-slate-800 dark:text-slate-100 tracking-tight">Live Term Quotas</h2>
-              <p class="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">Current registration portal snapshot for {quotas[0].term_id}</p>
+              <h2 class="font-serif text-base sm:text-lg font-bold text-[#1c1b18] dark:text-neutral-100 tracking-tight">Live Term Quotas</h2>
+              <p class="font-sans text-[11px] sm:text-xs text-[#746f65] dark:text-neutral-400">Current registration portal capacity for {quotas[0].term_id}</p>
             </div>
           </div>
-          <div class="flex items-center space-x-1.5 text-xs font-semibold text-[#002d72] dark:text-sky-300 bg-[#002d72]/10 dark:bg-sky-500/15 px-3 py-1 rounded-full w-fit">
-            <Activity size={13} class="animate-pulse" />
+          <div class="flex items-center space-x-1.5 font-mono text-[11px] font-medium text-emerald-800 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-600/20 px-2.5 py-1 rounded-md w-fit">
+            <Activity size={12} class="animate-pulse" />
             <span>Updated {quotas[0].captured_at}</span>
           </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {#each quotas as q}
-            <div class="bg-white dark:bg-slate-950/60 rounded-2xl border border-slate-200/80 dark:border-slate-800 p-4 sm:p-5 space-y-3 shadow-2xs">
+            <div class="bg-[#eeece2]/60 dark:bg-[#121214] rounded-xl border border-[#dbd7cc] dark:border-[#27272a] p-4 space-y-3 shadow-2xs">
               <div class="flex items-center justify-between">
-                <span class="px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-black rounded-lg">
+                <span class="px-2 py-0.5 bg-[#dedacb] dark:bg-[#27272a] text-[#1c1b18] dark:text-neutral-200 font-mono text-xs font-bold rounded">
                   Sec {q.section || '01'}
                 </span>
-                <span class="text-xs font-bold px-2 py-0.5 rounded-full {q.status === 'Open' || (q.available ?? 0) > 0 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400'}">
+                <span class="font-mono text-[11px] font-semibold px-2 py-0.5 rounded border {q.status === 'Open' || (q.available ?? 0) > 0 ? 'bg-emerald-500/10 text-emerald-800 border-emerald-600/20 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-800 border-rose-600/20 dark:text-rose-400'}">
                   {q.status || (q.available && q.available > 0 ? 'Open' : 'Full')}
                 </span>
               </div>
 
               {#if q.department}
-                <p class="text-xs text-slate-500 dark:text-slate-400 font-medium truncate">Department: <span class="font-bold text-slate-700 dark:text-slate-300">{q.department}</span></p>
+                <p class="text-xs text-[#746f65] dark:text-neutral-400 font-medium truncate font-mono">Dept: <span class="font-bold text-[#1c1b18] dark:text-neutral-200">{q.department}</span></p>
               {/if}
 
-              <div class="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 text-center">
-                <div class="p-2 bg-slate-50 dark:bg-slate-900 rounded-xl">
-                  <span class="block text-[9px] uppercase font-bold text-slate-400">Quota</span>
-                  <span class="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-200">{q.quota ?? '—'}</span>
+              <div class="grid grid-cols-3 gap-1.5 pt-2 border-t border-[#dbd7cc] dark:border-[#27272a] text-center font-mono">
+                <div class="p-1.5 bg-[#f7f5ee] dark:bg-[#18181b] rounded border border-[#dbd7cc]/70 dark:border-[#27272a]">
+                  <span class="block text-[8px] uppercase font-bold text-[#746f65]">Quota</span>
+                  <span class="text-xs sm:text-sm font-bold text-[#1c1b18] dark:text-neutral-200">{q.quota ?? '—'}</span>
                 </div>
-                <div class="p-2 bg-slate-50 dark:bg-slate-900 rounded-xl">
-                  <span class="block text-[9px] uppercase font-bold text-slate-400">Current</span>
-                  <span class="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-200">{q.current ?? '—'}</span>
+                <div class="p-1.5 bg-[#f7f5ee] dark:bg-[#18181b] rounded border border-[#dbd7cc]/70 dark:border-[#27272a]">
+                  <span class="block text-[8px] uppercase font-bold text-[#746f65]">Current</span>
+                  <span class="text-xs sm:text-sm font-bold text-[#1c1b18] dark:text-neutral-200">{q.current ?? '—'}</span>
                 </div>
-                <div class="p-2 bg-slate-50 dark:bg-slate-900 rounded-xl">
-                  <span class="block text-[9px] uppercase font-bold text-slate-400">Available</span>
-                  <span class="text-xs sm:text-sm font-black {q.available && q.available > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}">
+                <div class="p-1.5 bg-[#f7f5ee] dark:bg-[#18181b] rounded border border-[#dbd7cc]/70 dark:border-[#27272a]">
+                  <span class="block text-[8px] uppercase font-bold text-[#746f65]">Available</span>
+                  <span class="text-xs sm:text-sm font-bold {q.available && q.available > 0 ? 'text-emerald-800 dark:text-emerald-400' : 'text-[#746f65]'}">
                     {q.available ?? '0'}
                   </span>
                 </div>
               </div>
 
               {#if q.is_consent || q.is_unlimited}
-                <div class="flex flex-wrap gap-1.5 pt-1">
+                <div class="flex flex-wrap gap-1.5 pt-1 font-mono text-[9px]">
                   {#if q.is_consent}
-                    <span class="text-[10px] font-bold px-2 py-0.5 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 rounded-md">Consent Required</span>
+                    <span class="px-2 py-0.5 bg-amber-500/10 text-amber-950 dark:bg-amber-400/10 dark:text-amber-300 rounded border border-amber-500/20 font-semibold">Consent Required</span>
                   {/if}
                   {#if q.is_unlimited}
-                    <span class="text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 rounded-md">Unlimited</span>
+                    <span class="px-2 py-0.5 bg-sky-500/10 text-sky-950 dark:bg-sky-400/10 dark:text-sky-300 rounded border border-sky-500/20 font-semibold">Unlimited</span>
                   {/if}
                 </div>
               {/if}
@@ -188,26 +188,26 @@
 
     <!-- Recent Schedule Changes (if available) -->
     {#if changes.length > 0}
-      <section class="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/80 dark:bg-[#0f172a] dark:border-slate-800/80 p-5 sm:p-8 shadow-2xs space-y-4">
+      <section class="bg-[#f7f5ee] rounded-xl border border-[#dbd7cc] dark:bg-[#18181b] dark:border-[#27272a] p-5 sm:p-6 shadow-2xs space-y-4">
         <div class="flex items-center space-x-3">
-          <span class="p-2 bg-[#002d72]/10 dark:bg-sky-500/15 text-[#002d72] dark:text-sky-400 rounded-xl">
-            <History size={18} />
+          <span class="p-2 bg-[#002d72]/10 dark:bg-[#27272a] text-[#002d72] dark:text-amber-400 rounded-lg">
+            <History size={16} />
           </span>
-          <h2 class="text-base sm:text-lg font-black text-slate-800 dark:text-slate-100 tracking-tight">Recent Schedule Changes</h2>
+          <h2 class="font-serif text-base sm:text-lg font-bold text-[#1c1b18] dark:text-neutral-100 tracking-tight">Recent Schedule Audit Log</h2>
         </div>
 
-        <div class="space-y-2.5">
+        <div class="space-y-2">
           {#each changes as ch}
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-950/50 rounded-2xl border border-slate-100 dark:border-slate-800 gap-2">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-[#eeece2] dark:bg-[#121214] rounded-lg border border-[#dbd7cc] dark:border-[#27272a] gap-2 font-mono">
               <div class="flex items-center space-x-2.5">
-                <span class="px-2 py-0.5 text-[10px] sm:text-xs font-black uppercase rounded {ch.change_type === 'added' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : ch.change_type === 'modified' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'}">
+                <span class="px-2 py-0.5 text-[10px] font-bold uppercase rounded border {ch.change_type === 'added' ? 'bg-emerald-500/10 text-emerald-900 border-emerald-600/20 dark:text-emerald-400' : ch.change_type === 'modified' ? 'bg-amber-500/10 text-amber-950 border-amber-500/20 dark:text-amber-300' : 'bg-rose-500/10 text-rose-900 border-rose-600/20 dark:text-rose-400'}">
                   {ch.change_type}
                 </span>
-                <span class="text-xs font-bold text-slate-700 dark:text-slate-200">
+                <span class="text-xs text-[#1c1b18] dark:text-neutral-200">
                   Section {ch.section || 'All'} · {ch.details || 'Course updated'}
                 </span>
               </div>
-              <span class="text-[10px] sm:text-[11px] text-slate-400 dark:text-slate-500 font-mono">
+              <span class="text-[10px] text-[#746f65] dark:text-neutral-500">
                 {ch.timestamp}
               </span>
             </div>
@@ -217,45 +217,45 @@
     {/if}
 
     <!-- History Timeline -->
-    <div class="space-y-8 sm:space-y-12">
+    <div class="space-y-6 sm:space-y-8">
       {#each Object.keys(groupedHistory) as term}
-        <section class="space-y-3 sm:space-y-4">
-          <div class="flex items-center space-x-3">
-            <span class="w-1.5 sm:w-2 h-6 sm:h-8 bg-[#002d72] dark:bg-sky-500 rounded-full"></span>
-            <h2 class="text-lg sm:text-xl font-black text-slate-800 dark:text-slate-100 uppercase tracking-widest">{term}</h2>
+        <section class="space-y-3">
+          <div class="flex items-center space-x-2.5">
+            <span class="w-1.5 h-5 bg-[#002d72] dark:bg-amber-400 rounded-full"></span>
+            <h2 class="font-mono text-base font-bold text-[#1c1b18] dark:text-neutral-100 uppercase tracking-wider">{term}</h2>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {#each groupedHistory[term] as section}
-              <div class="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-6 shadow-2xs hover:border-[#0080c9] dark:bg-[#0f172a] dark:border-slate-800/80 dark:hover:border-sky-500/50 transition-all group">
-                <div class="flex items-center justify-between mb-3 sm:mb-4">
-                  <div class="px-2 py-0.5 bg-slate-50 text-slate-500 text-[10px] font-black rounded uppercase dark:bg-slate-950 dark:text-slate-400">Section {section.section}</div>
-                  <div class="text-[9px] sm:text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">{section.delivery_method || 'Standard'}</div>
+              <div class="bg-[#f7f5ee] rounded-xl border border-[#dbd7cc] p-4 sm:p-5 shadow-2xs hover:border-[#c8c3b5] dark:bg-[#18181b] dark:border-[#27272a] dark:hover:border-neutral-700 transition-colors group space-y-3">
+                <div class="flex items-center justify-between">
+                  <div class="px-2 py-0.5 bg-[#e7e4d9] dark:bg-[#27272a] text-[#45423b] dark:text-neutral-300 text-[10px] font-mono font-bold rounded uppercase">Section {section.section}</div>
+                  <div class="text-[9px] font-mono font-semibold text-[#746f65] dark:text-neutral-500 uppercase tracking-wider">{section.delivery_method || 'Standard'}</div>
                 </div>
                 
-                <div class="space-y-3 sm:space-y-4">
-                  <div class="flex items-start space-x-3">
-                    <User size={16} class="text-[#0080c9] dark:text-sky-400 mt-0.5 shrink-0" />
+                <div class="space-y-2.5">
+                  <div class="flex items-start space-x-2.5">
+                    <User size={14} class="text-[#746f65] mt-0.5 shrink-0" />
                     <div>
-                      <p class="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">Instructor</p>
-                      <p class="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200">{section.instructor}</p>
+                      <p class="font-mono text-[9px] text-[#746f65] uppercase tracking-wider">Instructor</p>
+                      <p class="text-xs sm:text-sm font-semibold text-[#1c1b18] dark:text-neutral-200">{section.instructor}</p>
                     </div>
                   </div>
 
-                  <div class="flex items-start space-x-3">
-                    <Clock size={16} class="text-[#0080c9] dark:text-sky-400 mt-0.5 shrink-0" />
+                  <div class="flex items-start space-x-2.5">
+                    <Clock size={14} class="text-[#746f65] mt-0.5 shrink-0" />
                     <div class="w-full">
-                      <p class="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase tracking-widest">Schedule & Room</p>
-                      <div class="space-y-1.5 mt-1">
+                      <p class="font-mono text-[9px] text-[#746f65] uppercase tracking-wider">Schedule & Room</p>
+                      <div class="space-y-1 mt-1 font-mono">
                         {#each section.slots as slot}
-                          <div class="flex items-center justify-between text-xs bg-slate-50 p-2 rounded-lg dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800">
+                          <div class="flex items-center justify-between text-xs bg-[#eeece2] p-1.5 rounded dark:bg-[#121214] border border-[#dbd7cc] dark:border-[#27272a]">
                              <div class="flex items-center space-x-1.5">
-                               <span class="font-black text-[#002d72] dark:text-sky-400 w-4">{slot.day}</span>
-                               <span class="text-slate-600 dark:text-slate-300">Slot {slot.hour}</span>
+                               <span class="font-bold text-[#002d72] dark:text-amber-400 w-4">{slot.day}</span>
+                               <span class="text-[#5c5850] dark:text-neutral-400">Slot {slot.hour}</span>
                              </div>
-                             <div class="flex items-center space-x-1 text-slate-400 dark:text-slate-500 truncate max-w-[100px]">
-                               <MapPin size={10} class="shrink-0" />
-                               <span class="truncate font-bold">{slot.room}</span>
+                             <div class="flex items-center space-x-1 text-[#746f65] truncate max-w-[100px]">
+                               <MapPin size={9} class="shrink-0" />
+                               <span class="truncate font-semibold">{slot.room}</span>
                              </div>
                           </div>
                         {/each}

@@ -119,9 +119,23 @@ export interface FeedState {
   updated_at?: string | null;
 }
 
+export interface UpstreamRunInfo {
+  run_id?: string | null;
+  term?: string | null;
+  status?: string | null;
+  total_courses?: number | null;
+  changes_detected?: number | null;
+  completed_at?: string | null;
+  started_at?: string | null;
+}
+
 export interface SystemStatus {
   status: string;
   latest_scrape_time?: string | null;
+  upstream_scrape_time?: string | null;
+  last_sync_time?: string | null;
+  is_stale?: boolean;
+  upstream_run?: UpstreamRunInfo | null;
   feeds?: Record<string, FeedState>;
 }
 

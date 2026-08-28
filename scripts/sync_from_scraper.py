@@ -632,9 +632,33 @@ def backfill_term(
     return len(touched_courses)
 
 
+def sync_upstream_run_metadata(session, client: ScraperClient, dry_run: bool = False) -> Optional[Dict[str, Any]]:
+    """Fetch latest scrape run execution metadata from upstream boun-scrape."""
+    try:
+        runs = client.get("feeds/runs", params={"limit": 1})
+        if runs and isinstance(runs, list) and len(runs) > 0:
+            latest_run = runs[0]
+            run_ts = latest_run.get("completed_at") or latest_run.get("started_at")
+            if run_ts and not dry_run:
+                state = session.query(SyncState).filter(SyncState.feed_name == "upstream_run").first()
+                if not state:
+                    state = SyncState(feed_name="upstream_run", last_cursor=run_ts)
+                    session.add(state)
+                else:
+                    state.last_cursor = run_ts
+                    state.updated_at = func.now()
+                session.commit()
+            return latest_run
+    except Exception as e:
+        logger.warning("Could not fetch upstream scrape runs: %s", e)
+    return None
+
+
 def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) -> None:
     session = session_factory()
     try:
+        sync_upstream_run_metadata(session, client, dry_run=args.dry_run)
+
         if args.mode == "backfill":
             backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
         elif args.mode == "full":
@@ -647,13 +671,14 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
 
         if not args.dry_run:
             now_iso = datetime.now(timezone.utc).isoformat()
-            state = session.query(SyncState).filter(SyncState.feed_name == "scraper").first()
-            if not state:
-                state = SyncState(feed_name="scraper", last_cursor=now_iso)
-                session.add(state)
-            else:
-                state.last_cursor = now_iso
-                state.updated_at = func.now()
+            for feed in ("local_sync", "scraper"):
+                state = session.query(SyncState).filter(SyncState.feed_name == feed).first()
+                if not state:
+                    state = SyncState(feed_name=feed, last_cursor=now_iso)
+                    session.add(state)
+                else:
+                    state.last_cursor = now_iso
+                    state.updated_at = func.now()
             session.commit()
     except Exception:
         session.rollback()

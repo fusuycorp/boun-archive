@@ -7,8 +7,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
+from datetime import datetime, timezone
 from typing import Literal, List, Optional
 from redis import asyncio as aioredis
 from fastapi_cache import FastAPICache
@@ -54,12 +55,28 @@ async def lifespan(app: FastAPI):
     redis = aioredis.from_url(redis_url)
     FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache", key_builder=custom_key_builder)
     
-    # Ensure Meilisearch 'courses' index exists with primary key 'id'
+    # Ensure Meilisearch 'courses' index exists with primary key 'id' and correct settings
     try:
-        MEILI_CLIENT.create_index('courses', {'primaryKey': 'id'})
-    except MeilisearchApiError as e:
-        if e.code != "index_already_exists":
-            logger.error("Failed to create Meilisearch 'courses' index: %s", e)
+        try:
+            MEILI_CLIENT.create_index('courses', {'primaryKey': 'id'})
+        except MeilisearchApiError as e:
+            if e.code != "index_already_exists":
+                logger.error("Failed to create Meilisearch 'courses' index: %s", e)
+
+        MEILI_CLIENT.index('courses').update_settings({
+            'filterableAttributes': [
+                'term', 'dept_code', 'department', 'instructor', 'delivery_method'
+            ],
+            'searchableAttributes': [
+                'course_code', 'title', 'instructor', 'department'
+            ],
+            'faceting': {
+                'maxValuesPerFacet': 1000
+            },
+            'sortableAttributes': ['term', 'course_code', 'title', 'instructor', 'credits', 'ects']
+        })
+    except Exception as e:
+        logger.warning("Meilisearch setup/configuration encountered an issue on startup: %s", e)
 
     try:
         yield
@@ -93,6 +110,127 @@ MEILI_CLIENT = meilisearch.Client(
     MEILI_MASTER_KEY
 )
 
+def _get_global_facets_from_db(db: Session) -> dict:
+    try:
+        term_counts = dict(
+            db.query(models.Course.term_id, func.count(models.Course.id))
+            .group_by(models.Course.term_id)
+            .all()
+        )
+        dept_counts = dict(
+            db.query(models.Course.dept_kisaadi, func.count(models.Course.id))
+            .group_by(models.Course.dept_kisaadi)
+            .all()
+        )
+        delivery_counts = dict(
+            db.query(models.Course.delivery_method, func.count(models.Course.id))
+            .filter(models.Course.delivery_method.isnot(None))
+            .group_by(models.Course.delivery_method)
+            .all()
+        )
+        return {
+            "term": term_counts,
+            "dept_code": dept_counts,
+            "delivery_method": delivery_counts
+        }
+    except Exception as e:
+        logger.error("DB facet fallback error: %s", e)
+        return {"term": {}, "dept_code": {}, "delivery_method": {}}
+
+def _search_courses_from_db(
+    db: Session,
+    q: str,
+    term: Optional[List[str]],
+    dept: Optional[List[str]],
+    instructor: Optional[str],
+    sort_by: Optional[str],
+    sort_order: str,
+    limit: int,
+    offset: int
+) -> dict:
+    try:
+        query = db.query(models.Course).options(
+            joinedload(models.Course.department),
+            joinedload(models.Course.instructor)
+        )
+        
+        if q and q.strip():
+            clean_q = escape_sql_wildcards(q.strip())
+            pattern = f"%{clean_q}%"
+            query = query.outerjoin(models.Instructor).outerjoin(models.Department).filter(
+                or_(
+                    models.Course.course_code.ilike(pattern),
+                    models.Course.title.ilike(pattern),
+                    models.Instructor.full_name.ilike(pattern),
+                    models.Department.bolum.ilike(pattern)
+                )
+            )
+        
+        if term:
+            query = query.filter(models.Course.term_id.in_(term))
+        if dept:
+            query = query.filter(models.Course.dept_kisaadi.in_(dept))
+        if instructor:
+            query = query.join(models.Instructor).filter(models.Instructor.full_name == instructor)
+            
+        total_hits = query.count()
+        
+        # Sorting
+        if sort_by == "course_code":
+            order_col = models.Course.course_code
+        elif sort_by == "title":
+            order_col = models.Course.title
+        elif sort_by == "credits":
+            order_col = models.Course.credits
+        elif sort_by == "ects":
+            order_col = models.Course.ects
+        elif sort_by == "term":
+            order_col = models.Course.term_id
+        else:
+            order_col = models.Course.course_code
+            
+        if sort_order == "desc":
+            query = query.order_by(order_col.desc())
+        else:
+            query = query.order_by(order_col.asc())
+            
+        courses = query.offset(offset).limit(limit).all()
+        
+        hits = []
+        for c in courses:
+            hits.append({
+                "id": c.id,
+                "course_code": c.course_code,
+                "title": c.title,
+                "section": c.section,
+                "term": c.term_id,
+                "department": c.department.bolum if c.department else None,
+                "dept_code": c.dept_kisaadi,
+                "instructor": c.instructor.full_name if c.instructor else "TBA",
+                "credits": c.credits,
+                "ects": c.ects,
+                "delivery_method": c.delivery_method
+            })
+            
+        return {
+            "hits": hits,
+            "offset": offset,
+            "limit": limit,
+            "estimatedTotalHits": total_hits,
+            "totalHits": total_hits,
+            "facetDistribution": _get_global_facets_from_db(db)
+        }
+    except Exception as e:
+        logger.error("DB search fallback error: %s", e)
+        return {
+            "hits": [],
+            "offset": offset,
+            "limit": limit,
+            "estimatedTotalHits": 0,
+            "totalHits": 0,
+            "facetDistribution": {}
+        }
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the BOUN Archive API"}
@@ -108,31 +246,61 @@ def health_check():
 def get_system_status(db: Session = Depends(database.get_db)):
     sync_states = db.query(models.SyncState).all()
     feed_map = {}
-    latest_ts = None
+    
+    upstream_scrape_ts = None
+    local_sync_ts = None
 
     for s in sync_states:
         feed_map[s.feed_name] = {
             "last_cursor": s.last_cursor,
             "updated_at": s.updated_at.isoformat() if s.updated_at else None
         }
-        if s.last_cursor:
-            if latest_ts is None or s.last_cursor > latest_ts:
-                latest_ts = s.last_cursor
-        elif s.updated_at:
-            iso_u = s.updated_at.isoformat()
-            if latest_ts is None or iso_u > latest_ts:
-                latest_ts = iso_u
+        if s.feed_name == "upstream_run" and s.last_cursor:
+            upstream_scrape_ts = s.last_cursor
+        elif s.feed_name in ("local_sync", "scraper"):
+            local_sync_ts = s.last_cursor or (s.updated_at.isoformat() if s.updated_at else None)
 
-    if not latest_ts:
+    # Fallback to actual data points if upstream_run row is not yet populated
+    if not upstream_scrape_ts:
+        candidates = []
+        if "deltas" in feed_map and feed_map["deltas"]["last_cursor"]:
+            candidates.append(feed_map["deltas"]["last_cursor"])
+        if "quota_snapshots" in feed_map and feed_map["quota_snapshots"]["last_cursor"]:
+            candidates.append(feed_map["quota_snapshots"]["last_cursor"])
+
         latest_change = db.query(func.max(models.CourseChange.timestamp)).scalar()
         latest_quota = db.query(func.max(models.QuotaSnapshot.captured_at)).scalar()
-        candidates = [c for c in [latest_change, latest_quota] if c]
+        if latest_change:
+            candidates.append(latest_change)
+        if latest_quota:
+            candidates.append(latest_quota)
+
         if candidates:
-            latest_ts = max(candidates)
+            upstream_scrape_ts = max(candidates)
+
+    # Calculate staleness (>24 hours)
+    is_stale = False
+    if upstream_scrape_ts:
+        try:
+            clean_ts = upstream_scrape_ts.replace("Z", "+00:00")
+            ts_dt = datetime.fromisoformat(clean_ts)
+            if ts_dt.tzinfo is None:
+                ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - ts_dt).total_seconds() / 3600
+            if age_hours > 24:
+                is_stale = True
+        except Exception:
+            pass
+    else:
+        is_stale = True
 
     return {
-        "status": "healthy",
-        "latest_scrape_time": latest_ts,
+        "status": "healthy" if not is_stale else "stale",
+        "latest_scrape_time": upstream_scrape_ts,
+        "upstream_scrape_time": upstream_scrape_ts,
+        "last_sync_time": local_sync_ts,
+        "is_stale": is_stale,
+        "upstream_run": None,
         "feeds": feed_map
     }
 
@@ -145,8 +313,9 @@ def search_courses(
     instructor: Optional[str] = None,
     sort_by: Optional[str] = Query(None),
     sort_order: Literal["asc", "desc"] = "asc",
-    limit: int = Query(20, ge=0, le=100),
-    offset: int = Query(0, ge=0, le=10_000)
+    limit: int = Query(20, ge=0, le=500),
+    offset: int = Query(0, ge=0, le=10_000),
+    db: Session = Depends(database.get_db)
 ):
     filter_list = []
     
@@ -185,26 +354,28 @@ def search_courses(
             'facets': ['term', 'dept_code', 'instructor', 'delivery_method'],
             'sort': sort_list
         })
+        # If meili returned 0 hits on empty search or failed, verify and return
         return results
-    except MeilisearchApiError as e:
-        if e.code == "index_not_found":
-            raise HTTPException(status_code=503, detail="Search index not ready")
-        raise HTTPException(status_code=500, detail="Search service error")
+    except Exception as e:
+        logger.warning("Meilisearch search error, falling back to PostgreSQL: %s", e)
+        return _search_courses_from_db(db, q, term, dept, instructor, sort_by, sort_order, limit, offset)
 
 @app.get("/v1/facets")
 @cache(expire=3600)
-def get_global_facets():
+def get_global_facets(db: Session = Depends(database.get_db)):
     try:
         # Return facets for all documents (empty search)
         results = MEILI_CLIENT.index('courses').search("", {
             'facets': ['term', 'dept_code', 'delivery_method'],
             'limit': 0
         })
-        return results.get('facetDistribution', {})
-    except MeilisearchApiError as e:
-        if e.code == "index_not_found":
-            raise HTTPException(status_code=503, detail="Search index not ready")
-        raise HTTPException(status_code=500, detail="Search service error")
+        facet_dist = results.get('facetDistribution', {})
+        if not facet_dist or not facet_dist.get('term'):
+            return _get_global_facets_from_db(db)
+        return facet_dist
+    except Exception as e:
+        logger.warning("Meilisearch facets error, falling back to PostgreSQL: %s", e)
+        return _get_global_facets_from_db(db)
 
 @app.get("/v1/analytics/ghost-schedule/{term:path}")
 @cache(expire=3600)

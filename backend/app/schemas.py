@@ -113,7 +113,20 @@ class FeedState(BaseModel):
     last_cursor: Optional[str] = None
     updated_at: Optional[str] = None
 
+class UpstreamRunInfo(BaseModel):
+    run_id: Optional[str] = None
+    term: Optional[str] = None
+    status: Optional[str] = None
+    total_courses: Optional[int] = None
+    changes_detected: Optional[int] = None
+    completed_at: Optional[str] = None
+    started_at: Optional[str] = None
+
 class SystemStatusResponse(BaseModel):
-    status: str
+    status: str = "healthy"
     latest_scrape_time: Optional[str] = None
+    upstream_scrape_time: Optional[str] = None
+    last_sync_time: Optional[str] = None
+    is_stale: bool = False
+    upstream_run: Optional[UpstreamRunInfo] = None
     feeds: Dict[str, FeedState] = {}
