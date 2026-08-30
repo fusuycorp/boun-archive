@@ -39,3 +39,16 @@ export function exportToCSV(data: any[], filename: string) {
   link.click();
   document.body.removeChild(link);
 }
+
+/**
+ * Maps Boğaziçi timetable slot numbers (1-14) to their standardized time intervals.
+ * Slot 1: 09:00 - 10:00, ..., Slot 14: 22:00 - 23:00.
+ */
+export function formatSlotTime(hour: number | string | undefined | null): string {
+  if (hour === undefined || hour === null) return "";
+  const h = typeof hour === "string" ? parseInt(hour, 10) : hour;
+  if (isNaN(h) || h < 1 || h > 14) return `Slot ${hour}`;
+  const startHour = (8 + h).toString().padStart(2, "0");
+  const endHour = (9 + h).toString().padStart(2, "0");
+  return `${startHour}:00 - ${endHour}:00`;
+}

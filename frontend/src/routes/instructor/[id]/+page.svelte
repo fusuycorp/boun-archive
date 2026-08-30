@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { User, History, BookOpen, Clock, Calendar, Download, Info, ArrowLeft } from "lucide-svelte";
-  import { exportToCSV } from "$lib/utils";
+  import { exportToCSV, formatSlotTime } from "$lib/utils";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
@@ -98,7 +98,7 @@
               <div class="flex items-center justify-between p-2.5 bg-[#eeece2] rounded-lg border border-[#dbd7cc] dark:bg-[#121214] dark:border-[#27272a]">
                  <div class="flex items-center space-x-2.5">
                    <span class="w-7 h-7 bg-[#f7f5ee] rounded flex items-center justify-center text-xs font-bold border border-[#dbd7cc] dark:bg-[#18181b] dark:border-[#27272a] dark:text-neutral-200">{slot.day}</span>
-                   <span class="text-xs font-semibold text-[#45423b] dark:text-neutral-300">Hour {slot.hour}</span>
+                   <span class="text-xs font-semibold text-[#45423b] dark:text-neutral-300">{formatSlotTime(slot.hour)}</span>
                  </div>
                  <span class="text-xs font-bold text-[#002d72] dark:text-amber-400">{slot.frequency}x</span>
               </div>

@@ -2,6 +2,7 @@
   import { page } from "$app/state";
   import { Calendar, User, Clock, MapPin, Hash, BookOpen, Info, Users, History, Activity } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import { formatSlotTime } from "$lib/utils";
   import type { QuotaSnapshot, CourseChange, CourseHistoryItem } from "$lib/types";
   import type { PageData } from "./$types";
 
@@ -254,7 +255,7 @@
                           <div class="flex items-center justify-between text-xs bg-[#eeece2] p-1.5 rounded dark:bg-[#121214] border border-[#dbd7cc] dark:border-[#27272a]">
                              <div class="flex items-center space-x-1.5">
                                <span class="font-bold text-[#002d72] dark:text-amber-400 w-4">{slot.day}</span>
-                               <span class="text-[#5c5850] dark:text-neutral-400">Slot {slot.hour}</span>
+                               <span class="text-[#5c5850] dark:text-neutral-400">{formatSlotTime(slot.hour)}</span>
                              </div>
                              <div class="flex items-center space-x-1 text-[#746f65] truncate max-w-[100px]">
                                <MapPin size={9} class="shrink-0" />

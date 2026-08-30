@@ -8,7 +8,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from datetime import datetime, timezone
 from typing import Literal, List, Optional
 from redis import asyncio as aioredis
@@ -75,6 +75,28 @@ async def lifespan(app: FastAPI):
             },
             'sortableAttributes': ['term', 'course_code', 'title', 'instructor', 'credits', 'ects']
         })
+
+        # Check if Meilisearch 'courses' index has documents; if 0, auto-sync in background
+        try:
+            stats = MEILI_CLIENT.index('courses').get_stats()
+            doc_count = getattr(stats, 'number_of_documents', None)
+            if doc_count is None and isinstance(stats, dict):
+                doc_count = stats.get('numberOfDocuments', 0)
+            if doc_count == 0:
+                logger.info("Meilisearch 'courses' index has 0 documents. Triggering background sync from PostgreSQL...")
+                import threading
+                import sys
+                from pathlib import Path
+                root_path = str(Path(__file__).resolve().parent.parent)
+                if root_path not in sys.path:
+                    sys.path.insert(0, root_path)
+                try:
+                    from scripts.sync_meilisearch import sync_meilisearch
+                    threading.Thread(target=sync_meilisearch, kwargs={"force": True}, daemon=True).start()
+                except Exception as sync_err:
+                    logger.warning("Could not import or start sync_meilisearch: %s", sync_err)
+        except Exception as e:
+            logger.warning("Meilisearch stats check failed on startup: %s", e)
     except Exception as e:
         logger.warning("Meilisearch setup/configuration encountered an issue on startup: %s", e)
 
@@ -151,16 +173,30 @@ def _search_courses_from_db(
     try:
         query = db.query(models.Course).options(
             joinedload(models.Course.department),
-            joinedload(models.Course.instructor)
+            joinedload(models.Course.instructor),
+            selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
         )
+        
+        has_instructor_join = False
+        has_dept_join = False
         
         if q and q.strip():
             clean_q = escape_sql_wildcards(q.strip())
+            clean_q_nospace = clean_q.replace(" ", "")
             pattern = f"%{clean_q}%"
-            query = query.outerjoin(models.Instructor).outerjoin(models.Department).filter(
+            pattern_nospace = f"%{clean_q_nospace}%"
+            
+            query = query.outerjoin(models.Instructor).outerjoin(models.Department)
+            has_instructor_join = True
+            has_dept_join = True
+            
+            query = query.filter(
                 or_(
                     models.Course.course_code.ilike(pattern),
+                    func.replace(models.Course.course_code, ' ', '').ilike(pattern_nospace),
                     models.Course.title.ilike(pattern),
+                    models.Course.dept_kisaadi.ilike(pattern),
+                    func.replace(models.Course.dept_kisaadi, ' ', '').ilike(pattern_nospace),
                     models.Instructor.full_name.ilike(pattern),
                     models.Department.bolum.ilike(pattern)
                 )
@@ -171,7 +207,10 @@ def _search_courses_from_db(
         if dept:
             query = query.filter(models.Course.dept_kisaadi.in_(dept))
         if instructor:
-            query = query.join(models.Instructor).filter(models.Instructor.full_name == instructor)
+            if not has_instructor_join:
+                query = query.join(models.Instructor)
+                has_instructor_join = True
+            query = query.filter(models.Instructor.full_name == instructor)
             
         total_hits = query.count()
         
@@ -186,18 +225,35 @@ def _search_courses_from_db(
             order_col = models.Course.ects
         elif sort_by == "term":
             order_col = models.Course.term_id
+        elif sort_by == "instructor":
+            if not has_instructor_join:
+                query = query.outerjoin(models.Instructor)
+                has_instructor_join = True
+            order_col = models.Instructor.full_name
         else:
-            order_col = models.Course.course_code
+            order_col = models.Course.term_id
             
-        if sort_order == "desc":
-            query = query.order_by(order_col.desc())
+        if sort_by:
+            if sort_order == "desc":
+                query = query.order_by(order_col.desc(), models.Course.course_code.asc())
+            else:
+                query = query.order_by(order_col.asc(), models.Course.course_code.asc())
         else:
-            query = query.order_by(order_col.asc())
+            # Default sort: term:desc, course_code:asc
+            query = query.order_by(models.Course.term_id.desc(), models.Course.course_code.asc())
             
         courses = query.offset(offset).limit(limit).all()
         
         hits = []
         for c in courses:
+            slots_data = []
+            for s in c.slots:
+                slots_data.append({
+                    "day_code": s.day_code,
+                    "slot_hour": s.slot_hour,
+                    "slot_title": s.slot_title,
+                    "room_name": s.room.name if s.room else None
+                })
             hits.append({
                 "id": c.id,
                 "course_code": c.course_code,
@@ -209,7 +265,8 @@ def _search_courses_from_db(
                 "instructor": c.instructor.full_name if c.instructor else "TBA",
                 "credits": c.credits,
                 "ects": c.ects,
-                "delivery_method": c.delivery_method
+                "delivery_method": c.delivery_method,
+                "slots": slots_data
             })
             
         return {
@@ -356,7 +413,13 @@ def search_courses(
             'facets': ['term', 'dept_code', 'instructor', 'delivery_method'],
             'sort': sort_list
         })
-        # If meili returned 0 hits on empty search or failed, verify and return
+        # If Meilisearch returned hits, return them directly
+        if results.get('hits'):
+            return results
+        # If Meilisearch returned 0 hits (index cold, empty, or desynced), fallback to DB
+        db_results = _search_courses_from_db(db, q, term, dept, instructor, sort_by, sort_order, limit, offset)
+        if db_results.get('hits') or db_results.get('totalHits', 0) > 0:
+            return db_results
         return results
     except Exception as e:
         logger.warning("Meilisearch search error, falling back to PostgreSQL: %s", e)

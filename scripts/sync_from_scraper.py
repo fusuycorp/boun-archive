@@ -188,7 +188,7 @@ def ensure_room(session, room_name: Optional[str], room_cache: Dict[str, int]) -
     return room.id
 
 
-def sync_meili_documents(meili_index, courses: List[Course]):
+def sync_meili_documents(meili_index, courses: List[Course], chunk_size: int = 1000):
     if not meili_index or not courses:
         return
     documents = []
@@ -216,6 +216,10 @@ def sync_meili_documents(meili_index, courses: List[Course]):
             "slots": slots_data
         }
         documents.append(doc)
+        if len(documents) >= chunk_size:
+            meili_index.add_documents(documents)
+            logger.info("Pushed %d document(s) to Meilisearch index", len(documents))
+            documents = []
 
     if documents:
         meili_index.add_documents(documents)
@@ -463,16 +467,23 @@ def _apply_delta_event(
 
 def _fetch_term_courses(client: ScraperClient, term_id: str) -> List[Dict[str, Any]]:
     export_term_param = term_id.replace("/", "-")
-    data = client.get(f"feeds/exports/{export_term_param}/json")
-    if data and isinstance(data, list):
-        return data
+    try:
+        data = client.get(f"feeds/exports/{export_term_param}/json")
+        if data and isinstance(data, list):
+            return data
+    except Exception as e:
+        logger.debug("Export feed not available (%s), falling back to /courses: %s", export_term_param, e)
 
     logger.info("Export feed not available, pulling paginated /courses for term %s...", term_id)
     courses_raw = []
     page = 1
     page_size = 100
     while True:
-        resp = client.get("courses", params={"term": term_id, "page": page, "size": page_size})
+        try:
+            resp = client.get("courses", params={"term": term_id, "page": page, "size": page_size})
+        except Exception as e:
+            logger.error("Error pulling /courses for term %s (page %d): %s", term_id, page, e)
+            break
         if not resp:
             break
         items = resp.get("items", []) if isinstance(resp, dict) else resp
@@ -620,16 +631,60 @@ def backfill_term(
         session.commit()
         if meili_index and touched_courses:
             logger.info("Syncing %d backfilled course(s) to Meilisearch...", len(touched_courses))
-            updated = session.query(Course).options(
-                joinedload(Course.term),
-                joinedload(Course.department),
-                joinedload(Course.instructor),
-                selectinload(Course.slots).joinedload(CourseSlot.room)
-            ).filter(Course.id.in_([c.id for c in touched_courses])).all()
-            sync_meili_documents(meili_index, updated)
+            touched_ids = [c.id for c in touched_courses]
+            for i in range(0, len(touched_ids), 500):
+                batch_ids = touched_ids[i:i+500]
+                updated = session.query(Course).options(
+                    joinedload(Course.term),
+                    joinedload(Course.department),
+                    joinedload(Course.instructor),
+                    selectinload(Course.slots).joinedload(CourseSlot.room)
+                ).filter(Course.id.in_(batch_ids)).all()
+                sync_meili_documents(meili_index, updated)
 
     logger.info("Backfill completed for term %s (%d courses upserted).", term_id, len(touched_courses))
     return len(touched_courses)
+
+
+def sync_terms_and_new_offerings(
+    session,
+    client: ScraperClient,
+    meili_index=None,
+    dry_run: bool = False
+) -> int:
+    """
+    Discovers all available terms from upstream scraper.
+    Ensures each term exists in PostgreSQL terms table.
+    For any term with 0 courses in local DB (e.g. newly published semester 2026/2027-1),
+    automatically triggers backfill_term to ingest courses, rooms, instructors and push to Meilisearch.
+    """
+    logger.info("Checking upstream scraper terms for new offerings...")
+    try:
+        scraper_terms = client.get("terms")
+        if not scraper_terms or not isinstance(scraper_terms, list):
+            logger.warning("Could not retrieve terms list from scraper.")
+            return 0
+    except Exception as e:
+        logger.warning("Failed to fetch scraper terms: %s", e)
+        return 0
+
+    term_cache: Set[str] = {t.id for t in session.query(Term.id).all()}
+    total_synced_courses = 0
+
+    for term_id in scraper_terms:
+        if not isinstance(term_id, str) or not term_id.strip():
+            continue
+        term_id = term_id.strip()
+        ensure_term(session, term_id, term_cache)
+
+        # Check if local DB has courses for this term
+        course_count = session.query(Course.id).filter(Course.term_id == term_id).count()
+        if course_count == 0:
+            logger.info("Found new upstream term '%s' with 0 local courses. Starting automatic backfill...", term_id)
+            synced = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
+            total_synced_courses += synced
+
+    return total_synced_courses
 
 
 def sync_upstream_run_metadata(session, client: ScraperClient, dry_run: bool = False) -> Optional[Dict[str, Any]]:
@@ -674,6 +729,10 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
     try:
         sync_upstream_run_metadata(session, client, dry_run=args.dry_run)
 
+        # 1. Discover upstream terms and backfill any newly scraped semester offerings
+        sync_terms_and_new_offerings(session, client, meili_index=meili_index, dry_run=args.dry_run)
+
+        # 2. Run configured mode
         if args.mode == "backfill":
             backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
         elif args.mode == "full":
@@ -706,7 +765,7 @@ def main():
     parser = argparse.ArgumentParser(description="Ingest courses, deltas, and quota snapshots from boun-scrape")
     parser.add_argument("--mode", choices=["incremental", "backfill", "full"], default="incremental",
                         help="Sync mode: incremental (default), backfill (single term), or full")
-    parser.add_argument("--term", type=str, default="2024/2025-1", help="Target term for backfill mode")
+    parser.add_argument("--term", type=str, default="2026/2027-1", help="Target term for backfill mode")
     parser.add_argument("--limit", type=int, default=500, help="Batch limit per polling request")
     parser.add_argument("--dry-run", action="store_true", help="Perform dry run without committing database changes")
     parser.add_argument("--scraper-url", type=str, default=None, help="Base URL for scraper API")

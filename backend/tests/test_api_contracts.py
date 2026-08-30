@@ -70,10 +70,28 @@ def test_search_contract(client: TestClient):
     assert isinstance(data, dict)
     assert "hits" in data
     assert isinstance(data["hits"], list)
+    assert len(data["hits"]) >= 1
     assert "limit" in data
     assert data["limit"] == 5
     assert "offset" in data
     assert ("estimatedTotalHits" in data) or ("totalHits" in data)
+    
+    first_hit = data["hits"][0]
+    assert "slots" in first_hit
+    assert isinstance(first_hit["slots"], list)
+    assert len(first_hit["slots"]) >= 1
+    assert first_hit["slots"][0]["day_code"] == "M"
+    assert first_hit["slots"][0]["room_name"] == "NH101"
+
+    # Test search query with spaces
+    res_space = client.get("/v1/search?q=CMPE%20150")
+    assert res_space.status_code == 200
+    assert len(res_space.json()["hits"]) >= 1
+
+    # Test search query without spaces
+    res_nospace = client.get("/v1/search?q=CMPE150")
+    assert res_nospace.status_code == 200
+    assert len(res_nospace.json()["hits"]) >= 1
 
 
 def test_course_detail_contract(client: TestClient):
