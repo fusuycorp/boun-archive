@@ -33,12 +33,20 @@
   ];
 
   const scrapeFreshness = $derived.by(() => {
-    const ts = systemStatus?.upstream_scrape_time || systemStatus?.latest_scrape_time;
+    if (!systemStatus) {
+      return { 
+        text: "Scraped: Checking...", 
+        statusClass: "slate", 
+        tooltip: "Checking upstream portal scrape status..." 
+      };
+    }
+
+    const ts = systemStatus?.last_scraped_at || systemStatus?.upstream_scrape_time || systemStatus?.latest_scrape_time;
     if (!ts) {
       return { 
-        text: "Scraped: Live", 
-        statusClass: "emerald", 
-        tooltip: "Scraper status: Live sync" 
+        text: "Scraped: Unknown", 
+        statusClass: "slate", 
+        tooltip: "No recorded portal scrape run available" 
       };
     }
 
@@ -82,11 +90,14 @@
       const portalTime = date.toLocaleString("en-US", { 
         month: "short", 
         day: "numeric", 
+        year: "numeric",
         hour: "2-digit", 
         minute: "2-digit",
         timeZoneName: "short" 
       });
-      const tooltip = `Portal Scraped: ${portalTime} (${text})\nArchive Sync: ${systemStatus?.last_sync_time ? new Date(systemStatus.last_sync_time).toLocaleTimeString() : 'Active'}${systemStatus?.is_stale ? ' (Stale >24h)' : ''}`;
+      const syncTs = systemStatus?.last_sync_at || systemStatus?.last_sync_time;
+      const syncTime = syncTs ? new Date(syncTs).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZoneName: "short" }) : 'Active';
+      const tooltip = `Last Scraper Run: ${portalTime} (${text})\nArchive Sync: ${syncTime}${systemStatus?.is_stale ? ' (Stale >24h)' : ''}`;
 
       return { text, statusClass, tooltip };
     } catch {
@@ -201,7 +212,9 @@
               ? 'text-emerald-800 bg-emerald-500/10 border-emerald-600/20 dark:text-emerald-400 dark:bg-emerald-500/10 dark:border-emerald-500/20'
               : scrapeFreshness.statusClass === 'amber'
               ? 'text-amber-900 bg-amber-500/10 border-amber-600/20 dark:text-amber-300 dark:bg-amber-500/10 dark:border-amber-500/20'
-              : 'text-rose-800 bg-rose-500/10 border-rose-600/20 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/20'
+              : scrapeFreshness.statusClass === 'rose'
+              ? 'text-rose-800 bg-rose-500/10 border-rose-600/20 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/20'
+              : 'text-[#746f65] bg-[#dbd7cc]/30 border-[#dbd7cc] dark:text-neutral-400 dark:bg-neutral-800/40 dark:border-neutral-700/40'
           }"
           title={scrapeFreshness.tooltip}
         >
@@ -210,7 +223,9 @@
               ? 'bg-emerald-600 dark:bg-emerald-500'
               : scrapeFreshness.statusClass === 'amber'
               ? 'bg-amber-600 dark:bg-amber-500'
-              : 'bg-rose-600 dark:bg-rose-500'
+              : scrapeFreshness.statusClass === 'rose'
+              ? 'bg-rose-600 dark:bg-rose-500'
+              : 'bg-neutral-400 dark:bg-neutral-500'
           }"></span>
           <span class="tracking-tight">{scrapeFreshness.text}</span>
         </div>

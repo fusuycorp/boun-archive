@@ -42,6 +42,8 @@ def test_system_status_contract(client: TestClient):
     data = response.json()
     assert isinstance(data, dict)
     assert "status" in data
+    assert "last_scraped_at" in data
+    assert "last_sync_at" in data
     assert "latest_scrape_time" in data
     assert "is_stale" in data
     assert "feeds" in data

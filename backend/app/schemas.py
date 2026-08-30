@@ -124,6 +124,8 @@ class UpstreamRunInfo(BaseModel):
 
 class SystemStatusResponse(BaseModel):
     status: str = "healthy"
+    last_scraped_at: Optional[str] = None
+    last_sync_at: Optional[str] = None
     latest_scrape_time: Optional[str] = None
     upstream_scrape_time: Optional[str] = None
     last_sync_time: Optional[str] = None

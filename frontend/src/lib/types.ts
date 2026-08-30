@@ -131,6 +131,8 @@ export interface UpstreamRunInfo {
 
 export interface SystemStatus {
   status: string;
+  last_scraped_at?: string | null;
+  last_sync_at?: string | null;
   latest_scrape_time?: string | null;
   upstream_scrape_time?: string | null;
   last_sync_time?: string | null;

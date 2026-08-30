@@ -296,6 +296,8 @@ def get_system_status(db: Session = Depends(database.get_db)):
 
     return {
         "status": "healthy" if not is_stale else "stale",
+        "last_scraped_at": upstream_scrape_ts,
+        "last_sync_at": local_sync_ts,
         "latest_scrape_time": upstream_scrape_ts,
         "upstream_scrape_time": upstream_scrape_ts,
         "last_sync_time": local_sync_ts,

@@ -635,20 +635,35 @@ def backfill_term(
 def sync_upstream_run_metadata(session, client: ScraperClient, dry_run: bool = False) -> Optional[Dict[str, Any]]:
     """Fetch latest scrape run execution metadata from upstream boun-scrape."""
     try:
-        runs = client.get("feeds/runs", params={"limit": 1})
+        runs = client.get("feeds/runs", params={"limit": 5})
+        run_ts = None
+        latest_run = None
         if runs and isinstance(runs, list) and len(runs) > 0:
-            latest_run = runs[0]
-            run_ts = latest_run.get("completed_at") or latest_run.get("started_at")
-            if run_ts and not dry_run:
-                state = session.query(SyncState).filter(SyncState.feed_name == "upstream_run").first()
-                if not state:
-                    state = SyncState(feed_name="upstream_run", last_cursor=run_ts)
-                    session.add(state)
-                else:
-                    state.last_cursor = run_ts
-                    state.updated_at = func.now()
-                session.commit()
-            return latest_run
+            for r in runs:
+                if isinstance(r, dict) and r.get("status") == "completed" and r.get("completed_at"):
+                    latest_run = r
+                    run_ts = r["completed_at"]
+                    break
+            if not run_ts and isinstance(runs[0], dict):
+                latest_run = runs[0]
+                run_ts = latest_run.get("completed_at") or latest_run.get("started_at")
+
+        if not run_ts:
+            stats = client.get("stats")
+            if stats and isinstance(stats, dict) and stats.get("last_scraped"):
+                run_ts = stats["last_scraped"]
+                latest_run = {"status": "completed", "completed_at": run_ts}
+
+        if run_ts and not dry_run:
+            state = session.query(SyncState).filter(SyncState.feed_name == "upstream_run").first()
+            if not state:
+                state = SyncState(feed_name="upstream_run", last_cursor=run_ts)
+                session.add(state)
+            else:
+                state.last_cursor = run_ts
+                state.updated_at = func.now()
+            session.commit()
+        return latest_run
     except Exception as e:
         logger.warning("Could not fetch upstream scrape runs: %s", e)
     return None
