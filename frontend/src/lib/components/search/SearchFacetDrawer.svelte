@@ -1,9 +1,10 @@
 <script lang="ts">
   import { Search, Check } from "lucide-svelte";
+  import type { FacetDistribution } from "$lib/types";
 
   interface Props {
-    globalFacets: any;
-    currentFacets: any;
+    globalFacets: FacetDistribution;
+    currentFacets: FacetDistribution;
     selectedTerms: string[];
     selectedDepts: string[];
     deptSearch: string;

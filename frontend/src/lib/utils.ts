@@ -3,7 +3,7 @@
  * @param data Array of objects to export
  * @param filename Name of the file (without extension)
  */
-export function exportToCSV(data: any[], filename: string) {
+export function exportToCSV(data: Record<string, unknown>[], filename: string) {
   if (!data || data.length === 0) return;
 
   // Extract headers from the first object

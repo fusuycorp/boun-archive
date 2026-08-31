@@ -67,9 +67,7 @@ def migrate():
     session = Session()
 
     # 2. Create Schema
-    print("Dropping existing tables...")
-    Base.metadata.drop_all(engine)
-    print("Creating tables in PostgreSQL...")
+    print("Creating tables in PostgreSQL if not exist...")
     Base.metadata.create_all(engine)
 
     # 3. Load Departments (from CSV)
@@ -86,9 +84,14 @@ def migrate():
     print("Migrating Terms...")
     courses_raw = pd.read_sql_query("SELECT DISTINCT term FROM courses", sqlite_conn)
     for term_id in courses_raw['term']:
-        if '-' in term_id:
-            year, sem = term_id.split('-')
-            term = Term(id=term_id, academic_year=year, semester_num=int(sem))
+        if term_id and ('-' in term_id or '/' in term_id):
+            if '-' in term_id:
+                parts = term_id.rsplit('-', 1)
+            else:
+                parts = term_id.rsplit('/', 1)
+            year = parts[0]
+            sem = clean_int(parts[1]) if len(parts) > 1 else 1
+            term = Term(id=term_id, academic_year=year, semester_num=sem or 1)
             session.merge(term)
     session.commit()
 

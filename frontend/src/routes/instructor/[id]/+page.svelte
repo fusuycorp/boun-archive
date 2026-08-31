@@ -2,6 +2,7 @@
   import { page } from "$app/state";
   import { User, History, BookOpen, Clock, Calendar, Download, Info, ArrowLeft } from "lucide-svelte";
   import { exportToCSV, formatSlotTime } from "$lib/utils";
+  import type { InstructorHistoryItem } from "$lib/types";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
@@ -14,7 +15,7 @@
   function handleExport() {
     if (!legacyData || !legacyData.history || legacyData.history.length === 0) return;
     
-    const exportData = legacyData.history.map((item: any) => ({
+    const exportData = legacyData.history.map((item: InstructorHistoryItem) => ({
       instructor: legacyData.instructor_name,
       term: item.term,
       course_code: item.course_code,

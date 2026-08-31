@@ -23,7 +23,7 @@ class MacroEngine:
             func.count(models.Course.id).label('count')
         ).group_by(
             models.Course.dept_kisaadi,
-            'year'
+            func.substr(models.Course.term_id, 1, 4)
         ).all()
         
         data = {}

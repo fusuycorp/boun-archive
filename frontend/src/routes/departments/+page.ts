@@ -1,5 +1,6 @@
 import type { PageLoad } from './$types';
 import { API_BASE } from '$lib/config';
+import type { Department, Term } from '$lib/types';
 
 export const load: PageLoad = async ({ fetch }) => {
   const [deptsRes, termsRes] = await Promise.allSettled([
@@ -7,8 +8,8 @@ export const load: PageLoad = async ({ fetch }) => {
     fetch(`${API_BASE}/v1/terms`)
   ]);
 
-  let departments: any[] = [];
-  let terms: any[] = [];
+  let departments: Department[] = [];
+  let terms: Term[] = [];
 
   if (deptsRes.status === 'fulfilled' && deptsRes.value.ok) {
     departments = await deptsRes.value.json();

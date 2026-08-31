@@ -57,8 +57,8 @@
         changes = [];
       }
 
-    } catch (e: any) {
-      error = e.message;
+    } catch (e) {
+      error = e instanceof Error ? e.message : "An unexpected error occurred";
     } finally {
       loading = false;
     }

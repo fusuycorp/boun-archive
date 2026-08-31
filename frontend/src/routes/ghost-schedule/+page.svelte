@@ -3,14 +3,15 @@
   import { Search, Filter, Check, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { exportToCSV } from "$lib/utils";
+  import type { Term, GhostScheduleItem, FacetDistribution } from "$lib/types";
 
-  let terms = $state<any[]>([]);
-  let globalFacets = $state<any>({});
+  let terms = $state<Term[]>([]);
+  let globalFacets = $state<FacetDistribution>({});
   let selectedTerm = $state("");
   let selectedDepts = $state<string[]>([]);
   let deptSearch = $state("");
   let isDeptOpen = $state(false);
-  let scheduleData = $state<any[]>([]);
+  let scheduleData = $state<GhostScheduleItem[]>([]);
   let loading = $state(false);
   let days = ["M", "T", "W", "Th", "F", "St", "Su"];
   let hours = Array.from({ length: 14 }, (_, i) => i + 1);

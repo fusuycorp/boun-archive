@@ -76,7 +76,8 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['dept_kisaadi'], ['departments.kisaadi'], ),
         sa.ForeignKeyConstraint(['instructor_id'], ['instructors.id'], ),
         sa.ForeignKeyConstraint(['term_id'], ['terms.id'], ),
-        sa.PrimaryKeyConstraint('id')
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('term_id', 'course_code', 'section', name='uq_courses_term_code_section')
     )
     op.create_index(op.f('ix_courses_id'), 'courses', ['id'], unique=False)
     op.create_index(op.f('ix_courses_term_id'), 'courses', ['term_id'], unique=False)
@@ -122,7 +123,8 @@ def upgrade() -> None:
         sa.Column('available', sa.Integer(), nullable=True),
         sa.Column('captured_at', sa.String(length=50), nullable=False),
         sa.ForeignKeyConstraint(['term_id'], ['terms.id'], ),
-        sa.PrimaryKeyConstraint('id')
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('term_id', 'course_code', 'section', 'department', 'captured_at', name='uq_quota_snapshot_entry')
     )
     op.create_index(op.f('ix_quota_snapshots_id'), 'quota_snapshots', ['id'], unique=False)
     op.create_index(op.f('ix_quota_snapshots_term_id'), 'quota_snapshots', ['term_id'], unique=False)

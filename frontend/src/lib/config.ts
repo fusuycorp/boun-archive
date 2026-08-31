@@ -9,7 +9,7 @@ import { browser } from '$app/environment';
  * - On server (SSR): Uses PUBLIC_API_URL or defaults to '/api'.
  */
 function resolveApiBase(): string {
-  const configured = env.PUBLIC_API_URL?.trim();
+  const configured = env.PUBLIC_API_URL?.trim().replace(/\/+$/, '');
 
   if (browser) {
     if (configured && (configured.includes('localhost') || configured.includes('127.0.0.1') || configured.includes('backend:'))) {

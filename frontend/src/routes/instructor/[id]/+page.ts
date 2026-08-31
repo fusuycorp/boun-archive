@@ -1,9 +1,10 @@
 import type { PageLoad } from './$types';
 import { API_BASE } from '$lib/config';
+import type { InstructorLegacy } from '$lib/types';
 
 export const load: PageLoad = async ({ params, fetch }) => {
   const id = params.id;
-  let legacyData: any = null;
+  let legacyData: InstructorLegacy | null = null;
   let loadError: string | null = null;
 
   try {
@@ -15,8 +16,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
     } else {
       loadError = 'Failed to load instructor data';
     }
-  } catch (e: any) {
-    loadError = e?.message || 'Failed to load instructor data';
+  } catch (e) {
+    loadError = e instanceof Error ? e.message : 'Failed to load instructor data';
   }
 
   return {

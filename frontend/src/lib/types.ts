@@ -24,9 +24,11 @@ export interface Room {
 export interface CourseSlot {
   id?: number;
   course_id?: number;
-  day_code: string;
-  slot_hour: number;
-  slot_title?: string;
+  day_code?: string | null;
+  slot_hour?: number | null;
+  slot_title?: string | null;
+  room_id?: number | null;
+  room_name?: string | null;
   room?: Room;
 }
 
@@ -35,34 +37,104 @@ export interface Course {
   term_id: string;
   dept_kisaadi: string;
   course_code: string;
-  section: string;
-  title: string;
-  instructor_id?: number;
-  instructor_name?: string;
-  credits?: number;
-  ects?: number;
-  delivery_method?: string;
+  section?: string | null;
+  title?: string | null;
+  instructor_id?: number | null;
+  instructor_name?: string | null;
+  credits?: number | null;
+  ects?: number | null;
+  delivery_method?: string | null;
   slots?: CourseSlot[];
 }
 
-export interface GhostScheduleItem {
+export interface SearchCourseSlot {
+  day_code: string;
+  slot_hour: number;
+  slot_title?: string | null;
+  room_name?: string | null;
+}
+
+export interface SearchCourseHit {
   id: number;
   course_code: string;
-  section: string;
   title: string;
-  term_id: string;
-  dept_kisaadi: string;
+  section?: string | null;
+  term: string;
+  department?: string | null;
+  dept_code: string;
+  instructor?: string | null;
+  instructor_id?: number | null;
+  credits?: number | null;
+  ects?: number | null;
+  delivery_method?: string | null;
+  slots?: SearchCourseSlot[];
+}
+
+export interface GhostScheduleItem {
   day_code: string;
   slot_hour: number;
   room_name: string;
+  course_code: string;
+  dept_kisaadi: string;
 }
 
+export type FacetDistribution = Record<string, Record<string, number>>;
+
 export interface SearchResponse {
-  hits: Course[];
-  facetDistribution?: Record<string, Record<string, number>>;
+  hits: SearchCourseHit[];
+  facetDistribution?: FacetDistribution;
   totalHits?: number;
   estimatedTotalHits?: number;
   processingTimeMs?: number;
+  offset?: number;
+  limit?: number;
+}
+
+export interface DepartmentUniqueCourse {
+  course_code: string;
+  title: string;
+  terms: string[];
+  latest_term?: string;
+}
+
+export interface DepartmentInstructor {
+  id: number;
+  full_name: string;
+  last_term: string;
+  course_count: number;
+  total_semesters: number;
+}
+
+export interface InstructorPreferredSlot {
+  day: string;
+  hour: number;
+  frequency: number;
+}
+
+export interface InstructorHistoryItem {
+  term: string;
+  course_code: string;
+  title: string;
+}
+
+export interface InstructorLegacy {
+  instructor_name: string;
+  total_semesters_taught: number;
+  total_courses_taught: number;
+  most_frequent_courses: Record<string, number>;
+  preferred_slots: InstructorPreferredSlot[];
+  history: InstructorHistoryItem[];
+}
+
+export interface DepartmentEvolution {
+  years: string[];
+  departments: Record<string, Record<string, number>>;
+}
+
+export interface SchedulingHeatmapSlot {
+  day_code: string;
+  slot_hour: number;
+  count: number;
 }
 
 export interface QuotaSnapshot {
@@ -140,5 +212,6 @@ export interface SystemStatus {
   upstream_run?: UpstreamRunInfo | null;
   feeds?: Record<string, FeedState>;
 }
+
 
 

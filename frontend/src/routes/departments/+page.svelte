@@ -3,56 +3,73 @@
   import { BookOpen, Search, ArrowRight, ChevronRight, Hash, ArrowUpDown, User, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { exportToCSV } from "$lib/utils";
+  import type { DepartmentUniqueCourse, DepartmentInstructor } from "$lib/types";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
 
   let departments = $derived(data.departments ?? []);
   let selectedDept = $state<string | null>(null);
-  let uniqueCourses = $state<any[]>([]);
-  let deptInstructors = $state<any[]>([]);
+  let uniqueCourses = $state<DepartmentUniqueCourse[]>([]);
+  let deptInstructors = $state<DepartmentInstructor[]>([]);
   let loading = $state(false);
   let deptSearch = $state("");
   let viewMode = $state<"courses" | "instructors">("courses");
 
   // Sorting - Courses
-  let courseSortColumn = $state("latest_term");
+  let courseSortColumn = $state<keyof DepartmentUniqueCourse | "latest_term">("latest_term");
   let courseSortDirection = $state<"asc" | "desc">("desc");
 
   // Sorting - Instructors
-  let instructorSortColumn = $state("last_term");
+  let instructorSortColumn = $state<keyof DepartmentInstructor>("last_term");
   let instructorSortDirection = $state<"asc" | "desc">("desc");
 
   function restoreSessionState() {
     // Restore state if available
-    const savedDept = sessionStorage.getItem("dept_selected");
-    const savedView = sessionStorage.getItem("dept_view_mode") as any;
-    
-    if (savedView) viewMode = savedView;
+    try {
+      const savedDept = sessionStorage.getItem("dept_selected");
+      const savedView = sessionStorage.getItem("dept_view_mode") as "courses" | "instructors" | null;
+      
+      if (savedView === "courses" || savedView === "instructors") viewMode = savedView;
 
-    if (savedDept) {
-      selectedDept = savedDept;
-      const savedCourses = sessionStorage.getItem(`dept_courses_${savedDept}`);
-      if (savedCourses) {
-        uniqueCourses = JSON.parse(savedCourses);
-      } else {
-        fetchUniqueCourses(savedDept);
-      }
+      if (savedDept) {
+        selectedDept = savedDept;
+        const savedCourses = sessionStorage.getItem(`dept_courses_${savedDept}`);
+        if (savedCourses) {
+          try {
+            uniqueCourses = JSON.parse(savedCourses);
+          } catch (e) {
+            console.error("Failed to parse saved department courses from session storage", e);
+            sessionStorage.removeItem(`dept_courses_${savedDept}`);
+            fetchUniqueCourses(savedDept);
+          }
+        } else {
+          fetchUniqueCourses(savedDept);
+        }
 
-      const savedInstructors = sessionStorage.getItem(`dept_instructors_${savedDept}`);
-      if (savedInstructors) {
-        deptInstructors = JSON.parse(savedInstructors);
-      } else {
-        fetchDeptInstructors(savedDept);
+        const savedInstructors = sessionStorage.getItem(`dept_instructors_${savedDept}`);
+        if (savedInstructors) {
+          try {
+            deptInstructors = JSON.parse(savedInstructors);
+          } catch (e) {
+            console.error("Failed to parse saved department instructors from session storage", e);
+            sessionStorage.removeItem(`dept_instructors_${savedDept}`);
+            fetchDeptInstructors(savedDept);
+          }
+        } else {
+          fetchDeptInstructors(savedDept);
+        }
       }
+    } catch (e) {
+      console.error("Failed to restore session state", e);
     }
   }
 
   async function fetchUniqueCourses(deptCode: string) {
     try {
       const res = await fetch(`${API_BASE}/v1/departments/${deptCode}/unique-courses`);
-      const data = await res.json();
-      uniqueCourses = data.map((c: any) => ({
+      const data: DepartmentUniqueCourse[] = await res.json();
+      uniqueCourses = data.map((c: DepartmentUniqueCourse) => ({
         ...c,
         latest_term: c.terms[0] || ""
       }));
@@ -65,7 +82,7 @@
   async function fetchDeptInstructors(deptCode: string) {
     try {
       const res = await fetch(`${API_BASE}/v1/departments/${deptCode}/instructors`);
-      const data = await res.json();
+      const data: DepartmentInstructor[] = await res.json();
       deptInstructors = data;
       sessionStorage.setItem(`dept_instructors_${deptCode}`, JSON.stringify(deptInstructors));
     } catch (e) {
@@ -86,7 +103,7 @@
     loading = false;
   }
 
-  function handleCourseSort(column: string) {
+  function handleCourseSort(column: keyof DepartmentUniqueCourse | "latest_term") {
     if (courseSortColumn === column) {
       courseSortDirection = courseSortDirection === "asc" ? "desc" : "asc";
     } else {
@@ -95,7 +112,7 @@
     }
   }
 
-  function handleInstructorSort(column: string) {
+  function handleInstructorSort(column: keyof DepartmentInstructor) {
     if (instructorSortColumn === column) {
       instructorSortDirection = instructorSortDirection === "asc" ? "desc" : "asc";
     } else {
@@ -142,8 +159,8 @@
 
   const sortedCourses = $derived(
     [...uniqueCourses].sort((a, b) => {
-      const valA = a[courseSortColumn];
-      const valB = b[courseSortColumn];
+      const valA = a[courseSortColumn] ?? "";
+      const valB = b[courseSortColumn] ?? "";
       if (valA < valB) return courseSortDirection === "asc" ? -1 : 1;
       if (valA > valB) return courseSortDirection === "asc" ? 1 : -1;
       return 0;
@@ -152,8 +169,8 @@
 
   const sortedInstructors = $derived(
     [...deptInstructors].sort((a, b) => {
-      const valA = a[instructorSortColumn];
-      const valB = b[instructorSortColumn];
+      const valA = a[instructorSortColumn] ?? "";
+      const valB = b[instructorSortColumn] ?? "";
       if (valA < valB) return instructorSortDirection === "asc" ? -1 : 1;
       if (valA > valB) return instructorSortDirection === "asc" ? 1 : -1;
       return 0;

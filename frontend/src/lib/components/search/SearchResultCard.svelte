@@ -1,19 +1,32 @@
 <script lang="ts">
-  import { User, Calendar, MapPin } from "lucide-svelte";
+  import { User, ArrowUpRight } from "lucide-svelte";
+  import { goto } from "$app/navigation";
+  import type { SearchCourseHit } from "$lib/types";
 
   interface Props {
-    course: any;
+    course: SearchCourseHit;
   }
 
   let { course }: Props = $props();
+
+  function gotoCourse() {
+    goto(`/course/${encodeURIComponent(course.course_code)}`);
+  }
 </script>
 
-<div class="bg-[#f7f5ee] dark:bg-[#18181b] p-4 rounded-xl border border-[#dbd7cc] dark:border-[#27272a] shadow-2xs space-y-3">
+<div 
+  role="link"
+  tabindex="0"
+  onclick={gotoCourse}
+  onkeydown={(e) => { if (e.key === 'Enter') gotoCourse(); }}
+  class="bg-[#f7f5ee] dark:bg-[#18181b] p-4 rounded-xl border border-[#dbd7cc] dark:border-[#27272a] shadow-2xs space-y-3 cursor-pointer hover:border-[#c5a059] dark:hover:border-amber-400/50 transition-colors group"
+>
   <div class="flex items-start justify-between gap-2">
     <div>
       <div class="flex items-center space-x-2">
         <a 
           href="/course/{encodeURIComponent(course.course_code)}" 
+          onclick={(e) => e.stopPropagation()}
           class="font-mono text-sm font-bold text-[#002d72] dark:text-neutral-100 hover:text-[#0080c9] dark:hover:text-amber-400 hover:underline"
         >
           {course.course_code}
@@ -37,8 +50,14 @@
     <div class="flex items-center space-x-1">
       <User size={12} class="text-[#746f65] shrink-0" />
       {#if course.instructor && course.instructor !== 'TBA'}
-        <a href="/instructors?q={encodeURIComponent(course.instructor)}" class="hover:text-[#002d72] dark:hover:text-amber-400 truncate max-w-[150px]">
-          {course.instructor}
+        <a 
+          href={course.instructor_id ? `/instructor/${course.instructor_id}` : `/instructors?q=${encodeURIComponent(course.instructor)}`} 
+          onclick={(e) => e.stopPropagation()}
+          class="inline-flex items-center space-x-1 text-[#45423b] dark:text-neutral-300 hover:text-[#002d72] dark:hover:text-amber-400 hover:underline truncate max-w-[150px] group/inst font-medium"
+          title="View instructor details"
+        >
+          <span class="truncate">{course.instructor}</span>
+          <ArrowUpRight size={11} class="text-[#746f65] group-hover/inst:text-[#002d72] dark:group-hover/inst:text-amber-400 shrink-0 opacity-70 group-hover/inst:opacity-100 transition-all" />
         </a>
       {:else}
         <span class="text-[#8a857a] italic">TBA</span>
@@ -50,20 +69,4 @@
       <span>{course.ects ?? 0} ECTS</span>
     </div>
   </div>
-
-  {#if course.slots && course.slots.length > 0}
-    <div class="flex flex-wrap gap-1.5 pt-1 border-t border-[#dbd7cc]/70 dark:border-[#27272a]">
-      {#each course.slots as slot}
-        <span class="inline-flex items-center space-x-1 px-1.5 py-0.5 bg-[#eeece2] dark:bg-[#121214] border border-[#dbd7cc] dark:border-[#27272a] rounded text-[10px] font-mono text-[#45423b] dark:text-neutral-300">
-          <Calendar size={10} class="text-[#746f65]" />
-          <span>{slot.day_code} {slot.slot_hour}</span>
-          {#if slot.room_name && slot.room_name !== 'N/A'}
-            <span class="text-[#c8c3b5] dark:text-neutral-700">|</span>
-            <MapPin size={9} class="text-[#746f65]" />
-            <span class="truncate max-w-[50px]">{slot.room_name}</span>
-          {/if}
-        </span>
-      {/each}
-    </div>
-  {/if}
 </div>

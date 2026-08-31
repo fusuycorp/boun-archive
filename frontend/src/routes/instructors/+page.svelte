@@ -2,12 +2,13 @@
   import { User, Search, History, BookOpen, Clock, Calendar, ArrowRight } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { goto } from "$app/navigation";
+  import type { Instructor } from "$lib/types";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
 
   let query = $state("");
-  let instructors = $state<any[]>([]);
+  let instructors = $state<Instructor[]>([]);
   let loading = $state(false);
 
   async function searchInstructors() {
@@ -32,11 +33,22 @@
     goto(`/instructor/${id}`);
   }
 
-  let timeout: any;
+  import { onMount } from "svelte";
+  import { page } from "$app/state";
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   function handleInput() {
     clearTimeout(timeout);
     timeout = setTimeout(searchInstructors, 300);
   }
+
+  onMount(() => {
+    const qParam = page.url.searchParams.get("q");
+    if (qParam) {
+      query = qParam;
+      searchInstructors();
+    }
+  });
 </script>
 
 <div class="space-y-6 sm:space-y-8 max-w-4xl mx-auto">

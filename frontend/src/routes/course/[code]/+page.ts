@@ -33,8 +33,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
     if (changeRes.status === 'fulfilled' && changeRes.value.ok) {
       changes = await changeRes.value.json();
     }
-  } catch (e: any) {
-    loadError = e?.message || 'Failed to fetch course data';
+  } catch (e) {
+    loadError = e instanceof Error ? e.message : 'Failed to fetch course data';
   }
 
   return {

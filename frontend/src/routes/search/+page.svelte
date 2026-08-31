@@ -5,14 +5,15 @@
   import { exportToCSV } from "$lib/utils";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
+  import type { SearchCourseHit, FacetDistribution } from "$lib/types";
   import SearchFacetDrawer from "$lib/components/search/SearchFacetDrawer.svelte";
   import SearchResultTable from "$lib/components/search/SearchResultTable.svelte";
   import SearchResultCard from "$lib/components/search/SearchResultCard.svelte";
 
   let query = $state("");
-  let results = $state<any[]>([]);
-  let currentFacets = $state<any>({});
-  let globalFacets = $state<any>({});
+  let results = $state<SearchCourseHit[]>([]);
+  let currentFacets = $state<FacetDistribution>({});
+  let globalFacets = $state<FacetDistribution>({});
   let loading = $state(false);
   let totalHits = $state(0);
   let offset = $state(0);
@@ -95,8 +96,8 @@
           globalFacets = data.facetDistribution;
         }
       }
-    } catch (e: any) {
-      if (e.name === 'AbortError') return;
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') return;
       console.error("Search failed", e);
     } finally {
       if (!searchAbortController.signal.aborted) {
@@ -132,7 +133,7 @@
     } else {
       selectedTerms = [...selectedTerms, term];
     }
-    performSearch();
+    performSearch(true);
   }
 
   function toggleDept(dept: string) {
@@ -141,7 +142,7 @@
     } else {
       selectedDepts = [...selectedDepts, dept];
     }
-    performSearch();
+    performSearch(true);
   }
 
   function clearFilters() {
@@ -150,7 +151,7 @@
     query = "";
     sortColumn = "";
     sortDirection = "asc";
-    performSearch();
+    performSearch(true);
   }
 
   function handleExport() {
@@ -171,7 +172,7 @@
     exportToCSV(exportData, `boun_courses_search_${new Date().toISOString().split('T')[0]}`);
   }
 
-  let debounceTimer: any;
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   function handleInput() {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => performSearch(true), 300);

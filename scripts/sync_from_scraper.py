@@ -8,7 +8,7 @@ import urllib.parse
 import urllib.error
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List, Set
+from typing import Optional, Dict, Any, List, Set, Union
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, joinedload, selectinload
 from dotenv import load_dotenv
@@ -109,16 +109,28 @@ class ScraperClient:
             raise
 
 
-def ensure_term(session, term_id: str, term_cache: Optional[Set[str]] = None) -> Term:
-    if term_cache is not None and term_id in term_cache:
-        return session.query(Term).filter(Term.id == term_id).first()
+def ensure_term(session, term_id: str, term_cache: Optional[Union[Set[str], Dict[str, Any]]] = None) -> Term:
+    if term_cache is not None:
+        if isinstance(term_cache, dict) and term_id in term_cache:
+            cached = term_cache[term_id]
+            if isinstance(cached, Term):
+                return cached
+        elif isinstance(term_cache, set) and term_id in term_cache:
+            term_in_session = session.get(Term, term_id) if hasattr(session, "get") else None
+            if term_in_session:
+                return term_in_session
+            return session.query(Term).filter(Term.id == term_id).first()
 
     term = session.query(Term).filter(Term.id == term_id).first()
     if not term:
         year = term_id
         sem = 1
         if "-" in term_id:
-            parts = term_id.split("-")
+            parts = term_id.rsplit("-", 1)
+            year = parts[0]
+            sem = clean_int(parts[1]) or 1
+        elif "/" in term_id:
+            parts = term_id.rsplit("/", 1)
             year = parts[0]
             sem = clean_int(parts[1]) or 1
         term = Term(id=term_id, academic_year=year, semester_num=sem)
@@ -126,21 +138,45 @@ def ensure_term(session, term_id: str, term_cache: Optional[Set[str]] = None) ->
         session.flush()
 
     if term_cache is not None:
-        term_cache.add(term_id)
+        if isinstance(term_cache, set):
+            term_cache.add(term_id)
+        elif isinstance(term_cache, dict):
+            term_cache[term_id] = term
     return term
 
 
-def ensure_department(session, dept_kisaadi: str, bolum: Optional[str] = None, dept_cache: Optional[Dict[str, str]] = None) -> Department:
+def ensure_department(
+    session,
+    dept_kisaadi: str,
+    bolum: Optional[str] = None,
+    dept_cache: Optional[Union[Dict[str, str], Dict[str, Department]]] = None
+) -> Optional[Department]:
+    if not dept_kisaadi:
+        return None
+    dept_kisaadi = str(dept_kisaadi)[:10].strip().upper()
+
     if dept_cache is not None and dept_kisaadi in dept_cache:
-        dept_bolum = dept_cache[dept_kisaadi]
-        if bolum and dept_bolum == dept_kisaadi and bolum != dept_bolum:
+        cached = dept_cache[dept_kisaadi]
+        if isinstance(cached, Department):
+            if bolum and cached.bolum == dept_kisaadi and bolum != cached.bolum:
+                cached.bolum = bolum
+                session.flush()
+            return cached
+        elif isinstance(cached, str):
+            dept_bolum = cached
+            if bolum and dept_bolum == dept_kisaadi and bolum != dept_bolum:
+                dept = session.query(Department).filter(Department.kisaadi == dept_kisaadi).first()
+                if dept:
+                    dept.bolum = bolum
+                    dept_cache[dept_kisaadi] = bolum
+                    session.flush()
+                    return dept
+            dept_in_session = session.get(Department, dept_kisaadi) if hasattr(session, "get") else None
+            if dept_in_session:
+                return dept_in_session
             dept = session.query(Department).filter(Department.kisaadi == dept_kisaadi).first()
             if dept:
-                dept.bolum = bolum
-                dept_cache[dept_kisaadi] = bolum
-                session.flush()
                 return dept
-        return session.query(Department).filter(Department.kisaadi == dept_kisaadi).first()
 
     dept = session.query(Department).filter(Department.kisaadi == dept_kisaadi).first()
     if not dept:
@@ -152,7 +188,7 @@ def ensure_department(session, dept_kisaadi: str, bolum: Optional[str] = None, d
         session.flush()
 
     if dept_cache is not None:
-        dept_cache[dept_kisaadi] = dept.bolum
+        dept_cache[dept_kisaadi] = dept
     return dept
 
 
@@ -210,6 +246,7 @@ def sync_meili_documents(meili_index, courses: List[Course], chunk_size: int = 1
             "department": c.department.bolum if c.department else None,
             "dept_code": c.dept_kisaadi,
             "instructor": c.instructor.full_name if c.instructor else "TBA",
+            "instructor_id": c.instructor_id,
             "credits": c.credits,
             "ects": c.ects,
             "delivery_method": c.delivery_method,
@@ -230,7 +267,7 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
     state = session.query(SyncState).filter(SyncState.feed_name == "quota_snapshots").first()
     cursor = state.last_cursor if state else None
 
-    term_cache: Set[str] = {t.id for t in session.query(Term.id).all()}
+    term_cache: Dict[str, Term] = {t.id: t for t in session.query(Term).all()}
     total_synced = 0
 
     while True:
@@ -249,7 +286,7 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
             logger.info("No new quota snapshot records available.")
             break
 
-        last_captured_at = None
+        last_captured_at = cursor
         for item in data:
             term_id = item.get("term")
             course_code = normalize_code(item.get("course_code"))
@@ -259,30 +296,68 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
 
             ensure_term(session, term_id, term_cache)
 
-            captured = item.get("captured_at") or item.get("timestamp") or ""
-            snapshot = QuotaSnapshot(
-                term_id=term_id,
-                course_code=course_code,
-                section=section,
-                department=item.get("department"),
-                status=item.get("status"),
-                quota=str(item.get("quota")) if item.get("quota") is not None else None,
-                current=str(item.get("current")) if item.get("current") is not None else None,
-                quota_numeric=clean_int(item.get("quota_numeric")),
-                current_numeric=clean_int(item.get("current_numeric")),
-                is_consent=bool(item.get("is_consent", False)),
-                is_unlimited=bool(item.get("is_unlimited", False)),
-                available=clean_int(item.get("available")),
-                captured_at=captured
-            )
-            if not dry_run:
-                session.add(snapshot)
+            captured = item.get("captured_at") or item.get("timestamp") or datetime.now(timezone.utc).isoformat()
+            dept = item.get("department")
+            status = item.get("status")
+            quota_raw = str(item.get("quota")) if item.get("quota") is not None else None
+            current_raw = str(item.get("current")) if item.get("current") is not None else None
+            quota_num = clean_int(item.get("quota_numeric")) if item.get("quota_numeric") is not None else clean_int(item.get("quota"))
+            current_num = clean_int(item.get("current_numeric")) if item.get("current_numeric") is not None else clean_int(item.get("current"))
+            avail = clean_int(item.get("available"))
+            if avail is None and quota_num is not None and current_num is not None:
+                avail = max(0, quota_num - current_num)
+
+            # Deduplication & idempotent upsert
+            existing = session.query(QuotaSnapshot).filter(
+                QuotaSnapshot.term_id == term_id,
+                QuotaSnapshot.course_code == course_code,
+                QuotaSnapshot.section == section,
+                QuotaSnapshot.department == dept,
+                QuotaSnapshot.captured_at == captured
+            ).first()
+
+            if not existing:
+                snapshot = QuotaSnapshot(
+                    term_id=term_id,
+                    course_code=course_code,
+                    section=section,
+                    department=dept,
+                    status=status,
+                    quota=quota_raw,
+                    current=current_raw,
+                    quota_numeric=quota_num,
+                    current_numeric=current_num,
+                    is_consent=bool(item.get("is_consent", False)),
+                    is_unlimited=bool(item.get("is_unlimited", False)),
+                    available=avail,
+                    captured_at=captured
+                )
+                if not dry_run:
+                    session.add(snapshot)
+            else:
+                if status is not None:
+                    existing.status = status
+                if quota_raw is not None:
+                    existing.quota = quota_raw
+                if current_raw is not None:
+                    existing.current = current_raw
+                if quota_num is not None:
+                    existing.quota_numeric = quota_num
+                if current_num is not None:
+                    existing.current_numeric = current_num
+                existing.is_consent = bool(item.get("is_consent", existing.is_consent))
+                existing.is_unlimited = bool(item.get("is_unlimited", existing.is_unlimited))
+                if avail is not None:
+                    existing.available = avail
 
             if captured:
-                last_captured_at = captured
+                if last_captured_at is None or captured > last_captured_at:
+                    last_captured_at = captured
             total_synced += 1
 
-        if not dry_run and last_captured_at:
+        if not dry_run:
+            if not last_captured_at:
+                last_captured_at = datetime.now(timezone.utc).isoformat()
             if not state:
                 state = SyncState(feed_name="quota_snapshots", last_cursor=last_captured_at)
                 session.add(state)
@@ -307,7 +382,7 @@ def _sync_course_slots(
 ) -> None:
     if slots_payload is None or dry_run:
         return
-    session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete()
+    session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete(synchronize_session="fetch")
     for s in slots_payload:
         room_id = ensure_room(session, s.get("room"), room_cache)
         slot = CourseSlot(
@@ -330,8 +405,8 @@ def _upsert_course(
     val_payload: Dict[str, Any],
     inst_cache: Dict[str, int],
     room_cache: Dict[str, int],
-    dept_cache: Dict[str, str],
-    term_cache: Set[str],
+    dept_cache: Optional[Union[Dict[str, str], Dict[str, Department]]],
+    term_cache: Optional[Union[Set[str], Dict[str, Any]]],
     dry_run: bool = False
 ) -> Optional[Course]:
     ensure_term(session, term_id, term_cache)
@@ -345,14 +420,11 @@ def _upsert_course(
     ects = clean_int(val_payload.get("ects"))
     delivery_method = val_payload.get("delivery_method")
 
-    course_q = session.query(Course).filter(
+    course = session.query(Course).filter(
         Course.term_id == term_id,
         Course.course_code == course_code,
         Course.section == section
-    )
-    if dept_kisaadi:
-        course_q = course_q.filter(Course.dept_kisaadi == dept_kisaadi)
-    course = course_q.first()
+    ).first()
 
     if not course:
         course = Course(
@@ -370,6 +442,8 @@ def _upsert_course(
             session.add(course)
             session.flush()
     else:
+        if dept_kisaadi is not None:
+            course.dept_kisaadi = dept_kisaadi
         if title is not None:
             course.title = title
         if instructor_id is not None:
@@ -395,25 +469,27 @@ def _apply_delta_event(
     item: Dict[str, Any],
     inst_cache: Dict[str, int],
     room_cache: Dict[str, int],
-    dept_cache: Dict[str, str],
-    term_cache: Set[str],
+    dept_cache: Optional[Union[Dict[str, str], Dict[str, Department]]],
+    term_cache: Optional[Union[Set[str], Dict[str, Any]]],
     touched_course_ids: Set[int],
     meili_index,
     dry_run: bool = False
 ) -> None:
-    change_type = item.get("change_type")
+    raw_change_type = item.get("change_type")
     term_id = item.get("term")
     dept_kisaadi = item.get("department")
     course_code = normalize_code(item.get("course_code"))
     section = normalize_section(item.get("section"))
     timestamp = item.get("timestamp") or ""
 
-    if not change_type or not term_id or not course_code:
+    if not raw_change_type or not term_id or not course_code:
         return
+
+    change_type = str(raw_change_type).strip().lower()
 
     if not dry_run:
         change_log = CourseChange(
-            change_type=change_type,
+            change_type=raw_change_type,
             term_id=term_id,
             dept_kisaadi=dept_kisaadi,
             course_code=course_code,
@@ -425,8 +501,10 @@ def _apply_delta_event(
         )
         session.add(change_log)
 
-    if change_type in ("added", "modified"):
+    if change_type in ("added", "insert", "inserted", "create", "created", "modified", "update", "updated", "modify"):
         val_payload = item.get("new_value") or {}
+        if not val_payload and any(k in item for k in ("course_name", "title", "instructor", "credits", "ects", "slots", "course_slots")):
+            val_payload = item
         course = _upsert_course(
             session=session,
             term_id=term_id,
@@ -443,19 +521,16 @@ def _apply_delta_event(
         if course and course.id:
             touched_course_ids.add(course.id)
 
-    elif change_type == "removed":
-        course_q = session.query(Course).filter(
+    elif change_type in ("removed", "delete", "deleted", "remove", "drop", "dropped"):
+        course = session.query(Course).filter(
             Course.term_id == term_id,
             Course.course_code == course_code,
             Course.section == section
-        )
-        if dept_kisaadi:
-            course_q = course_q.filter(Course.dept_kisaadi == dept_kisaadi)
-        course = course_q.first()
+        ).first()
 
         if course and not dry_run:
             course_id = course.id
-            session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete()
+            session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete(synchronize_session="fetch")
             session.delete(course)
             session.flush()
             if meili_index:
@@ -509,8 +584,8 @@ def sync_deltas_feed(
 
     inst_cache: Dict[str, int] = {i.full_name: i.id for i in session.query(Instructor).all()}
     room_cache: Dict[str, int] = {r.name: r.id for r in session.query(Room).all()}
-    dept_cache: Dict[str, str] = {d.kisaadi: d.bolum for d in session.query(Department).all()}
-    term_cache: Set[str] = {t.id for t in session.query(Term.id).all()}
+    dept_cache: Dict[str, Department] = {d.kisaadi: d for d in session.query(Department).all()}
+    term_cache: Dict[str, Term] = {t.id: t for t in session.query(Term).all()}
 
     total_synced = 0
 
@@ -554,7 +629,9 @@ def sync_deltas_feed(
             )
             total_synced += 1
 
-        if not dry_run and last_timestamp:
+        if not dry_run:
+            if not last_timestamp:
+                last_timestamp = datetime.now(timezone.utc).isoformat()
             if not state:
                 state = SyncState(feed_name="deltas", last_cursor=last_timestamp)
                 session.add(state)
@@ -599,8 +676,8 @@ def backfill_term(
 
     inst_cache: Dict[str, int] = {i.full_name: i.id for i in session.query(Instructor).all()}
     room_cache: Dict[str, int] = {r.name: r.id for r in session.query(Room).all()}
-    dept_cache: Dict[str, str] = {d.kisaadi: d.bolum for d in session.query(Department).all()}
-    term_cache: Set[str] = {t.id for t in session.query(Term.id).all()}
+    dept_cache: Dict[str, Department] = {d.kisaadi: d for d in session.query(Department).all()}
+    term_cache: Dict[str, Term] = {t.id: t for t in session.query(Term).all()}
     touched_courses: List[Course] = []
 
     for item in courses_raw:
@@ -668,7 +745,7 @@ def sync_terms_and_new_offerings(
         logger.warning("Failed to fetch scraper terms: %s", e)
         return 0
 
-    term_cache: Set[str] = {t.id for t in session.query(Term.id).all()}
+    term_cache: Dict[str, Term] = {t.id: t for t in session.query(Term).all()}
     total_synced_courses = 0
 
     for term_id in scraper_terms:
@@ -791,6 +868,18 @@ def main():
         try:
             meili_client = meilisearch.Client(meili_url, meili_key)
             meili_index = meili_client.index("courses")
+            meili_index.update_settings({
+                'filterableAttributes': [
+                    'term', 'dept_code', 'department', 'instructor', 'instructor_id', 'delivery_method'
+                ],
+                'searchableAttributes': [
+                    'course_code', 'title', 'instructor', 'department'
+                ],
+                'faceting': {
+                    'maxValuesPerFacet': 1000
+                },
+                'sortableAttributes': ['term', 'course_code', 'title', 'instructor', 'credits', 'ects']
+            })
         except Exception as e:
             logger.warning("Could not connect to Meilisearch: %s. Proceeding with DB sync only.", e)
 

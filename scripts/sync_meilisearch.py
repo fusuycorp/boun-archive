@@ -50,7 +50,7 @@ def sync_meilisearch(force: bool = False):
     print("Configuring index settings...")
     config_task = index.update_settings({
         'filterableAttributes': [
-            'term', 'dept_code', 'department', 'instructor', 'delivery_method'
+            'term', 'dept_code', 'department', 'instructor', 'instructor_id', 'delivery_method'
         ],
         'searchableAttributes': [
             'course_code', 'title', 'instructor', 'department'
@@ -95,6 +95,7 @@ def sync_meilisearch(force: bool = False):
             'department': c.department.bolum if c.department else None,
             'dept_code': c.dept_kisaadi,
             'instructor': c.instructor.full_name if c.instructor else "TBA",
+            'instructor_id': c.instructor_id,
             'credits': c.credits,
             'ects': c.ects,
             'delivery_method': c.delivery_method,
@@ -117,6 +118,35 @@ def sync_meilisearch(force: bool = False):
     if last_task:
         print(f"Awaiting indexing completion for task UID {last_task.task_uid}...")
         client.wait_for_task(last_task.task_uid)
+
+    # 4. Prune documents for courses deleted from PostgreSQL
+    print("Checking for pruned/deleted courses in Meilisearch...")
+    try:
+        db_course_ids = set(r[0] for r in session.query(Course.id).all())
+        offset = 0
+        limit = 1000
+        orphaned_ids = []
+        while True:
+            docs_res = index.get_documents({"fields": ["id"], "limit": limit, "offset": offset})
+            if not docs_res or not docs_res.results:
+                break
+            for doc in docs_res.results:
+                doc_id = getattr(doc, "id", None)
+                if doc_id is not None and doc_id not in db_course_ids:
+                    orphaned_ids.append(doc_id)
+            if len(docs_res.results) < limit:
+                break
+            offset += limit
+
+        if orphaned_ids:
+            print(f"Pruning {len(orphaned_ids)} deleted course(s) from Meilisearch...")
+            del_task = index.delete_documents(orphaned_ids)
+            client.wait_for_task(del_task.task_uid)
+            print(f"Pruned {len(orphaned_ids)} deleted course(s).")
+        else:
+            print("No orphaned course documents to prune.")
+    except Exception as e:
+        print(f"Warning: Document pruning check encountered an error: {e}")
         
     print("Meilisearch sync completed!")
 

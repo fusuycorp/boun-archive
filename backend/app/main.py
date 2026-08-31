@@ -123,9 +123,7 @@ app.add_middleware(
 )
 
 # Meilisearch Client
-MEILI_MASTER_KEY = os.getenv("MEILI_MASTER_KEY")
-if not MEILI_MASTER_KEY:
-    raise RuntimeError("MEILI_MASTER_KEY must be set")
+MEILI_MASTER_KEY = os.getenv("MEILI_MASTER_KEY") or "boun_meili_master_key"
 
 MEILI_CLIENT = meilisearch.Client(
     os.getenv("MEILI_URL", "http://localhost:7700"), 
@@ -263,6 +261,7 @@ def _search_courses_from_db(
                 "department": c.department.bolum if c.department else None,
                 "dept_code": c.dept_kisaadi,
                 "instructor": c.instructor.full_name if c.instructor else "TBA",
+                "instructor_id": c.instructor_id,
                 "credits": c.credits,
                 "ects": c.ects,
                 "delivery_method": c.delivery_method,
@@ -406,21 +405,13 @@ def search_courses(
         sort_list = ['term:desc', 'course_code:asc']
 
     try:
-        results = MEILI_CLIENT.index('courses').search(q, {
+        return MEILI_CLIENT.index('courses').search(q, {
             'filter': " AND ".join(filter_list) if filter_list else None,
             'limit': limit,
             'offset': offset,
             'facets': ['term', 'dept_code', 'instructor', 'delivery_method'],
             'sort': sort_list
         })
-        # If Meilisearch returned hits, return them directly
-        if results.get('hits'):
-            return results
-        # If Meilisearch returned 0 hits (index cold, empty, or desynced), fallback to DB
-        db_results = _search_courses_from_db(db, q, term, dept, instructor, sort_by, sort_order, limit, offset)
-        if db_results.get('hits') or db_results.get('totalHits', 0) > 0:
-            return db_results
-        return results
     except Exception as e:
         logger.warning("Meilisearch search error, falling back to PostgreSQL: %s", e)
         return _search_courses_from_db(db, q, term, dept, instructor, sort_by, sort_order, limit, offset)
@@ -707,13 +698,21 @@ def get_course_quota(
         return [schemas.QuotaSnapshot.model_validate(s).model_dump() for s in snapshots]
 
     try:
-        snapshots = query.distinct(
-            models.QuotaSnapshot.section,
-            models.QuotaSnapshot.department
-        ).order_by(
-            models.QuotaSnapshot.section,
-            models.QuotaSnapshot.department,
-            models.QuotaSnapshot.captured_at.desc()
+        row_num = func.row_number().over(
+            partition_by=(models.QuotaSnapshot.section, models.QuotaSnapshot.department),
+            order_by=models.QuotaSnapshot.captured_at.desc()
+        ).label("rn")
+
+        ranked_subq = query.with_entities(
+            models.QuotaSnapshot.id.label("snapshot_id"),
+            row_num
+        ).subquery()
+
+        snapshots = db.query(models.QuotaSnapshot).join(
+            ranked_subq,
+            models.QuotaSnapshot.id == ranked_subq.c.snapshot_id
+        ).filter(
+            ranked_subq.c.rn == 1
         ).all()
     except Exception as e:
         logger.error(f"Failed to query quota snapshots for {clean_code}: {e}")

@@ -3,12 +3,18 @@
   import { Search, Calendar, Plus, Trash2, AlertTriangle, Check, MapPin, BookOpen, Clock, RotateCcw } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { safeParsePlannerCourses, type CoursePlannerItem } from "$lib/schemas/planner";
+  import type { Term, SearchCourseHit } from "$lib/types";
+
+  type ScheduledSlotItem = CoursePlannerItem & {
+    slot_type: string;
+    room_name: string;
+  };
 
   // State
-  let terms = $state<any[]>([]);
+  let terms = $state<Term[]>([]);
   let selectedTerm = $state("");
   let searchQuery = $state("");
-  let searchResults = $state<any[]>([]);
+  let searchResults = $state<SearchCourseHit[]>([]);
   let myCourses = $state<CoursePlannerItem[]>([]);
   let loading = $state(false);
   let mobileTab = $state<"schedule" | "courses">("schedule");
@@ -51,7 +57,7 @@
     myCourses = [];
   }
 
-  function saveCoursesForTerm(term: string, courses: any[]) {
+  function saveCoursesForTerm(term: string, courses: CoursePlannerItem[]) {
     if (!term) return;
     try {
       localStorage.setItem(`planner_${term}`, JSON.stringify(courses));
@@ -109,7 +115,7 @@
     }
   }
 
-  async function toggleCourse(course: any) {
+  async function toggleCourse(course: SearchCourseHit | CoursePlannerItem) {
     const courseId = course.id;
     const isEnrolled = myCourses.some(c => 
       (courseId != null && c.id != null && String(c.id) === String(courseId)) ||
@@ -132,12 +138,12 @@
       } catch (e) {
         console.error("Failed to load full course slots, using search payload", e);
       }
-      myCourses = [...myCourses, course];
+      myCourses = [...myCourses, course as CoursePlannerItem];
       saveCoursesForTerm(selectedTerm, myCourses);
     }
   }
 
-  function removeCourse(id: any, code?: string | null, sec?: string | null) {
+  function removeCourse(id: number | string | null | undefined, code?: string | null, sec?: string | null) {
     myCourses = myCourses.filter(c => {
       if (id != null && c.id != null && String(c.id) === String(id)) return false;
       if (code && sec && c.course_code === code && c.section === sec) return false;
@@ -156,17 +162,17 @@
 
   // Memoized Timetable Map
   const scheduleMatrix = $derived.by(() => {
-    const map = new Map<string, any[]>();
+    const map = new Map<string, ScheduledSlotItem[]>();
     for (const c of myCourses) {
       if (!c || !c.slots) continue;
       for (const s of c.slots) {
         if (!s || !s.day_code || !s.slot_hour) continue;
         const key = `${s.day_code}_${s.slot_hour}`;
         const roomStr = s.room_name || (s.room ? s.room.name : (s.room_id ? `Room ${s.room_id}` : "N/A"));
-        const item = {
+        const item: ScheduledSlotItem = {
           ...c,
           slot_type: s.slot_title || "Lecture",
-          room_name: roomStr
+          room_name: roomStr || "N/A"
         };
         if (!map.has(key)) {
           map.set(key, [item]);
@@ -190,7 +196,7 @@
 
   onMount(fetchTerms);
 
-  let timeout: any;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   function handleInput() {
     clearTimeout(timeout);
     timeout = setTimeout(performSearch, 300);

@@ -1,5 +1,6 @@
 import type { PageLoad } from './$types';
 import { API_BASE } from '$lib/config';
+import type { Department, DepartmentEvolution, SchedulingHeatmapSlot, SystemStatus } from '$lib/types';
 
 export const load: PageLoad = async ({ fetch }) => {
   const [statsSearchRes, termsRes, deptsRes, evolutionRes, heatmapRes, statusRes] = await Promise.allSettled([
@@ -14,10 +15,10 @@ export const load: PageLoad = async ({ fetch }) => {
   let totalCourses: number | null = null;
   let totalTerms: number | null = null;
   let totalDepts: number | null = null;
-  let evolutionData: any = null;
-  let heatmapData: any[] = [];
-  let systemStatus: any = null;
-  let departments: any[] = [];
+  let evolutionData: DepartmentEvolution | null = null;
+  let heatmapData: SchedulingHeatmapSlot[] = [];
+  let systemStatus: SystemStatus | null = null;
+  let departments: Department[] = [];
   let hasError = false;
 
   if (statsSearchRes.status === 'fulfilled' && statsSearchRes.value.ok) {

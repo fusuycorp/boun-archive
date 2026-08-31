@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional, Dict
 
 class TermBase(BaseModel):
@@ -7,24 +7,21 @@ class TermBase(BaseModel):
     semester_num: int
 
 class Term(TermBase):
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class DepartmentBase(BaseModel):
     kisaadi: str
     bolum: str
 
 class Department(DepartmentBase):
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class InstructorBase(BaseModel):
     full_name: str
 
 class Instructor(InstructorBase):
     id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class RoomBase(BaseModel):
     name: str
@@ -33,8 +30,7 @@ class RoomBase(BaseModel):
 
 class Room(RoomBase):
     id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class CourseSlotBase(BaseModel):
     day_code: Optional[str] = None
@@ -45,8 +41,7 @@ class CourseSlotBase(BaseModel):
 class CourseSlot(CourseSlotBase):
     id: int
     room_name: Optional[str] = None
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class CourseBase(BaseModel):
     term_id: str
@@ -62,8 +57,7 @@ class CourseBase(BaseModel):
 class Course(CourseBase):
     id: int
     slots: List[CourseSlot] = []
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class QuotaSnapshotBase(BaseModel):
     term_id: str
@@ -82,8 +76,7 @@ class QuotaSnapshotBase(BaseModel):
 
 class QuotaSnapshot(QuotaSnapshotBase):
     id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class CourseChangeBase(BaseModel):
     change_type: str
@@ -98,16 +91,14 @@ class CourseChangeBase(BaseModel):
 
 class CourseChange(CourseChangeBase):
     id: int
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class SyncStateBase(BaseModel):
     feed_name: str
     last_cursor: Optional[str] = None
 
 class SyncState(SyncStateBase):
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class FeedState(BaseModel):
     last_cursor: Optional[str] = None
