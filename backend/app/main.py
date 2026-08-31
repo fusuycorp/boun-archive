@@ -577,25 +577,6 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
         } for c in courses], key=lambda x: x['term'], reverse=True)
     }
 
-@app.post("/v1/sync/run")
-@app.get("/v1/sync/run")
-def trigger_sync_run(
-    term: Optional[str] = None,
-    mode: str = "incremental"
-):
-    import threading
-    threading.Thread(
-        target=_run_scraper_sync_job,
-        kwargs={"term_id": term, "mode": mode},
-        daemon=True
-    ).start()
-    return {
-        "status": "triggered",
-        "mode": mode,
-        "term": term,
-        "message": f"Sync job initiated in background (mode={mode}, term={term or 'all'})"
-    }
-
 @app.get("/v1/terms", response_model=List[schemas.Term])
 @cache(expire=300)
 def get_terms(db: Session = Depends(database.get_db)):
