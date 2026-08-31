@@ -72,7 +72,7 @@
               <span class="truncate font-mono">{term}</span>
             </div>
             <span class="text-[10px] opacity-60 font-mono text-[#525f7f] dark:text-slate-400">
-               {currentFacets?.term?.[term] ?? globalFacets?.term?.[term] ?? 0}
+               {currentFacets?.term ? (currentFacets.term[term] ?? 0) : (globalFacets?.term?.[term] ?? 0)}
             </span>
           </button>
         {/each}
@@ -119,7 +119,7 @@
             <span class="truncate font-mono">{dept}</span>
           </div>
           <span class="text-[10px] opacity-60 font-mono text-[#525f7f] dark:text-slate-400">
-            {currentFacets?.dept_code?.[dept] ?? globalFacets?.dept_code?.[dept] ?? 0}
+            {currentFacets?.dept_code ? (currentFacets.dept_code[dept] ?? 0) : (globalFacets?.dept_code?.[dept] ?? 0)}
           </span>
         </button>
       {/each}
