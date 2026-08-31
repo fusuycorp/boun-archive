@@ -160,27 +160,27 @@
   <title>BOUN Archive • Boğaziçi University Academic Catalog</title>
 </svelte:head>
 
-<div class="min-h-screen w-full bg-[#eeece2] text-[#1c1b18] transition-colors duration-200 dark:bg-[#121214] dark:text-neutral-100 flex flex-col antialiased selection:bg-[#c5a059]/25 selection:text-[#1c1b18] dark:selection:bg-[#c5a059]/30 dark:selection:text-amber-200">
+<div class="min-h-screen w-full bg-[#faf8f5] text-[#161e2e] transition-colors duration-200 dark:bg-[#0a0e1a] dark:text-slate-100 flex flex-col antialiased selection:bg-[#002d72]/20 selection:text-[#002d72] dark:selection:bg-[#8cc8ea]/25 dark:selection:text-[#8cc8ea]">
   <!-- Top Navigation Header -->
-  <header class="sticky top-0 z-40 w-full bg-[#eeece2]/90 dark:bg-[#121214]/90 backdrop-blur-md border-b border-[#dbd7cc] dark:border-[#27272a] shadow-2xs transition-colors duration-200">
+  <header class="sticky top-0 z-40 w-full bg-[#faf8f5]/85 dark:bg-[#0a0e1a]/85 backdrop-blur-md border-b border-[#e5e0d8] dark:border-[#1e293b] shadow-2xs transition-colors duration-200">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
       <!-- Left: Logo & Brand -->
       <a href="/" class="flex items-center space-x-3 group shrink-0" aria-label="BOUN Archive Home">
         <img 
           src="/logo.png" 
           alt="Boğaziçi University Crest" 
-          class="h-9 w-9 rounded-lg shadow-2xs border border-[#dbd7cc] dark:border-[#27272a] object-cover shrink-0 group-hover:scale-105 transition-transform duration-200" 
+          class="h-9 w-9 rounded-lg shadow-2xs border border-[#e5e0d8] dark:border-[#1e293b] object-cover shrink-0 group-hover:scale-105 transition-transform duration-200" 
         />
         <div class="flex flex-col">
           <div class="flex items-center gap-1.5">
-            <span class="font-serif text-lg font-bold tracking-tight text-[#1c1b18] dark:text-neutral-50 leading-none">
+            <span class="font-serif text-lg font-bold tracking-tight text-[#002d72] dark:text-slate-50 leading-none">
               BOUN Archive
             </span>
-            <span class="hidden sm:inline-block font-mono text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-900 dark:bg-amber-400/10 dark:text-amber-300 border border-amber-500/25">
+            <span class="hidden sm:inline-block font-mono text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#c5a059]/15 text-[#9a7632] dark:bg-[#c5a059]/20 dark:text-[#e5a823] border border-[#c5a059]/30">
               50y
             </span>
           </div>
-          <span class="font-sans text-[9px] font-semibold uppercase tracking-widest text-[#746f65] dark:text-neutral-500 mt-0.5">
+          <span class="font-sans text-[9px] font-semibold uppercase tracking-widest text-[#525f7f] dark:text-slate-400 mt-0.5">
             Boğaziçi University
           </span>
         </div>
@@ -192,12 +192,12 @@
           {@const isActive = page.url.pathname === item.href}
           <a 
             href={item.href} 
-            class="flex items-center space-x-2 px-3 py-2 rounded-lg text-xs xl:text-sm font-semibold transition-colors duration-150
+            class="flex items-center space-x-2 px-3 py-2 rounded-lg text-xs xl:text-sm font-semibold transition-all duration-150
             {isActive 
-              ? 'bg-[#dedacb] text-[#1c1b18] dark:bg-[#1f1f23] dark:text-neutral-100 shadow-2xs' 
-              : 'text-[#5c5850] hover:text-[#1c1b18] hover:bg-[#e4e1d4] dark:text-neutral-400 dark:hover:text-neutral-200 dark:hover:bg-[#18181b]'}"
+              ? 'bg-[#002d72]/10 text-[#002d72] dark:bg-[#8cc8ea]/15 dark:text-[#8cc8ea] shadow-2xs' 
+              : 'text-[#525f7f] hover:text-[#002d72] hover:bg-[#002d72]/5 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60'}"
           >
-            <item.icon size={15} class="shrink-0 {isActive ? 'text-[#002d72] dark:text-amber-400' : 'text-[#8a857a] dark:text-neutral-500'}" />
+            <item.icon size={15} class="shrink-0 {isActive ? 'text-[#002d72] dark:text-[#8cc8ea]' : 'text-[#8a94a6] dark:text-slate-500'}" />
             <span>{item.label}</span>
           </a>
         {/each}
@@ -214,7 +214,7 @@
               ? 'text-amber-900 bg-amber-500/10 border-amber-600/20 dark:text-amber-300 dark:bg-amber-500/10 dark:border-amber-500/20'
               : scrapeFreshness.statusClass === 'rose'
               ? 'text-rose-800 bg-rose-500/10 border-rose-600/20 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/20'
-              : 'text-[#746f65] bg-[#dbd7cc]/30 border-[#dbd7cc] dark:text-neutral-400 dark:bg-neutral-800/40 dark:border-neutral-700/40'
+              : 'text-[#525f7f] bg-[#e5e0d8]/40 border-[#e5e0d8] dark:text-slate-400 dark:bg-slate-800/40 dark:border-slate-700/40'
           }"
           title={scrapeFreshness.tooltip}
         >
@@ -225,7 +225,7 @@
               ? 'bg-amber-600 dark:bg-amber-500'
               : scrapeFreshness.statusClass === 'rose'
               ? 'bg-rose-600 dark:bg-rose-500'
-              : 'bg-neutral-400 dark:bg-neutral-500'
+              : 'bg-slate-400 dark:bg-slate-500'
           }"></span>
           <span class="tracking-tight">{scrapeFreshness.text}</span>
         </div>
@@ -233,21 +233,21 @@
         <!-- Dark/Light Theme Toggle -->
         <button 
           onclick={toggleTheme}
-          class="p-2 text-[#5c5850] hover:text-[#1c1b18] hover:bg-[#e4e1d4] dark:text-neutral-400 dark:hover:text-neutral-200 dark:hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
+          class="p-2 text-[#525f7f] hover:text-[#002d72] hover:bg-[#002d72]/5 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60 rounded-lg transition-colors cursor-pointer"
           aria-label="Toggle dark/light theme"
           title={isDark ? "Switch to light theme" : "Switch to dark theme"}
         >
           {#if isDark}
-            <Sun size={17} class="text-amber-400" />
+            <Sun size={17} class="text-[#f59e0b]" />
           {:else}
-            <Moon size={17} class="text-[#5c5850]" />
+            <Moon size={17} class="text-[#002d72]" />
           {/if}
         </button>
 
         <!-- Mobile Menu Trigger -->
         <button 
           onclick={() => isMobileDrawerOpen = !isMobileDrawerOpen}
-          class="lg:hidden p-2 text-[#5c5850] hover:text-[#1c1b18] hover:bg-[#e4e1d4] dark:text-neutral-400 dark:hover:text-neutral-200 dark:hover:bg-[#18181b] rounded-lg transition-colors cursor-pointer"
+          class="lg:hidden p-2 text-[#525f7f] hover:text-[#002d72] hover:bg-[#002d72]/5 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60 rounded-lg transition-colors cursor-pointer"
           aria-label="Open mobile navigation menu"
         >
           {#if isMobileDrawerOpen}
@@ -274,20 +274,20 @@
 
   <!-- Mobile Off-Canvas Drawer -->
   <aside 
-    class="lg:hidden fixed inset-y-0 left-0 z-50 w-72 bg-[#f7f5ee] dark:bg-[#18181b] border-r border-[#dbd7cc] dark:border-[#27272a] shadow-2xl flex flex-col transition-transform duration-300 ease-in-out transform {isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}"
+    class="lg:hidden fixed inset-y-0 left-0 z-50 w-72 bg-[#ffffff] dark:bg-[#121827] border-r border-[#e5e0d8] dark:border-[#1e293b] shadow-2xl flex flex-col transition-transform duration-300 ease-in-out transform {isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}"
     aria-label="Mobile Navigation Drawer"
   >
-    <div class="p-5 flex items-center justify-between border-b border-[#dbd7cc] dark:border-[#27272a] shrink-0">
+    <div class="p-5 flex items-center justify-between border-b border-[#e5e0d8] dark:border-[#1e293b] shrink-0">
       <div class="flex items-center space-x-3">
-        <img src="/logo.png" alt="BOUN Logo" class="h-9 w-9 rounded-lg shadow-2xs border border-[#dbd7cc] dark:border-[#27272a] object-cover shrink-0" />
+        <img src="/logo.png" alt="BOUN Logo" class="h-9 w-9 rounded-lg shadow-2xs border border-[#e5e0d8] dark:border-[#1e293b] object-cover shrink-0" />
         <div>
-          <h2 class="font-serif text-base font-bold text-[#1c1b18] tracking-tight leading-none dark:text-neutral-50">BOUN Archive</h2>
-          <p class="font-sans text-[9px] text-[#746f65] mt-1 uppercase tracking-widest font-semibold dark:text-neutral-500">Academic Analytics</p>
+          <h2 class="font-serif text-base font-bold text-[#002d72] tracking-tight leading-none dark:text-slate-50">BOUN Archive</h2>
+          <p class="font-sans text-[9px] text-[#525f7f] mt-1 uppercase tracking-widest font-semibold dark:text-slate-400">Academic Analytics</p>
         </div>
       </div>
       <button 
         onclick={closeMobileDrawer}
-        class="p-2 text-[#746f65] hover:text-[#1c1b18] dark:hover:text-neutral-200 rounded-lg cursor-pointer"
+        class="p-2 text-[#525f7f] hover:text-[#002d72] dark:hover:text-slate-200 rounded-lg cursor-pointer"
         aria-label="Close menu"
       >
         <X size={19} />
@@ -295,8 +295,8 @@
     </div>
 
     <!-- Scrape status banner in mobile drawer -->
-    <div class="px-4 py-3 bg-[#e7e4d9] dark:bg-[#121214] border-b border-[#dbd7cc] dark:border-[#27272a] flex items-center justify-between text-xs font-medium">
-      <span class="text-[#5c5850] dark:text-neutral-400">Portal Sync Status</span>
+    <div class="px-4 py-3 bg-[#f3efe6] dark:bg-[#0a0e1a] border-b border-[#e5e0d8] dark:border-[#1e293b] flex items-center justify-between text-xs font-medium">
+      <span class="text-[#525f7f] dark:text-slate-400">Portal Sync Status</span>
       <div class="flex items-center gap-1.5 font-mono text-[11px] font-semibold {
         scrapeFreshness.statusClass === 'emerald'
           ? 'text-emerald-800 dark:text-emerald-400'
@@ -323,16 +323,16 @@
           onclick={closeMobileDrawer}
           class="flex items-center space-x-3 px-4 py-3 rounded-xl font-semibold text-sm transition-colors
           {isActive 
-            ? 'bg-[#dedacb] text-[#1c1b18] shadow-2xs dark:bg-[#27272a] dark:text-neutral-100' 
-            : 'text-[#5c5850] hover:bg-[#e4e1d4] hover:text-[#1c1b18] dark:text-neutral-400 dark:hover:bg-[#232328] dark:hover:text-neutral-200'}"
+            ? 'bg-[#002d72]/10 text-[#002d72] shadow-2xs dark:bg-[#8cc8ea]/15 dark:text-[#8cc8ea]' 
+            : 'text-[#525f7f] hover:bg-[#002d72]/5 hover:text-[#002d72] dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-200'}"
         >
-          <item.icon size={17} class="shrink-0 {isActive ? 'text-[#002d72] dark:text-amber-400' : 'text-[#8a857a] dark:text-neutral-500'}" />
+          <item.icon size={17} class="shrink-0 {isActive ? 'text-[#002d72] dark:text-[#8cc8ea]' : 'text-[#8a94a6] dark:text-slate-500'}" />
           <span>{item.label}</span>
         </a>
       {/each}
     </nav>
 
-    <div class="p-4 border-t border-[#dbd7cc] text-[10px] text-[#746f65] text-center dark:border-[#27272a] dark:text-neutral-500 shrink-0">
+    <div class="p-4 border-t border-[#e5e0d8] text-[10px] text-[#525f7f] text-center dark:border-[#1e293b] dark:text-slate-400 shrink-0">
       Boğaziçi University Academic Catalog • 50 Years
     </div>
   </aside>
@@ -343,14 +343,14 @@
   </main>
 
   <!-- Subtle Footer -->
-  <footer class="w-full border-t border-[#dbd7cc] dark:border-[#27272a] py-6 text-center text-xs text-[#746f65] dark:text-neutral-500 transition-colors duration-200">
+  <footer class="w-full border-t border-[#e5e0d8] dark:border-[#1e293b] py-6 text-center text-xs text-[#525f7f] dark:text-slate-400 transition-colors duration-200">
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
       <div class="flex items-center space-x-2">
-        <span class="font-bold text-[#45423b] dark:text-neutral-300">BOUN Course Archive</span>
+        <span class="font-bold text-[#002d72] dark:text-slate-200">BOUN Course Archive</span>
         <span>•</span>
         <span>Boğaziçi University Academic Analytics</span>
       </div>
-      <div class="font-mono text-[11px] text-[#746f65] dark:text-neutral-500">
+      <div class="font-mono text-[11px] text-[#525f7f] dark:text-slate-400">
         Historical Corpus (1970–Present) & Real-time Feeds
       </div>
     </div>

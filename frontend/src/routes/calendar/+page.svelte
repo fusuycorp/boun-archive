@@ -207,18 +207,18 @@
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
     <div>
-      <h1 class="font-serif text-2xl sm:text-3xl font-bold text-[#1c1b18] dark:text-neutral-50 tracking-tight">Weekly Planner</h1>
-      <p class="font-sans text-xs sm:text-sm text-[#746f65] mt-1 dark:text-neutral-400">Personalize semester schedules and identify timetable conflicts.</p>
+      <h1 class="font-serif text-2xl sm:text-3xl font-bold text-[#002d72] dark:text-slate-50 tracking-tight">Weekly Planner</h1>
+      <p class="font-sans text-xs sm:text-sm text-[#525f7f] mt-1 dark:text-slate-400">Personalize semester schedules and identify timetable conflicts.</p>
     </div>
     
     <div class="flex items-center space-x-3">
       <div class="flex flex-col space-y-1 w-full sm:w-auto">
-        <label for="semester-select" class="font-mono text-[9px] font-bold text-[#746f65] dark:text-neutral-500 uppercase tracking-wider px-1">Selected Semester</label>
+        <label for="semester-select" class="font-mono text-[9px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider px-1">Selected Semester</label>
         <select 
           id="semester-select"
           value={selectedTerm} 
           onchange={(e) => handleTermSelect(e.currentTarget.value)}
-          class="w-full sm:min-w-[180px] p-2 bg-[#f7f5ee] border border-[#dbd7cc] rounded-lg text-xs sm:text-sm font-semibold text-[#1c1b18] outline-none focus:ring-2 focus:ring-[#c5a059]/30 dark:bg-[#18181b] dark:border-[#27272a] dark:text-neutral-100 shadow-2xs cursor-pointer font-mono"
+          class="w-full sm:min-w-[180px] p-2 bg-white border border-[#e5e0d8] rounded-lg text-xs sm:text-sm font-semibold text-[#161e2e] outline-none focus:ring-2 focus:ring-[#002d72]/20 focus:border-[#002d72] dark:bg-[#121827] dark:border-[#1e293b] dark:text-slate-100 shadow-2xs cursor-pointer font-mono"
         >
           {#each terms as term}
             <option value={term.id}>{term.id}</option>
@@ -229,13 +229,13 @@
   </div>
 
   <!-- Mobile Segmented View Switcher (lg:hidden) -->
-  <div class="lg:hidden flex bg-[#dedacb] dark:bg-[#27272a] p-1 rounded-xl shrink-0 font-sans">
+  <div class="lg:hidden flex bg-[#e5e0d8] dark:bg-slate-800 p-1 rounded-xl shrink-0 font-sans">
     <button 
       onclick={() => mobileTab = "schedule"}
       class="flex-1 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2 cursor-pointer
       {mobileTab === 'schedule' 
-        ? 'bg-[#f7f5ee] text-[#1c1b18] shadow-2xs dark:bg-[#18181b] dark:text-white' 
-        : 'text-[#5c5850] dark:text-neutral-400'}"
+        ? 'bg-white text-[#002d72] shadow-2xs dark:bg-[#121827] dark:text-white font-bold' 
+        : 'text-[#525f7f] dark:text-slate-400'}"
     >
       <Clock size={14} />
       <span>Timetable Matrix</span>
@@ -244,8 +244,8 @@
       onclick={() => mobileTab = "courses"}
       class="flex-1 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2 cursor-pointer
       {mobileTab === 'courses' 
-        ? 'bg-[#f7f5ee] text-[#1c1b18] shadow-2xs dark:bg-[#18181b] dark:text-white' 
-        : 'text-[#5c5850] dark:text-neutral-400'}"
+        ? 'bg-white text-[#002d72] shadow-2xs dark:bg-[#121827] dark:text-white font-bold' 
+        : 'text-[#525f7f] dark:text-slate-400'}"
     >
       <BookOpen size={14} />
       <span>Courses ({myCourses.length})</span>
@@ -257,15 +257,15 @@
     <!-- Left Sidebar: Search & List -->
     <aside class="w-full lg:w-80 flex flex-col space-y-4 shrink-0 overflow-y-auto pr-0 lg:pr-1 custom-scrollbar {mobileTab === 'courses' ? 'flex' : 'hidden lg:flex'}">
       <!-- Search Box -->
-      <div class="bg-[#f7f5ee] p-4 rounded-xl border border-[#dbd7cc] shadow-2xs space-y-3 dark:bg-[#18181b] dark:border-[#27272a]">
+      <div class="bg-white p-4 rounded-xl border border-[#e5e0d8] shadow-2xs space-y-3 dark:bg-[#121827] dark:border-[#1e293b]">
         <div class="relative">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-[#746f65]" size={15} />
+          <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-[#525f7f]" size={15} />
           <input 
             type="text" 
             bind:value={searchQuery}
             oninput={handleInput}
             placeholder="Search courses to add..."
-            class="w-full pl-9 pr-3 py-2 bg-[#eeece2] border border-[#dbd7cc] rounded-lg text-xs outline-none focus:ring-1 focus:ring-[#c5a059] focus:border-[#c5a059] dark:bg-[#121214] dark:border-[#27272a] dark:text-white"
+            class="w-full pl-9 pr-3 py-2 bg-[#faf8f5] border border-[#e5e0d8] rounded-lg text-xs outline-none focus:ring-1 focus:ring-[#002d72] focus:border-[#002d72] dark:bg-[#0a0e1a] dark:border-[#1e293b] dark:text-white"
           />
         </div>
 
@@ -277,23 +277,23 @@
                 onclick={() => toggleCourse(course)}
                 class="w-full p-2.5 border rounded-lg text-left transition-colors group cursor-pointer
                 {isAdded 
-                  ? 'bg-[#dedacb] border-[#c8c3b5] dark:bg-[#27272a] dark:border-neutral-600' 
-                  : 'bg-[#eeece2]/70 border-[#dbd7cc] hover:bg-[#dedacb] dark:bg-[#121214] dark:border-[#27272a] dark:hover:bg-[#232328]'}"
+                  ? 'bg-[#002d72]/10 border-[#002d72]/30 dark:bg-[#8cc8ea]/15 dark:border-[#8cc8ea]/30' 
+                  : 'bg-[#faf8f5] border-[#e5e0d8] hover:bg-[#f3efe6] dark:bg-[#0a0e1a] dark:border-[#1e293b] dark:hover:bg-slate-800/60'}"
               >
                 <div class="flex justify-between items-start">
                   <div class="flex items-center space-x-1.5">
-                    <span class="font-mono text-xs font-bold text-[#002d72] dark:text-neutral-100 uppercase">{course.course_code}</span>
-                    <span class="font-mono text-[10px] text-[#746f65] dark:text-neutral-500">Sec {course.section}</span>
+                    <span class="font-mono text-xs font-bold text-[#002d72] dark:text-slate-100 uppercase">{course.course_code}</span>
+                    <span class="font-mono text-[10px] text-[#525f7f] dark:text-slate-400">Sec {course.section}</span>
                   </div>
                   {#if isAdded}
-                    <div class="w-4 h-4 bg-[#002d72] dark:bg-amber-400 rounded-full flex items-center justify-center text-white dark:text-neutral-950 shadow-2xs">
+                    <div class="w-4 h-4 bg-[#002d72] dark:bg-[#8cc8ea] rounded-full flex items-center justify-center text-white dark:text-[#0a0e1a] shadow-2xs">
                        <Check size={10} strokeWidth={3} />
                     </div>
                   {:else}
-                    <Plus size={13} class="text-[#746f65] group-hover:text-[#1c1b18] dark:text-neutral-500 dark:group-hover:text-neutral-200" />
+                    <Plus size={13} class="text-[#525f7f] group-hover:text-[#002d72] dark:text-slate-400 dark:group-hover:text-slate-200" />
                   {/if}
                 </div>
-                <div class="font-serif text-xs text-[#45423b] dark:text-neutral-300 mt-1 line-clamp-1">{course.title}</div>
+                <div class="font-serif text-xs text-[#161e2e] dark:text-slate-300 mt-1 line-clamp-1">{course.title}</div>
               </button>
             {/each}
           </div>
@@ -301,13 +301,13 @@
       </div>
 
       <!-- Selected List -->
-      <div class="bg-[#f7f5ee] p-4 rounded-xl border border-[#dbd7cc] shadow-2xs flex-1 space-y-3 dark:bg-[#18181b] dark:border-[#27272a]">
+      <div class="bg-white p-4 rounded-xl border border-[#e5e0d8] shadow-2xs flex-1 space-y-3 dark:bg-[#121827] dark:border-[#1e293b]">
         <div class="flex items-center justify-between px-1">
-          <h3 class="font-mono text-[10px] font-bold text-[#746f65] dark:text-neutral-500 uppercase tracking-wider">Enrolled Schedule ({myCourses.length})</h3>
+          <h3 class="font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">Enrolled Schedule ({myCourses.length})</h3>
           {#if myCourses.length > 0}
             <button 
               onclick={clearAllCourses}
-              class="text-[10px] font-mono font-semibold text-[#746f65] hover:text-rose-600 dark:hover:text-rose-400 flex items-center space-x-1 transition-colors cursor-pointer"
+              class="text-[10px] font-mono font-semibold text-[#525f7f] hover:text-rose-600 dark:hover:text-rose-400 flex items-center space-x-1 transition-colors cursor-pointer"
               title="Clear all courses for this semester"
             >
               <RotateCcw size={10} />
@@ -318,15 +318,15 @@
 
         <div class="space-y-2 max-h-72 lg:max-h-none overflow-y-auto pr-1 custom-scrollbar">
           {#each myCourses as course}
-            <div class="p-3 bg-[#eeece2]/70 border border-[#dbd7cc] rounded-lg group relative dark:bg-[#121214] dark:border-[#27272a]">
+            <div class="p-3 bg-[#faf8f5] border border-[#e5e0d8] rounded-lg group relative dark:bg-[#0a0e1a] dark:border-[#1e293b]">
               <div class="flex items-center space-x-2">
-                <div class="font-mono text-xs font-bold text-[#002d72] dark:text-neutral-100 uppercase">{course.course_code}</div>
-                <div class="font-mono text-[10px] text-[#746f65] dark:text-neutral-500">Sec {course.section}</div>
+                <div class="font-mono text-xs font-bold text-[#002d72] dark:text-slate-100 uppercase">{course.course_code}</div>
+                <div class="font-mono text-[10px] text-[#525f7f] dark:text-slate-400">Sec {course.section}</div>
               </div>
-              <div class="font-serif text-xs text-[#45423b] dark:text-neutral-300 mt-1 pr-6">{course.title}</div>
+              <div class="font-serif text-xs text-[#161e2e] dark:text-slate-300 mt-1 pr-6">{course.title}</div>
               <button 
                 onclick={() => removeCourse(course.id, course.course_code, course.section)}
-                class="absolute top-2 right-2 p-1 text-[#746f65] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded transition-colors cursor-pointer"
+                class="absolute top-2 right-2 p-1 text-[#525f7f] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded transition-colors cursor-pointer"
                 aria-label="Remove course"
               >
                 <Trash2 size={13} />
@@ -334,7 +334,7 @@
             </div>
           {/each}
           {#if myCourses.length === 0}
-            <div class="text-center py-10 text-[#a39e93] dark:text-neutral-600">
+            <div class="text-center py-10 text-[#8a94a6] dark:text-slate-600">
               <Calendar size={28} class="mx-auto mb-2 opacity-30" />
               <p class="font-sans text-xs">No courses selected yet</p>
             </div>
@@ -344,21 +344,21 @@
     </aside>
 
     <!-- Main Calendar Grid -->
-    <div class="flex-1 bg-[#f7f5ee] rounded-xl border border-[#dbd7cc] shadow-2xs overflow-hidden flex flex-col min-w-0 dark:bg-[#18181b] dark:border-[#27272a] {mobileTab === 'schedule' ? 'flex' : 'hidden lg:flex'}">
+    <div class="flex-1 bg-white rounded-xl border border-[#e5e0d8] shadow-2xs overflow-hidden flex flex-col min-w-0 dark:bg-[#121827] dark:border-[#1e293b] {mobileTab === 'schedule' ? 'flex' : 'hidden lg:flex'}">
       <div class="overflow-auto flex-1 custom-scrollbar">
         <table class="w-full border-collapse table-fixed min-w-[620px]">
-          <thead class="sticky top-0 z-20 bg-[#e7e4d9]/90 border-b border-[#dbd7cc] dark:bg-[#121214] dark:border-[#27272a]">
+          <thead class="sticky top-0 z-20 bg-[#f3efe6]/90 border-b border-[#e5e0d8] dark:bg-[#0a0e1a] dark:border-[#1e293b]">
             <tr>
-              <th class="p-2 sm:p-2.5 font-mono text-[10px] font-bold text-[#746f65] dark:text-neutral-500 uppercase tracking-wider w-12 sm:w-14 border-r border-[#dbd7cc] dark:border-[#27272a] sticky left-0 z-30 bg-[#e7e4d9] dark:bg-[#121214]">Slot</th>
+              <th class="p-2 sm:p-2.5 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider w-12 sm:w-14 border-r border-[#e5e0d8] dark:border-[#1e293b] sticky left-0 z-30 bg-[#f3efe6] dark:bg-[#0a0e1a]">Slot</th>
               {#each days as day}
-                <th class="p-2 sm:p-2.5 font-mono text-[10px] font-bold text-[#746f65] dark:text-neutral-500 uppercase tracking-wider">{day}</th>
+                <th class="p-2 sm:p-2.5 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">{day}</th>
               {/each}
             </tr>
           </thead>
           <tbody>
             {#each hours as hour}
-              <tr class="border-b border-[#dbd7cc]/70 last:border-0 dark:border-[#27272a]">
-                <td class="p-2 text-center font-mono text-xs font-bold text-[#746f65] dark:text-neutral-500 border-r border-[#dbd7cc] dark:border-[#27272a] bg-[#e7e4d9]/60 dark:bg-[#121214] sticky left-0 z-10">{hour}</td>
+              <tr class="border-b border-[#e5e0d8] last:border-0 dark:border-[#1e293b]">
+                <td class="p-2 text-center font-mono text-xs font-bold text-[#525f7f] dark:text-slate-400 border-r border-[#e5e0d8] dark:border-[#1e293b] bg-[#f3efe6]/60 dark:bg-[#0a0e1a] sticky left-0 z-10">{hour}</td>
                 {#each days as day}
                   {@const slotCourses = getCoursesAt(day, hour)}
                   <td class="p-1 h-20 sm:h-24 align-top relative">
@@ -370,8 +370,8 @@
                           {slotCourses.length > 1 
                             ? 'bg-rose-500/10 border-rose-500/30 text-rose-950 dark:bg-rose-500/20 dark:border-rose-500/40 dark:text-rose-200' 
                             : isSpecial 
-                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-950 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-200' 
-                              : 'bg-[#002d72]/10 border-[#002d72]/20 text-[#002d72] dark:bg-amber-400/10 dark:border-amber-400/20 dark:text-amber-300'}"
+                              ? 'bg-[#c5a059]/15 border-[#c5a059]/30 text-[#9a7632] dark:bg-[#c5a059]/20 dark:border-[#c5a059]/40 dark:text-[#e5a823]' 
+                              : 'bg-[#002d72]/10 border-[#002d72]/20 text-[#002d72] dark:bg-[#8cc8ea]/15 dark:border-[#8cc8ea]/30 dark:text-[#8cc8ea]'}"
                         >
                           <div class="flex justify-between items-start">
                             <div class="font-mono font-bold truncate">{course.course_code}</div>
