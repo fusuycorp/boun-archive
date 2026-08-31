@@ -906,11 +906,28 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
                     state.last_cursor = now_iso
                     state.updated_at = func.now()
             session.commit()
+            invalidate_redis_cache()
     except Exception:
         session.rollback()
         raise
     finally:
         session.close()
+
+
+def invalidate_redis_cache() -> None:
+    """Purge cached FastAPI response keys in Redis so updated terms/courses are immediately reflected."""
+    redis_url = os.getenv("REDIS_URL")
+    if not redis_url:
+        return
+    try:
+        import redis
+        r = redis.from_url(redis_url)
+        keys = r.keys("fastapi-cache:*")
+        if keys:
+            r.delete(*keys)
+            logger.info("Invalidated %d cached FastAPI response key(s) in Redis.", len(keys))
+    except Exception as e:
+        logger.debug("Redis cache invalidation skipped: %s", e)
 
 
 def main():

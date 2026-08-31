@@ -1,6 +1,6 @@
 import type { PageLoad } from './$types';
 import { API_BASE } from '$lib/config';
-import type { CourseHistoryItem, QuotaSnapshot, CourseChange } from '$lib/types';
+import type { CourseHistoryItem, QuotaSnapshot } from '$lib/types';
 
 export const load: PageLoad = async ({ params, fetch }) => {
   const code = params.code || '';
@@ -8,14 +8,12 @@ export const load: PageLoad = async ({ params, fetch }) => {
 
   let history: CourseHistoryItem[] = [];
   let quotas: QuotaSnapshot[] = [];
-  let changes: CourseChange[] = [];
   let loadError: string | null = null;
 
   try {
-    const [histRes, quotaRes, changeRes] = await Promise.allSettled([
+    const [histRes, quotaRes] = await Promise.allSettled([
       fetch(`${API_BASE}/v1/courses/history/${encodedCode}`),
-      fetch(`${API_BASE}/v1/courses/${encodedCode}/quota`),
-      fetch(`${API_BASE}/v1/courses/${encodedCode}/changes?limit=20`)
+      fetch(`${API_BASE}/v1/courses/${encodedCode}/quota`)
     ]);
 
     if (histRes.status === 'fulfilled' && histRes.value.ok) {
@@ -29,10 +27,6 @@ export const load: PageLoad = async ({ params, fetch }) => {
     if (quotaRes.status === 'fulfilled' && quotaRes.value.ok) {
       quotas = await quotaRes.value.json();
     }
-
-    if (changeRes.status === 'fulfilled' && changeRes.value.ok) {
-      changes = await changeRes.value.json();
-    }
   } catch (e) {
     loadError = e instanceof Error ? e.message : 'Failed to fetch course data';
   }
@@ -41,7 +35,6 @@ export const load: PageLoad = async ({ params, fetch }) => {
     courseCode: code,
     history,
     quotas,
-    changes,
     error: loadError
   };
 };

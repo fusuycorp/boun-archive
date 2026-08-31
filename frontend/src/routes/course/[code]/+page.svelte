@@ -1,9 +1,9 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { Calendar, User, Clock, MapPin, Hash, BookOpen, Info, Users, History, Activity } from "lucide-svelte";
+  import { Calendar, User, Clock, MapPin, Hash, BookOpen, Info, Users, Activity } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { formatSlotTime } from "$lib/utils";
-  import type { QuotaSnapshot, CourseChange, CourseHistoryItem } from "$lib/types";
+  import type { QuotaSnapshot, CourseHistoryItem } from "$lib/types";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
@@ -11,14 +11,12 @@
   let courseCode = $derived(data.courseCode || page.params.code);
   let history = $state<CourseHistoryItem[]>([]);
   let quotas = $state<QuotaSnapshot[]>([]);
-  let changes = $state<CourseChange[]>([]);
   let loading = $state(false);
   let error = $state<string | null>(null);
 
   $effect(() => {
     history = data.history ?? [];
     quotas = data.quotas ?? [];
-    changes = data.changes ?? [];
     error = data.error ?? null;
   });
 
@@ -31,10 +29,9 @@
     try {
       const encodedCode = encodeURIComponent(code.trim());
       
-      const [histRes, quotaRes, changeRes] = await Promise.allSettled([
+      const [histRes, quotaRes] = await Promise.allSettled([
         fetch(`${API_BASE}/v1/courses/history/${encodedCode}`),
-        fetch(`${API_BASE}/v1/courses/${encodedCode}/quota`),
-        fetch(`${API_BASE}/v1/courses/${encodedCode}/changes?limit=20`)
+        fetch(`${API_BASE}/v1/courses/${encodedCode}/quota`)
       ]);
 
       if (histRes.status === "fulfilled" && histRes.value.ok) {
@@ -49,12 +46,6 @@
         quotas = await quotaRes.value.json();
       } else {
         quotas = [];
-      }
-
-      if (changeRes.status === "fulfilled" && changeRes.value.ok) {
-        changes = await changeRes.value.json();
-      } else {
-        changes = [];
       }
 
     } catch (e) {
@@ -184,36 +175,6 @@
                   {/if}
                 </div>
               {/if}
-            </div>
-          {/each}
-        </div>
-      </section>
-    {/if}
-
-    <!-- Recent Schedule Changes (if available) -->
-    {#if changes.length > 0}
-      <section class="bg-white rounded-xl border border-[#e5e0d8] dark:bg-[#121827] dark:border-[#1e293b] p-5 sm:p-6 shadow-2xs space-y-4">
-        <div class="flex items-center space-x-3">
-          <span class="p-2 bg-[#002d72]/10 dark:bg-slate-800 text-[#002d72] dark:text-[#8cc8ea] rounded-lg">
-            <History size={16} />
-          </span>
-          <h2 class="font-serif text-base sm:text-lg font-bold text-[#002d72] dark:text-slate-100 tracking-tight">Recent Schedule Audit Log</h2>
-        </div>
-
-        <div class="space-y-2">
-          {#each changes as ch}
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-[#faf8f5] dark:bg-[#0a0e1a] rounded-lg border border-[#e5e0d8] dark:border-[#1e293b] gap-2 font-mono">
-              <div class="flex items-center space-x-2.5">
-                <span class="px-2 py-0.5 text-[10px] font-bold uppercase rounded border {ch.change_type === 'added' ? 'bg-emerald-500/10 text-emerald-900 border-emerald-600/20 dark:text-emerald-400' : ch.change_type === 'modified' ? 'bg-amber-500/10 text-amber-950 border-amber-500/20 dark:text-amber-300' : 'bg-rose-500/10 text-rose-900 border-rose-600/20 dark:text-rose-400'}">
-                  {ch.change_type}
-                </span>
-                <span class="text-xs text-[#161e2e] dark:text-slate-200">
-                  Section {ch.section || 'All'} · {ch.details || 'Course updated'}
-                </span>
-              </div>
-              <span class="text-[10px] text-[#525f7f] dark:text-slate-400">
-                {ch.timestamp}
-              </span>
             </div>
           {/each}
         </div>
