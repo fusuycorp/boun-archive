@@ -100,6 +100,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Meilisearch setup/configuration encountered an issue on startup: %s", e)
 
+    # 3. Start background scraper sync on boot to discover new terms immediately
+    import threading
+    threading.Thread(target=_run_scraper_sync_job, kwargs={"mode": "incremental"}, daemon=True).start()
+
     try:
         yield
     finally:
@@ -107,6 +111,26 @@ async def lifespan(app: FastAPI):
             await redis.aclose()
         elif hasattr(redis, "close"):
             await redis.close()
+
+def _run_scraper_sync_job(term_id: Optional[str] = None, mode: str = "incremental") -> None:
+    """Helper executed in background thread to sync from scraper and update DB + Meilisearch."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    root_dir = str(Path(__file__).resolve().parent.parent)
+    script_path = str(Path(root_dir) / "scripts" / "sync_from_scraper.py")
+    cmd = [sys.executable, script_path, "--mode", mode]
+    if term_id:
+        cmd.extend(["--term", term_id])
+    try:
+        logger.info("Executing background scraper sync: %s", " ".join(cmd))
+        proc = subprocess.run(cmd, cwd=root_dir, capture_output=True, text=True, timeout=600)
+        if proc.returncode == 0:
+            logger.info("Background scraper sync completed successfully.")
+        else:
+            logger.warning("Background scraper sync finished with code %d: %s", proc.returncode, proc.stderr[:300])
+    except Exception as e:
+        logger.error("Background scraper sync execution failed: %s", e)
 
 app = FastAPI(title="BOUN Archive API", lifespan=lifespan)
 
@@ -118,7 +142,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -553,14 +577,33 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
         } for c in courses], key=lambda x: x['term'], reverse=True)
     }
 
+@app.post("/v1/sync/run")
+@app.get("/v1/sync/run")
+def trigger_sync_run(
+    term: Optional[str] = None,
+    mode: str = "incremental"
+):
+    import threading
+    threading.Thread(
+        target=_run_scraper_sync_job,
+        kwargs={"term_id": term, "mode": mode},
+        daemon=True
+    ).start()
+    return {
+        "status": "triggered",
+        "mode": mode,
+        "term": term,
+        "message": f"Sync job initiated in background (mode={mode}, term={term or 'all'})"
+    }
+
 @app.get("/v1/terms", response_model=List[schemas.Term])
-@cache(expire=86400)
+@cache(expire=300)
 def get_terms(db: Session = Depends(database.get_db)):
     terms = db.query(models.Term).order_by(models.Term.id.desc()).all()
     return [schemas.Term.model_validate(t).model_dump() for t in terms]
 
 @app.get("/v1/departments", response_model=List[schemas.Department])
-@cache(expire=86400)
+@cache(expire=300)
 def get_departments(db: Session = Depends(database.get_db)):
     depts = db.query(models.Department).order_by(models.Department.kisaadi).all()
     return [schemas.Department.model_validate(d).model_dump() for d in depts]
