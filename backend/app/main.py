@@ -117,14 +117,25 @@ def _run_scraper_sync_job(term_id: Optional[str] = None, mode: str = "incrementa
     import subprocess
     import sys
     from pathlib import Path
-    root_dir = str(Path(__file__).resolve().parent.parent)
-    script_path = str(Path(root_dir) / "scripts" / "sync_from_scraper.py")
+    
+    app_dir = Path(__file__).resolve().parent.parent
+    candidates = [
+        app_dir / "scripts" / "sync_from_scraper.py",
+        app_dir.parent / "scripts" / "sync_from_scraper.py",
+        Path("/app/scripts/sync_from_scraper.py")
+    ]
+    script_path = next((str(p) for p in candidates if p.exists()), None)
+    if not script_path:
+        logger.warning("Could not locate scripts/sync_from_scraper.py in candidate paths.")
+        return
+
+    working_dir = str(Path(script_path).parent.parent)
     cmd = [sys.executable, script_path, "--mode", mode]
     if term_id:
         cmd.extend(["--term", term_id])
     try:
         logger.info("Executing background scraper sync: %s", " ".join(cmd))
-        proc = subprocess.run(cmd, cwd=root_dir, capture_output=True, text=True, timeout=600)
+        proc = subprocess.run(cmd, cwd=working_dir, capture_output=True, text=True, timeout=600)
         if proc.returncode == 0:
             logger.info("Background scraper sync completed successfully.")
         else:

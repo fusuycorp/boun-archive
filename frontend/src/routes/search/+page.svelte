@@ -92,7 +92,8 @@
         results = data.hits || [];
         currentFacets = data.facetDistribution || {};
         totalHits = data.totalHits ?? data.estimatedTotalHits ?? 0;
-        if ((!globalFacets?.term || Object.keys(globalFacets.term).length === 0) && data.facetDistribution) {
+        const isUnfiltered = selectedTerms.length === 0 && selectedDepts.length === 0 && !query.trim();
+        if (isUnfiltered && (!globalFacets?.term || Object.keys(globalFacets.term).length === 0) && data.facetDistribution) {
           globalFacets = data.facetDistribution;
         }
       }
