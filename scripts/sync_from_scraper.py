@@ -373,6 +373,67 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
     return total_synced
 
 
+VALID_DAYS = {"M", "T", "W", "Th", "F", "St", "Su"}
+
+
+def _sanitize_shifted_payload(val_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Self-healing normalizer for upstream scraper table parsing shifts.
+    Detects when table columns were shifted (e.g. instructor='Info', slots broken into character array).
+    Reconstructs instructor name, slot hours, and rooms without failing ingestion.
+    """
+    if not isinstance(val_payload, dict):
+        return val_payload
+
+    raw_inst = (val_payload.get("instructor") or "").strip()
+    raw_delivery = str(val_payload.get("delivery_method") or "").strip()
+    raw_exam_date = (val_payload.get("exam_date") or "").strip()
+    slots = val_payload.get("slots") or val_payload.get("course_slots") or []
+
+    is_shifted = (
+        raw_inst.lower() in ("info", "detay", "details") and
+        len(slots) > 0 and
+        all(len(s.get("day", s.get("day_code", ""))) == 1 for s in slots)
+    )
+
+    if not is_shifted:
+        return val_payload
+
+    p = dict(val_payload)
+    # 1. Reconstruct instructor from slots day characters
+    reconstructed_inst = "".join(s.get("day", s.get("day_code", "")) for s in slots if s.get("day") or s.get("day_code")).strip()
+    p["instructor"] = reconstructed_inst if reconstructed_inst else "TBA"
+
+    # 2. Reconstruct hours from delivery_method if it is purely numeric digits
+    hours = []
+    if raw_delivery.isdigit():
+        hours = [int(ch) for ch in raw_delivery if ch.isdigit() and 1 <= int(ch) <= 14]
+        p["delivery_method"] = ""
+
+    # 3. Reconstruct rooms/days from exam_date
+    rooms = [r.strip() for r in raw_exam_date.split("|") if r.strip()]
+    new_slots = []
+    if hours:
+        for idx, hr in enumerate(hours):
+            room_str = rooms[idx] if idx < len(rooms) else (rooms[0] if rooms else "")
+            parts = room_str.split(None, 1)
+            if parts and parts[0] in VALID_DAYS:
+                day_code = parts[0]
+                room_val = parts[1] if len(parts) > 1 else ""
+            else:
+                day_code = "M"
+                room_val = room_str
+            new_slots.append({
+                "day": day_code,
+                "hour": hr,
+                "room": room_val,
+                "slot_title": p.get("course_name") or p.get("title"),
+                "instructor": reconstructed_inst
+            })
+    p["slots"] = new_slots
+    return p
+
+
 def _sync_course_slots(
     session,
     course_id: int,
@@ -384,11 +445,20 @@ def _sync_course_slots(
         return
     session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete(synchronize_session="fetch")
     for s in slots_payload:
-        room_id = ensure_room(session, s.get("room"), room_cache)
+        slot_hour = clean_int(s.get("hour") or s.get("slot_hour"))
+        if slot_hour is None or slot_hour < 1 or slot_hour > 14:
+            continue
+        day_raw = (s.get("day") or s.get("day_code") or "").strip()
+        if not day_raw:
+            continue
+        day_code = day_raw if day_raw in VALID_DAYS else (day_raw.capitalize() if day_raw.capitalize() in VALID_DAYS else "M")
+
+        room_name = s.get("room") or s.get("room_name")
+        room_id = ensure_room(session, room_name, room_cache)
         slot = CourseSlot(
             course_id=course_id,
-            day_code=s.get("day") or s.get("day_code"),
-            slot_hour=clean_int(s.get("hour") or s.get("slot_hour")),
+            day_code=day_code,
+            slot_hour=slot_hour,
             slot_title=s.get("slot_title"),
             room_id=room_id
         )
@@ -409,6 +479,7 @@ def _upsert_course(
     term_cache: Optional[Union[Set[str], Dict[str, Any]]],
     dry_run: bool = False
 ) -> Optional[Course]:
+    val_payload = _sanitize_shifted_payload(val_payload)
     ensure_term(session, term_id, term_cache)
     if dept_kisaadi:
         ensure_department(session, dept_kisaadi, dept_cache=dept_cache)
@@ -681,28 +752,32 @@ def backfill_term(
     touched_courses: List[Course] = []
 
     for item in courses_raw:
-        dept_kisaadi = item.get("department")
-        course_code = normalize_code(item.get("course_code"))
-        section = normalize_section(item.get("section"))
+        try:
+            with session.begin_nested():
+                dept_kisaadi = item.get("department")
+                course_code = normalize_code(item.get("course_code"))
+                section = normalize_section(item.get("section"))
 
-        if not course_code:
-            continue
+                if not course_code:
+                    continue
 
-        course = _upsert_course(
-            session=session,
-            term_id=term_id,
-            dept_kisaadi=dept_kisaadi,
-            course_code=course_code,
-            section=section,
-            val_payload=item,
-            inst_cache=inst_cache,
-            room_cache=room_cache,
-            dept_cache=dept_cache,
-            term_cache=term_cache,
-            dry_run=dry_run
-        )
-        if course:
-            touched_courses.append(course)
+                course = _upsert_course(
+                    session=session,
+                    term_id=term_id,
+                    dept_kisaadi=dept_kisaadi,
+                    course_code=course_code,
+                    section=section,
+                    val_payload=item,
+                    inst_cache=inst_cache,
+                    room_cache=room_cache,
+                    dept_cache=dept_cache,
+                    term_cache=term_cache,
+                    dry_run=dry_run
+                )
+                if course:
+                    touched_courses.append(course)
+        except Exception as e:
+            logger.warning("Skipping anomalous course %s in term %s: %s", item.get("course_code"), term_id, e)
 
     if not dry_run:
         session.commit()

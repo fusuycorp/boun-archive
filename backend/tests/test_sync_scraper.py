@@ -93,3 +93,100 @@ def test_fetch_term_courses_fallback():
     courses = _fetch_term_courses(client, "2026/2027-1")
     assert len(courses) == 1
     assert courses[0]["course_code"] == "HIST 49S"
+
+
+def test_sanitize_shifted_payload():
+    from scripts.sync_from_scraper import _sanitize_shifted_payload
+
+    shifted_payload = {
+        "id": 34601,
+        "term": "2026/2027-1",
+        "department": "AD",
+        "course_code": "AD  211",
+        "section": "01",
+        "course_name": "FINANCIAL ACCOUNTING FOR ECONOMISTS",
+        "instructor": "Info",
+        "credits": 3.0,
+        "ects": 4.0,
+        "delivery_method": "345",
+        "exam_date": "M 1171|M 1171|M 1171",
+        "slots": [
+            {"day": "F", "hour": "M", "room": ""},
+            {"day": "A", "hour": "M", "room": ""},
+            {"day": "T", "hour": "M", "room": ""},
+            {"day": "İ", "hour": "", "room": ""},
+            {"day": "H", "hour": "", "room": ""},
+            {"day": "F", "hour": "", "room": ""},
+            {"day": ".", "hour": "", "room": ""},
+            {"day": "Y", "hour": "", "room": ""},
+            {"day": "I", "hour": "", "room": ""},
+            {"day": "L", "hour": "", "room": ""},
+            {"day": "M", "hour": "", "room": ""},
+            {"day": "A", "hour": "", "room": ""},
+            {"day": "Z", "hour": "", "room": ""},
+        ]
+    }
+
+    sanitized = _sanitize_shifted_payload(shifted_payload)
+    assert sanitized["instructor"] == "FATİHF.YILMAZ"
+    assert sanitized["delivery_method"] == ""
+    assert len(sanitized["slots"]) == 3
+    assert sanitized["slots"][0]["hour"] == 3
+    assert sanitized["slots"][0]["day"] == "M"
+    assert sanitized["slots"][0]["room"] == "1171"
+    assert sanitized["slots"][1]["hour"] == 4
+    assert sanitized["slots"][2]["hour"] == 5
+
+
+def test_sync_shifted_course_into_db(sync_db):
+    shifted_payload = {
+        "id": 34602,
+        "term": "2026/2027-1",
+        "department": "AD",
+        "course_code": "AD  213",
+        "section": "01",
+        "course_name": "FINANCIAL ACCOUNTING",
+        "instructor": "Info",
+        "credits": 3.0,
+        "ects": 5.0,
+        "delivery_method": "234",
+        "exam_date": "İB 102|İB 102|İB 102",
+        "slots": [
+            {"day": "A", "hour": "W", "room": ""},
+            {"day": "L", "hour": "W", "room": ""},
+            {"day": "İ", "hour": "W", "room": ""},
+            {"day": "C", "hour": "", "room": ""},
+            {"day": "O", "hour": "", "room": ""},
+            {"day": "Ş", "hour": "", "room": ""},
+            {"day": "K", "hour": "", "room": ""},
+            {"day": "U", "hour": "", "room": ""},
+            {"day": "N", "hour": "", "room": ""},
+        ]
+    }
+
+    inst_cache = {}
+    room_cache = {}
+    dept_cache = {}
+    term_cache = set()
+
+    course = _upsert_course(
+        session=sync_db,
+        term_id="2026/2027-1",
+        dept_kisaadi="AD",
+        course_code="AD 213",
+        section="01",
+        val_payload=shifted_payload,
+        inst_cache=inst_cache,
+        room_cache=room_cache,
+        dept_cache=dept_cache,
+        term_cache=term_cache,
+        dry_run=False
+    )
+    sync_db.commit()
+
+    assert course is not None
+    assert course.instructor is not None
+    assert course.instructor.full_name == "ALİCOŞKUN"
+    assert len(course.slots) == 3
+    assert [s.slot_hour for s in course.slots] == [2, 3, 4]
+    assert course.slots[0].room.name == "İB 102"
