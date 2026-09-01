@@ -244,7 +244,7 @@ def sync_meili_documents(meili_index, courses: List[Course], chunk_size: int = 1
             "section": c.section,
             "term": c.term_id,
             "department": c.department.bolum if c.department else None,
-            "dept_code": c.dept_kisaadi,
+            "dept_code": (c.dept_kisaadi.upper() if c.dept_kisaadi else (c.course_code.split()[0].upper() if c.course_code else None)),
             "instructor": c.instructor.full_name if c.instructor else "TBA",
             "instructor_id": c.instructor_id,
             "credits": c.credits,
@@ -297,7 +297,12 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
             ensure_term(session, term_id, term_cache)
 
             captured = item.get("captured_at") or item.get("timestamp") or datetime.now(timezone.utc).isoformat()
-            dept = item.get("department")
+            dept_raw = item.get("department")
+            if not dept_raw and course_code:
+                parts = course_code.strip().split()
+                if parts:
+                    dept_raw = parts[0]
+            dept = dept_raw.strip().upper() if dept_raw else None
             status = item.get("status")
             quota_raw = str(item.get("quota")) if item.get("quota") is not None else None
             current_raw = str(item.get("current")) if item.get("current") is not None else None
@@ -481,8 +486,12 @@ def _upsert_course(
 ) -> Optional[Course]:
     val_payload = _sanitize_shifted_payload(val_payload)
     ensure_term(session, term_id, term_cache)
-    if dept_kisaadi:
-        ensure_department(session, dept_kisaadi, dept_cache=dept_cache)
+
+    if dept_kisaadi and str(dept_kisaadi).strip():
+        dept_kisaadi = str(dept_kisaadi).strip().upper()
+        dept = ensure_department(session, dept_kisaadi, dept_cache=dept_cache)
+        if dept:
+            dept_kisaadi = dept.kisaadi
 
     title = val_payload.get("course_name") or val_payload.get("title")
     instructor_name = val_payload.get("instructor")
@@ -548,8 +557,13 @@ def _apply_delta_event(
 ) -> None:
     raw_change_type = item.get("change_type")
     term_id = item.get("term")
-    dept_kisaadi = item.get("department")
     course_code = normalize_code(item.get("course_code"))
+    raw_dept = item.get("department")
+    if not raw_dept and course_code:
+        parts = course_code.strip().split()
+        if parts:
+            raw_dept = parts[0]
+    dept_kisaadi = raw_dept.strip().upper() if raw_dept else None
     section = normalize_section(item.get("section"))
     timestamp = item.get("timestamp") or ""
 
@@ -627,6 +641,10 @@ def _fetch_term_courses(client: ScraperClient, term_id: str) -> List[Dict[str, A
     while True:
         try:
             resp = client.get("courses", params={"term": term_id, "page": page, "size": page_size})
+            if not resp and "/" in term_id:
+                resp = client.get("courses", params={"term": export_term_param, "page": page, "size": page_size})
+            elif not resp and "-" in term_id:
+                resp = client.get("courses", params={"term": term_id.replace("-", "/"), "page": page, "size": page_size})
         except Exception as e:
             logger.error("Error pulling /courses for term %s (page %d): %s", term_id, page, e)
             break
@@ -968,7 +986,10 @@ def main():
                     'course_code', 'title', 'instructor', 'department'
                 ],
                 'faceting': {
-                    'maxValuesPerFacet': 1000
+                    'maxValuesPerFacet': 10000
+                },
+                'pagination': {
+                    'maxTotalHits': 200000
                 },
                 'sortableAttributes': ['term', 'course_code', 'title', 'instructor', 'credits', 'ects']
             })

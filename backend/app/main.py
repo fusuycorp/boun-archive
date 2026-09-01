@@ -73,13 +73,16 @@ async def lifespan(app: FastAPI):
 
         MEILI_CLIENT.index('courses').update_settings({
             'filterableAttributes': [
-                'term', 'dept_code', 'department', 'instructor', 'delivery_method'
+                'term', 'dept_code', 'department', 'instructor', 'instructor_id', 'delivery_method'
             ],
             'searchableAttributes': [
                 'course_code', 'title', 'instructor', 'department'
             ],
             'faceting': {
-                'maxValuesPerFacet': 1000
+                'maxValuesPerFacet': 10000
+            },
+            'pagination': {
+                'maxTotalHits': 200000
             },
             'sortableAttributes': ['term', 'course_code', 'title', 'instructor', 'credits', 'ects']
         })
@@ -254,12 +257,13 @@ def _search_courses_from_db(
         if term:
             query = query.filter(models.Course.term_id.in_(term))
         if dept:
-            query = query.filter(models.Course.dept_kisaadi.in_(dept))
+            clean_depts = [d.strip().upper() for d in dept if d and d.strip()]
+            query = query.filter(func.upper(models.Course.dept_kisaadi).in_(clean_depts))
         if instructor:
             if not has_instructor_join:
                 query = query.join(models.Instructor)
                 has_instructor_join = True
-            query = query.filter(models.Instructor.full_name == instructor)
+            query = query.filter(func.upper(models.Instructor.full_name) == instructor.strip().upper())
             
         total_hits = query.count()
         
@@ -438,9 +442,12 @@ def search_courses(
     if dept:
         dept_filters = []
         for d in dept:
-            escaped = escape_meili_filter(d)
-            dept_filters.append(f"dept_code = '{escaped}'")
-        filter_list.append(f"({' OR '.join(dept_filters)})")
+            if d and d.strip():
+                clean_d = d.strip().upper()
+                escaped = escape_meili_filter(clean_d)
+                dept_filters.append(f"dept_code = '{escaped}'")
+        if dept_filters:
+            filter_list.append(f"({' OR '.join(dept_filters)})")
         
     if instructor:
         escaped_instructor = escape_meili_filter(instructor)
@@ -491,17 +498,30 @@ def get_ghost_schedule(
     dept: List[str] = Query(None),
     db: Session = Depends(database.get_db)
 ):
-    # Reconstruct campus layout for a term
+    target_term = term
+    if not db.query(models.Course.id).filter(models.Course.term_id == target_term).first():
+        if "-" in term and "/" not in term:
+            parts = term.rsplit("-", 1)
+            if len(parts) == 2 and "-" in parts[0]:
+                slash_term = parts[0].replace("-", "/") + "-" + parts[1]
+                if db.query(models.Course.id).filter(models.Course.term_id == slash_term).first():
+                    target_term = slash_term
+        elif "/" in term:
+            dash_term = term.replace("/", "-")
+            if db.query(models.Course.id).filter(models.Course.term_id == dash_term).first():
+                target_term = dash_term
+
     query = db.query(
         models.CourseSlot.day_code,
         models.CourseSlot.slot_hour,
         models.Room.name.label("room_name"),
         models.Course.course_code,
         models.Course.dept_kisaadi
-    ).join(models.Course).join(models.Room).filter(models.Course.term_id == term)
+    ).join(models.Course).join(models.Room).filter(models.Course.term_id == target_term)
     
     if dept:
-        query = query.filter(models.Course.dept_kisaadi.in_(dept))
+        clean_depts = [d.strip().upper() for d in dept if d and d.strip()]
+        query = query.filter(func.upper(models.Course.dept_kisaadi).in_(clean_depts))
         
     results = query.all()
     
@@ -634,13 +654,14 @@ def get_departments(request: Request = None, db: Session = Depends(database.get_
 @app.get("/v1/departments/{dept_code}/unique-courses")
 @cache(expire=3600)
 def get_department_unique_courses(dept_code: str, db: Session = Depends(database.get_db)):
+    clean_dept = dept_code.strip().upper()
     # Query distinct course_code, title, term_id to minimize row transfer and in-memory deduplication
     courses = db.query(
         models.Course.course_code,
         models.Course.title,
         models.Course.term_id
     ).filter(
-        models.Course.dept_kisaadi == dept_code
+        func.upper(models.Course.dept_kisaadi) == clean_dept
     ).distinct().order_by(
         models.Course.course_code,
         models.Course.term_id.desc()
@@ -661,13 +682,14 @@ def get_department_unique_courses(dept_code: str, db: Session = Depends(database
 @app.get("/v1/departments/{dept_code}/instructors")
 @cache(expire=3600)
 def get_department_instructors(dept_code: str, db: Session = Depends(database.get_db)):
+    clean_dept = dept_code.strip().upper()
     results = db.query(
         models.Instructor.id,
         models.Instructor.full_name,
         func.max(models.Course.term_id).label("last_term"),
         func.count(models.Course.id).label("course_count"),
         func.count(func.distinct(models.Course.term_id)).label("total_semesters")
-    ).join(models.Course).filter(models.Course.dept_kisaadi == dept_code).group_by(
+    ).join(models.Course).filter(func.upper(models.Course.dept_kisaadi) == clean_dept).group_by(
         models.Instructor.id, models.Instructor.full_name
     ).order_by(func.max(models.Course.term_id).desc()).all()
     
@@ -694,7 +716,7 @@ def get_course_history(course_code: str, request: Request = None, db: Session = 
         joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
     ).filter(
         func.upper(models.Course.course_code) == clean_code.upper()
-    ).limit(300).all()
+    ).order_by(models.Course.term_id.desc(), models.Course.section.asc()).limit(1000).all()
     
     if not courses:
         no_spaces = clean_code.replace(" ", "").upper()
@@ -703,7 +725,7 @@ def get_course_history(course_code: str, request: Request = None, db: Session = 
             joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
         ).filter(
             func.upper(func.replace(models.Course.course_code, ' ', '')) == no_spaces
-        ).limit(300).all()
+        ).order_by(models.Course.term_id.desc(), models.Course.section.asc()).limit(1000).all()
         
     if not courses:
         raise HTTPException(status_code=404, detail="Course history not found")
@@ -750,7 +772,7 @@ def get_course_schedule_ics_feed(course_code: str, db: Session = Depends(databas
         joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
     ).filter(
         func.upper(models.Course.course_code) == clean_code.upper()
-    ).limit(300).all()
+    ).order_by(models.Course.term_id.desc(), models.Course.section.asc()).limit(1000).all()
     
     if not courses:
         no_spaces = clean_code.replace(" ", "").upper()
@@ -759,7 +781,7 @@ def get_course_schedule_ics_feed(course_code: str, db: Session = Depends(databas
             joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
         ).filter(
             func.upper(func.replace(models.Course.course_code, ' ', '')) == no_spaces
-        ).limit(300).all()
+        ).order_by(models.Course.term_id.desc(), models.Course.section.asc()).limit(1000).all()
         
     if not courses:
         raise HTTPException(status_code=404, detail="Course schedule not found")

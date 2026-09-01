@@ -56,7 +56,10 @@ def sync_meilisearch(force: bool = False):
             'course_code', 'title', 'instructor', 'department'
         ],
         'faceting': {
-            'maxValuesPerFacet': 1000
+            'maxValuesPerFacet': 10000
+        },
+        'pagination': {
+            'maxTotalHits': 200000
         },
         'sortableAttributes': ['term', 'course_code', 'title', 'instructor', 'credits', 'ects']
     })
@@ -93,7 +96,7 @@ def sync_meilisearch(force: bool = False):
             'section': c.section,
             'term': c.term_id,
             'department': c.department.bolum if c.department else None,
-            'dept_code': c.dept_kisaadi,
+            'dept_code': (c.dept_kisaadi.upper() if c.dept_kisaadi else (c.course_code.split()[0].upper() if c.course_code else None)),
             'instructor': c.instructor.full_name if c.instructor else "TBA",
             'instructor_id': c.instructor_id,
             'credits': c.credits,
