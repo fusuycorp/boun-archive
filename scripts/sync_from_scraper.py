@@ -816,6 +816,61 @@ def backfill_term(
     return len(touched_courses)
 
 
+def _fetch_upstream_term_runs(client: ScraperClient) -> Dict[str, Dict[str, Any]]:
+    """Fetch the latest completed scrape run per upstream term.
+
+    Returns a {term_id: {"total": int, "started_at": str}} map derived from
+    /feeds/runs, so the sync layer can detect terms that were only partially
+    ingested locally (e.g. an early backfill latched onto a mid-scrape
+    snapshot) and reconcile them at most once per upstream run.
+    """
+    runs_by_term: Dict[str, Dict[str, Any]] = {}
+    try:
+        runs = client.get("feeds/runs", params={"limit": 500})
+    except Exception as e:
+        logger.warning("Could not fetch upstream scrape runs for term reconciliation: %s", e)
+        return runs_by_term
+    if not isinstance(runs, list):
+        return runs_by_term
+
+    latest_by_term: Dict[str, Dict[str, Any]] = {}
+    for r in runs:
+        if not isinstance(r, dict):
+            continue
+        term_id = r.get("term")
+        if not term_id or r.get("status") != "completed":
+            continue
+        started_at = r.get("started_at") or ""
+        cur = latest_by_term.get(term_id)
+        if cur is None or started_at > (cur.get("started_at") or ""):
+            latest_by_term[term_id] = r
+
+    for term_id, run in latest_by_term.items():
+        total = clean_int(run.get("total_courses"))
+        if total is not None and total > 0:
+            runs_by_term[term_id] = {"total": total, "started_at": run.get("started_at") or ""}
+    return runs_by_term
+
+
+def _last_reconciled_run(session, term_id: str) -> Optional[str]:
+    state = session.query(SyncState).filter(
+        SyncState.feed_name == f"term_reconciled:{term_id}"
+    ).first()
+    return state.last_cursor if state else None
+
+
+def _mark_term_reconciled(session, term_id: str, run_started_at: str) -> None:
+    feed_name = f"term_reconciled:{term_id}"
+    state = session.query(SyncState).filter(SyncState.feed_name == feed_name).first()
+    if not state:
+        state = SyncState(feed_name=feed_name, last_cursor=run_started_at)
+        session.add(state)
+    else:
+        state.last_cursor = run_started_at
+        state.updated_at = func.now()
+    session.commit()
+
+
 def sync_terms_and_new_offerings(
     session,
     client: ScraperClient,
@@ -825,8 +880,13 @@ def sync_terms_and_new_offerings(
     """
     Discovers all available terms from upstream scraper.
     Ensures each term exists in PostgreSQL terms table.
-    For any term with 0 courses in local DB (e.g. newly published semester 2026/2027-1),
-    automatically triggers backfill_term to ingest courses, rooms, instructors and push to Meilisearch.
+    Backfills any term that is missing courses locally:
+      - new upstream terms (0 local courses, e.g. newly published 2026/2027-1)
+      - partially ingested terms whose local count trails the latest completed
+        upstream scrape run (e.g. an earlier backfill latched onto a snapshot);
+        each completed upstream run is reconciled at most once per term
+        (tracked in sync_state) so a persistent count mismatch cannot
+        re-trigger a full backfill on every boot.
     """
     logger.info("Checking upstream scraper terms for new offerings...")
     try:
@@ -837,6 +897,8 @@ def sync_terms_and_new_offerings(
     except Exception as e:
         logger.warning("Failed to fetch scraper terms: %s", e)
         return 0
+
+    upstream_runs = _fetch_upstream_term_runs(client)
 
     term_cache: Dict[str, Term] = {t.id: t for t in session.query(Term).all()}
     total_synced_courses = 0
@@ -849,7 +911,24 @@ def sync_terms_and_new_offerings(
 
         # Check if local DB has courses for this term
         course_count = session.query(Course.id).filter(Course.term_id == term_id).count()
-        if course_count == 0:
+        upstream_run = upstream_runs.get(term_id)
+
+        if upstream_run is not None and course_count < upstream_run["total"]:
+            if _last_reconciled_run(session, term_id) == upstream_run["started_at"]:
+                logger.info(
+                    "Term '%s' trails upstream (%d/%d courses) but was already reconciled against run %s; skipping.",
+                    term_id, course_count, upstream_run["total"], upstream_run["started_at"]
+                )
+                continue
+            logger.info(
+                "Term '%s' incomplete locally (%d/%d courses). Starting reconciliation backfill...",
+                term_id, course_count, upstream_run["total"]
+            )
+            synced = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
+            total_synced_courses += synced
+            if not dry_run and synced > 0:
+                _mark_term_reconciled(session, term_id, upstream_run["started_at"])
+        elif course_count == 0:
             logger.info("Found new upstream term '%s' with 0 local courses. Starting automatic backfill...", term_id)
             synced = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
             total_synced_courses += synced
