@@ -51,6 +51,15 @@
   });
 </script>
 
+<svelte:head>
+  <title>Faculty Instructors Archive & Directory • BOUN Archive</title>
+  <meta name="description" content="Directory and teaching history archive of faculty members and instructors at Boğaziçi University." />
+  <meta property="og:title" content="Faculty Instructors Archive • BOUN Archive" />
+  <meta property="og:description" content="Explore historical teaching profiles and faculty records for Boğaziçi University." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://archive.bogazici.app/instructors" />
+</svelte:head>
+
 <div class="space-y-6 sm:space-y-8 max-w-4xl mx-auto">
   <div class="text-center space-y-3 sm:space-y-4 py-6 sm:py-10">
     <div class="inline-flex p-3 sm:p-3.5 bg-[#002d72]/10 dark:bg-[#8cc8ea]/15 rounded-2xl text-[#002d72] dark:text-[#8cc8ea] mb-1 sm:mb-2">

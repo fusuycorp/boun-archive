@@ -4,7 +4,8 @@ import logging
 import meilisearch
 from meilisearch.errors import MeilisearchApiError
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import func, or_
@@ -18,6 +19,12 @@ from fastapi_cache.decorator import cache
 
 from . import models, schemas, database
 from .analytics import MacroEngine
+from .semantic import (
+    course_history_to_json_ld,
+    instructor_to_json_ld,
+    departments_to_json_ld,
+    generate_course_schedule_ics
+)
 
 ALLOWED_SORTS = {"term", "course_code", "title", "instructor", "credits", "ects"}
 
@@ -38,14 +45,15 @@ def custom_key_builder(
     args,
     kwargs,
 ) -> str:
-    # Filter out Session/db objects to prevent unique DB connection representation causing cache misses
-    filtered_args = tuple(arg for arg in args if not isinstance(arg, Session))
+    # Filter out Session/db/Request objects to prevent unique DB connection representation causing cache misses
+    filtered_args = tuple(arg for arg in args if not isinstance(arg, (Session, Request)))
     filtered_kwargs = {
         k: v for k, v in kwargs.items()
-        if not isinstance(v, Session) and k != "db"
+        if not isinstance(v, (Session, Request)) and k not in ("db", "request")
     }
+    accept_hdr = request.headers.get("accept", "") if request and hasattr(request, "headers") else ""
     cache_key = hashlib.md5(
-        f"{func.__module__}:{func.__name__}:{filtered_args}:{filtered_kwargs}".encode()
+        f"{func.__module__}:{func.__name__}:{filtered_args}:{filtered_kwargs}:{accept_hdr}".encode()
     ).hexdigest()
     return f"{namespace}:{cache_key}"
 
@@ -143,7 +151,15 @@ def _run_scraper_sync_job(term_id: Optional[str] = None, mode: str = "incrementa
     except Exception as e:
         logger.error("Background scraper sync execution failed: %s", e)
 
-app = FastAPI(title="BOUN Archive API", lifespan=lifespan)
+app = FastAPI(
+    title="BOUN Archive API",
+    description="Open Data & Semantic Linked Data API for Boğaziçi University's academic catalog, course history, schedules, and quota analytics.",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    lifespan=lifespan
+)
 
 # Middlewares
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -522,13 +538,20 @@ def get_instructors(q: str = "", db: Session = Depends(database.get_db)):
         query = query.filter(models.Instructor.full_name.ilike(f"%{clean_q}%"))
     return query.limit(50).all()
 
-@app.get("/v1/instructors/{instructor_id}", response_model=schemas.Instructor)
+@app.get("/v1/instructors/{instructor_id}")
 @cache(expire=3600)
-def get_instructor(instructor_id: int, db: Session = Depends(database.get_db)):
+def get_instructor(instructor_id: int, request: Request = None, db: Session = Depends(database.get_db)):
     instructor = db.query(models.Instructor).filter(models.Instructor.id == instructor_id).first()
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor not found")
-    return instructor
+    if request:
+        accept = request.headers.get("accept", "")
+        if "application/ld+json" in accept or "application/json-ld" in accept:
+            return JSONResponse(
+                content=instructor_to_json_ld(instructor.id, instructor.full_name),
+                media_type="application/ld+json"
+            )
+    return schemas.Instructor.model_validate(instructor).model_dump()
 
 @app.get("/v1/analytics/instructor/{instructor_id}/legacy")
 @cache(expire=3600)
@@ -594,11 +617,19 @@ def get_terms(db: Session = Depends(database.get_db)):
     terms = db.query(models.Term).order_by(models.Term.id.desc()).all()
     return [schemas.Term.model_validate(t).model_dump() for t in terms]
 
-@app.get("/v1/departments", response_model=List[schemas.Department])
+@app.get("/v1/departments")
 @cache(expire=300)
-def get_departments(db: Session = Depends(database.get_db)):
+def get_departments(request: Request = None, db: Session = Depends(database.get_db)):
     depts = db.query(models.Department).order_by(models.Department.kisaadi).all()
-    return [schemas.Department.model_validate(d).model_dump() for d in depts]
+    dept_dicts = [schemas.Department.model_validate(d).model_dump() for d in depts]
+    if request:
+        accept = request.headers.get("accept", "")
+        if "application/ld+json" in accept or "application/json-ld" in accept:
+            return JSONResponse(
+                content=departments_to_json_ld(dept_dicts),
+                media_type="application/ld+json"
+            )
+    return dept_dicts
 
 @app.get("/v1/departments/{dept_code}/unique-courses")
 @cache(expire=3600)
@@ -653,7 +684,7 @@ def get_department_instructors(dept_code: str, db: Session = Depends(database.ge
 
 @app.get("/v1/courses/history/{course_code}")
 @cache(expire=3600)
-def get_course_history(course_code: str, db: Session = Depends(database.get_db)):
+def get_course_history(course_code: str, request: Request = None, db: Session = Depends(database.get_db)):
     clean_code = " ".join(course_code.strip().split())
     if not clean_code:
         raise HTTPException(status_code=404, detail="Course history not found")
@@ -698,7 +729,63 @@ def get_course_history(course_code: str, db: Session = Depends(database.get_db))
         
     result.sort(key=lambda x: x['section'] or '')
     result.sort(key=lambda x: x['term_id'], reverse=True)
+    if request:
+        accept = request.headers.get("accept", "")
+        if "application/ld+json" in accept or "application/json-ld" in accept:
+            return JSONResponse(
+                content=course_history_to_json_ld(clean_code, result),
+                media_type="application/ld+json"
+            )
     return result
+
+@app.get("/v1/courses/{course_code}/schedule.ics")
+@cache(expire=3600)
+def get_course_schedule_ics_feed(course_code: str, db: Session = Depends(database.get_db)):
+    clean_code = " ".join(course_code.strip().split())
+    if not clean_code:
+        raise HTTPException(status_code=404, detail="Course schedule not found")
+    
+    courses = db.query(models.Course).options(
+        joinedload(models.Course.instructor),
+        joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
+    ).filter(
+        func.upper(models.Course.course_code) == clean_code.upper()
+    ).limit(300).all()
+    
+    if not courses:
+        no_spaces = clean_code.replace(" ", "").upper()
+        courses = db.query(models.Course).options(
+            joinedload(models.Course.instructor),
+            joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
+        ).filter(
+            func.upper(func.replace(models.Course.course_code, ' ', '')) == no_spaces
+        ).limit(300).all()
+        
+    if not courses:
+        raise HTTPException(status_code=404, detail="Course schedule not found")
+
+    history = []
+    for c in courses:
+        history.append({
+            "id": c.id,
+            "term_id": c.term_id,
+            "section": c.section,
+            "title": c.title,
+            "instructor": c.instructor.full_name if c.instructor else "TBA",
+            "slots": [{
+                "day": s.day_code,
+                "hour": s.slot_hour,
+                "room": s.room.name if s.room else "N/A"
+            } for s in c.slots]
+        })
+    history.sort(key=lambda x: x['term_id'], reverse=True)
+    ics_text = generate_course_schedule_ics(clean_code, history)
+    safe_filename = clean_code.replace(" ", "_")
+    return Response(
+        content=ics_text,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="boun_{safe_filename}_schedule.ics"'}
+    )
 
 @app.get("/v1/courses/{course_code}/quota", response_model=List[schemas.QuotaSnapshot])
 @cache(expire=60)

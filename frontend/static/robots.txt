@@ -1,3 +1,9 @@
-# allow crawling everything by default
+# Robots.txt for BOUN Archive (Semantic Web & Machine Discovery)
 User-agent: *
-Disallow:
+Allow: /
+
+# Standard Sitemap
+Sitemap: https://archive.bogazici.app/sitemap.xml
+
+# LLM Discovery
+# See /llms.txt and /llms-full.txt for machine-readable API and ontology definitions

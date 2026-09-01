@@ -1,14 +1,16 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { Calendar, User, Clock, MapPin, Hash, BookOpen, Info, Users, Activity } from "lucide-svelte";
+  import { Calendar, User, Clock, MapPin, Hash, BookOpen, Info, Users, Activity, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { formatSlotTime } from "$lib/utils";
+  import { generateCourseJsonLd } from "$lib/semantic";
+  import { generateICS, downloadICS } from "$lib/ical";
   import type { QuotaSnapshot, CourseHistoryItem } from "$lib/types";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
 
-  let courseCode = $derived(data.courseCode || page.params.code);
+  let courseCode = $derived(data.courseCode || page.params.code || "");
   let history = $state<CourseHistoryItem[]>([]);
   let quotas = $state<QuotaSnapshot[]>([]);
   let loading = $state(false);
@@ -65,7 +67,29 @@
   );
 
   const latestInfo = $derived(history.length > 0 ? history[0] : null);
+
+  function exportScheduleICS() {
+    if (!history || history.length === 0) return;
+    const latestTerm = latestInfo?.term_id;
+    const latestCourses = history.filter(h => h.term_id === latestTerm);
+    const icsString = generateICS(latestCourses.length > 0 ? latestCourses : history, `${courseCode} Schedule`, courseCode);
+    downloadICS(icsString, `boun_${courseCode.replace(/\s+/g, '_')}_schedule`);
+  }
 </script>
+
+<svelte:head>
+  <title>{courseCode} {latestInfo?.title ? `- ${latestInfo.title}` : ''} • BOUN Archive</title>
+  <meta name="description" content="Academic offering history, instructors, credits, timetable slots, and quota records for {courseCode} ({latestInfo?.title || ''}) at Boğaziçi University." />
+  <meta property="og:title" content="{courseCode}: {latestInfo?.title || 'Course Details'} • BOUN Archive" />
+  <meta property="og:description" content="Explore course offerings, syllabus credits, instructors, and quota history for {courseCode} at Boğaziçi University." />
+  <meta property="og:url" content="https://archive.bogazici.app/course/{encodeURIComponent(courseCode || '')}" />
+  <meta property="og:type" content="article" />
+  <meta name="DC.title" content="{courseCode}: {latestInfo?.title || ''}" />
+  <meta name="DC.creator" content="Boğaziçi University" />
+  <meta name="DC.identifier" content="https://archive.bogazici.app/course/{encodeURIComponent(courseCode || '')}" />
+  <meta name="DC.type" content="Course" />
+  {@html `<script type="application/ld+json">${JSON.stringify(generateCourseJsonLd(courseCode || '', history, latestInfo))}<\/script>`}
+</svelte:head>
 
 <div class="max-w-6xl mx-auto space-y-6 sm:space-y-8">
   {#if loading}
@@ -98,11 +122,11 @@
           <div class="flex flex-wrap gap-4 sm:gap-6 text-xs font-mono">
              <div class="flex items-center space-x-1.5 text-[#525f7f] dark:text-slate-400">
                <BookOpen size={14} class="text-[#0080c9] dark:text-[#8cc8ea] shrink-0" />
-               <span>{latestInfo?.credits} Credits</span>
+               <span>{latestInfo?.credits ?? '—'} Credits</span>
              </div>
              <div class="flex items-center space-x-1.5 text-[#525f7f] dark:text-slate-400">
                <Hash size={14} class="text-[#0080c9] dark:text-[#8cc8ea] shrink-0" />
-               <span>{latestInfo?.ects} ECTS</span>
+               <span>{latestInfo?.ects ?? '—'} ECTS</span>
              </div>
              <div class="flex items-center space-x-1.5 text-[#525f7f] dark:text-slate-400">
                <Calendar size={14} class="text-[#0080c9] dark:text-[#8cc8ea] shrink-0" />
@@ -110,6 +134,19 @@
              </div>
           </div>
         </div>
+
+        {#if history.length > 0}
+          <div class="flex items-center gap-2">
+            <button
+              onclick={exportScheduleICS}
+              class="flex items-center space-x-2 bg-[#faf8f5] dark:bg-[#0a0e1a] border border-[#e5e0d8] dark:border-[#1e293b] text-[#002d72] dark:text-[#8cc8ea] px-4 py-2.5 rounded-lg text-xs font-semibold hover:bg-[#e5e0d8]/50 dark:hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer"
+              title="Download RFC 5545 iCalendar file for Google Calendar / Apple Calendar"
+            >
+              <Download size={14} />
+              <span>Export iCal (.ics)</span>
+            </button>
+          </div>
+        {/if}
       </div>
     </header>
 
@@ -192,7 +229,7 @@
 
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {#each groupedHistory[term] as section}
-              <div class="bg-white rounded-xl border border-[#e5e0d8] p-4 sm:p-5 shadow-2xs hover:border-[#c5a059] dark:bg-[#121827] dark:border-[#1e293b] dark:hover:border-[#8cc8ea]/40 transition-colors group space-y-3">
+              <article class="bg-white rounded-xl border border-[#e5e0d8] p-4 sm:p-5 shadow-2xs hover:border-[#c5a059] dark:bg-[#121827] dark:border-[#1e293b] dark:hover:border-[#8cc8ea]/40 transition-colors group space-y-3">
                 <div class="flex items-center justify-between">
                   <div class="px-2 py-0.5 bg-[#f3efe6] dark:bg-slate-800 text-[#161e2e] dark:text-slate-300 text-[10px] font-mono font-bold rounded uppercase">Section {section.section}</div>
                   <div class="text-[9px] font-mono font-semibold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">{section.delivery_method || 'Standard'}</div>
@@ -216,7 +253,7 @@
                           <div class="flex items-center justify-between text-xs bg-[#faf8f5] p-1.5 rounded dark:bg-[#0a0e1a] border border-[#e5e0d8] dark:border-[#1e293b]">
                              <div class="flex items-center space-x-1.5">
                                 <span class="font-bold text-[#002d72] dark:text-[#8cc8ea] w-4">{slot.day}</span>
-                                <span class="text-[#525f7f] dark:text-slate-400">{formatSlotTime(slot.hour)}</span>
+                                <time class="text-[#525f7f] dark:text-slate-400">{formatSlotTime(slot.hour)}</time>
                              </div>
                              <div class="flex items-center space-x-1 text-[#525f7f] truncate max-w-[100px]">
                                 <MapPin size={9} class="shrink-0" />
@@ -228,7 +265,7 @@
                     </div>
                   </div>
                 </div>
-              </div>
+              </article>
             {/each}
           </div>
         </section>
@@ -236,4 +273,3 @@
     </div>
   {/if}
 </div>
-

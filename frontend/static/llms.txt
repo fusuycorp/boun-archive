@@ -1,0 +1,43 @@
+# BOUN Archive
+
+> A historical course catalog, scheduling archive, and quota analytics platform for Boğaziçi University.
+
+BOUN Archive indexes historical and current course offerings, instructor teaching legacies, quota change timelines, and schedule assignments across all academic departments at Boğaziçi University.
+
+## Core API Endpoints
+
+- `GET /v1/search`: Full-text & faceted course search (via Meilisearch). Supports query params `q`, `term`, `dept`, `instructor`, `delivery_method`, `sort`, `limit`, `offset`.
+- `GET /v1/courses/history/{course_code}`: Multi-semester historical timeline of offerings, instructors, credit/ECTS values, and room/slot assignments for a course code (e.g. `CMPE 150`).
+- `GET /v1/courses/{course_code}/quota`: Real-time and historical quota polling snapshots (capacity, registered count, consent status).
+- `GET /v1/courses/{course_code}/changes`: Changelog of delta modifications (schedule changes, instructor changes, room reallocations).
+- `GET /v1/courses/{course_code}/schedule.ics`: RFC 5545 iCalendar feed for weekly recurring class schedules.
+- `GET /v1/instructors`: Complete directory of active and historical faculty instructors.
+- `GET /v1/instructors/{instructor_id}`: Instructor profile and unique ID mapping.
+- `GET /v1/analytics/instructor/{instructor_id}/legacy`: Historical courses taught, terms active, and teaching footprint.
+- `GET /v1/departments`: All academic departments with short code (`kisaadi`) and Turkish/English full names (`bolum`).
+- `GET /v1/departments/{dept_code}/unique-courses`: Unique course codes offered historically by a department.
+- `GET /v1/departments/{dept_code}/instructors`: Faculty members associated with a department.
+- `GET /v1/terms`: All indexed academic terms in chronological order (e.g. `2026/2027-1`, `2025/2026-2`).
+- `GET /v1/analytics/ghost-schedule/{term}`: Ghost room utilization and unassigned classroom capacities.
+- `GET /v1/analytics/macro/departments-evolution`: Longitudinal course count evolution across departments over decades.
+- `GET /v1/analytics/macro/scheduling-heatmap`: Aggregate slot distribution heatmaps across days and hours.
+- `GET /v1/system/status`: Scraper freshness, last sync timestamps, and database health.
+
+## Core Entities & Models
+
+- **Course**: An academic course (e.g., `CMPE 150`, `MATH 101`). Unique code per department.
+- **Course Offering**: An instance of a course taught in a specific `term_id` and `section` (e.g. `CMPE 150.01` in `2026/2027-1`).
+- **Instructor**: Faculty or teaching staff member.
+- **Department**: Academic unit identified by `dept_kisaadi` (e.g., `CMPE`, `MATH`, `PHYS`, `HIST`, `ECON`).
+- **CourseSlot**: Scheduled class time slot with `day_code` (`M`, `T`, `W`, `Th`, `F`, `St`, `Su`), `slot_hour` (1 to 13), and `room_name`.
+- **QuotaSnapshot**: Time-series snapshot of course capacity, filled seats, and consent requirements.
+
+## Content Negotiation & Linked Data
+
+Entities can be requested in JSON-LD format by passing `Accept: application/ld+json`.
+- `GET /v1/courses/{course_code}` with `Accept: application/ld+json` returns Schema.org `Course` and `CourseInstance` graph.
+- `GET /v1/instructors/{instructor_id}` with `Accept: application/ld+json` returns Schema.org `Person`.
+- `GET /v1/departments` with `Accept: application/ld+json` returns Schema.org `EducationalOrganization` list.
+
+## Full LLM Index
+For the complete schemas, parameter definitions, and semantic graph specifications, see [llms-full.txt](https://archive.bogazici.app/llms-full.txt).

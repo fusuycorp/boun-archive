@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Search, Calendar, Plus, Trash2, AlertTriangle, Check, MapPin, BookOpen, Clock, RotateCcw } from "lucide-svelte";
+  import { Search, Calendar, Plus, Trash2, AlertTriangle, Check, MapPin, BookOpen, Clock, RotateCcw, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import { generateICS, downloadICS } from "$lib/ical";
   import { safeParsePlannerCourses, type CoursePlannerItem } from "$lib/schemas/planner";
   import type { Term, SearchCourseHit } from "$lib/types";
 
@@ -201,7 +202,21 @@
     clearTimeout(timeout);
     timeout = setTimeout(performSearch, 300);
   }
+  function exportScheduleICS() {
+    if (myCourses.length === 0) return;
+    const icsString = generateICS(myCourses, `BOUN Schedule - ${selectedTerm}`);
+    downloadICS(icsString, `boun_schedule_${selectedTerm.replace(/[^a-zA-Z0-9]/g, '_')}`);
+  }
 </script>
+
+<svelte:head>
+  <title>Weekly Course Planner & Timetable Matrix • BOUN Archive</title>
+  <meta name="description" content="Personalize course schedules, detect timetable conflicts, and export semester schedules to iCalendar (.ics) for Boğaziçi University." />
+  <meta property="og:title" content="Weekly Schedule Planner • BOUN Archive" />
+  <meta property="og:description" content="Personalize semester timetable and export iCal (.ics) schedules for Boğaziçi University." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://archive.bogazici.app/calendar" />
+</svelte:head>
 
 <div class="space-y-4 sm:space-y-6 h-full flex flex-col">
   <!-- Header -->
@@ -225,6 +240,19 @@
           {/each}
         </select>
       </div>
+
+      {#if myCourses.length > 0}
+        <div class="flex flex-col space-y-1 self-end">
+          <button
+            onclick={exportScheduleICS}
+            class="flex items-center space-x-1.5 p-2 bg-white border border-[#e5e0d8] rounded-lg text-xs font-semibold text-[#002d72] hover:bg-[#f3efe6] dark:bg-[#121827] dark:border-[#1e293b] dark:text-[#8cc8ea] dark:hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer h-[38px]"
+            title="Export timetable to iCalendar (.ics)"
+          >
+            <Download size={14} />
+            <span class="hidden sm:inline">Export .ics</span>
+          </button>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -305,14 +333,24 @@
         <div class="flex items-center justify-between px-1">
           <h3 class="font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">Enrolled Schedule ({myCourses.length})</h3>
           {#if myCourses.length > 0}
-            <button 
-              onclick={clearAllCourses}
-              class="text-[10px] font-mono font-semibold text-[#525f7f] hover:text-rose-600 dark:hover:text-rose-400 flex items-center space-x-1 transition-colors cursor-pointer"
-              title="Clear all courses for this semester"
-            >
-              <RotateCcw size={10} />
-              <span>Clear</span>
-            </button>
+            <div class="flex items-center space-x-2">
+              <button 
+                onclick={exportScheduleICS}
+                class="text-[10px] font-mono font-semibold text-[#002d72] hover:text-[#0080c9] dark:text-[#8cc8ea] dark:hover:text-sky-300 flex items-center space-x-1 transition-colors cursor-pointer"
+                title="Export enrolled courses to iCalendar (.ics)"
+              >
+                <Download size={10} />
+                <span>Export .ics</span>
+              </button>
+              <button 
+                onclick={clearAllCourses}
+                class="text-[10px] font-mono font-semibold text-[#525f7f] hover:text-rose-600 dark:hover:text-rose-400 flex items-center space-x-1 transition-colors cursor-pointer"
+                title="Clear all courses for this semester"
+              >
+                <RotateCcw size={10} />
+                <span>Clear</span>
+              </button>
+            </div>
           {/if}
         </div>
 

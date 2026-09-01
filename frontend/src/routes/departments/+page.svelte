@@ -3,6 +3,7 @@
   import { BookOpen, Search, ChevronRight, Hash, ArrowUpDown, User, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { exportToCSV } from "$lib/utils";
+  import { generateDepartmentsJsonLd } from "$lib/semantic";
   import DeptCourseTable from "$lib/components/departments/DeptCourseTable.svelte";
   import DeptInstructorTable from "$lib/components/departments/DeptInstructorTable.svelte";
   import type { DepartmentUniqueCourse, DepartmentInstructor } from "$lib/types";
@@ -179,6 +180,18 @@
     })
   );
 </script>
+
+<svelte:head>
+  <title>Academic Departments Directory • BOUN Archive</title>
+  <meta name="description" content="Explore Boğaziçi University academic departments, historical curriculum records, unique course offerings, and faculty instructors." />
+  <meta property="og:title" content="Departments Directory • BOUN Archive" />
+  <meta property="og:description" content="Explore Boğaziçi University academic departments, historical curriculum records, unique course offerings, and faculty instructors." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://archive.bogazici.app/departments" />
+  {#if departments.length > 0}
+    {@html `<script type="application/ld+json">${JSON.stringify(generateDepartmentsJsonLd(departments))}<\/script>`}
+  {/if}
+</svelte:head>
 
 <div class="space-y-6 sm:space-y-8">
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

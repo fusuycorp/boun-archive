@@ -196,6 +196,15 @@
   });
 </script>
 
+<svelte:head>
+  <title>{query ? `"${query}" - Course Search` : 'Search Academic Courses'} • BOUN Archive</title>
+  <meta name="description" content="Search Boğaziçi University courses by course code, title, instructor, department, or term with instant faceting and filters." />
+  <meta property="og:title" content="Course Search & Archive • BOUN Archive" />
+  <meta property="og:description" content="Search Boğaziçi University courses by code, title, instructor, and department." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://archive.bogazici.app/search" />
+</svelte:head>
+
 <div class="space-y-6">
   <!-- Mobile Filter Modal / Drawer -->
   {#if isFilterDrawerOpen}

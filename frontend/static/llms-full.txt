@@ -1,0 +1,91 @@
+# BOUN Archive - Full Technical and Machine-Readable Specification
+
+## Introduction
+BOUN Archive is the canonical open data platform for Boğaziçi University's academic catalog. It exposes structured APIs, semantic Linked Data (JSON-LD), full-text search indexes, and schedule analytics spanning multiple decades of curriculum data.
+
+Base Web URL: https://archive.bogazici.app
+API Base URL: https://archive.bogazici.app/api or /v1
+
+---
+
+## 1. Domain Ontology & Schema.org Mapping
+
+### Course
+- Schema.org URI: `https://schema.org/Course`
+- Primary Key / Identifier: `course_code` (e.g. `CMPE 150`, `EE 212`, `HIST 105`)
+- Properties:
+  - `name`: Course title (string)
+  - `courseCode`: Short uppercase department identifier + code (string)
+  - `numberOfCredits`: Local Boğaziçi credit count (integer)
+  - `educationalCredentialAwarded`: ECTS credit points (integer)
+  - `department`: EducationalOrganization reference with `dept_kisaadi`
+
+### Course Instance (Offering per Term)
+- Schema.org URI: `https://schema.org/CourseInstance`
+- Composite Key: `term_id` + `course_code` + `section`
+- Properties:
+  - `term_id`: Academic semester string (format: `YYYY/YYYY-N`, where N is 1: Fall, 2: Spring, 3: Summer)
+  - `section`: Section number (e.g. `01`, `02`)
+  - `instructor`: Reference to `Person` (instructor name and ID)
+  - `delivery_method`: Delivery mode (`In-Person`, `Online`, `Hybrid`)
+  - `slots`: Array of weekly class timeslots (`CourseSlot`)
+
+### CourseSlot (Schedule & Location)
+- Schema.org URI: `https://schema.org/Schedule`
+- Properties:
+  - `day_code`: Day of week (`M`: Monday, `T`: Tuesday, `W`: Wednesday, `Th`: Thursday, `F`: Friday, `St`: Saturday, `Su`: Sunday)
+  - `slot_hour`: Slot hour number from 1 (09:00 - 10:00) to 13 (21:00 - 22:00)
+  - `room_name`: Classroom / lab name (e.g. `BMB 217`, `NH 101`, `TB 250`)
+
+### Instructor
+- Schema.org URI: `https://schema.org/Person`
+- Properties:
+  - `id`: Integer unique identifier
+  - `full_name`: Official instructor name
+  - `affiliation`: Boğaziçi University (`https://www.wikidata.org/wiki/Q853512`)
+
+### Department
+- Schema.org URI: `https://schema.org/EducationalOrganization`
+- Properties:
+  - `kisaadi`: Department code abbreviation (e.g. `CMPE`, `MATH`, `PHYS`, `IE`, `EE`)
+  - `bolum`: Department full name in Turkish/English
+
+---
+
+## 2. Machine-Readable API Contract
+
+### Search Endpoint
+`GET /v1/search`
+Query Parameters:
+- `q`: String. Keyword search across course code, title, instructor name, and department.
+- `term`: Repeatable string. Filter by academic term (e.g. `?term=2026/2027-1&term=2025/2026-2`).
+- `dept`: Repeatable string. Filter by department code (e.g. `?dept=CMPE&dept=EE`).
+- `instructor`: Repeatable string. Filter by instructor full name.
+- `delivery_method`: Repeatable string. Filter by mode (`In-Person`, `Online`, `Hybrid`).
+- `sort`: String. One of `term`, `course_code`, `title`, `instructor`, `credits`, `ects` (prefix with `-` for descending, e.g. `-term`).
+- `limit`: Integer (1-100, default 20).
+- `offset`: Integer (default 0).
+
+### Course History Endpoint
+`GET /v1/courses/history/{course_code}`
+Returns an array of historical offerings for a course across all recorded semesters.
+
+### Course Quota Timeline Endpoint
+`GET /v1/courses/{course_code}/quota`
+Returns chronological snapshots of registration quotas, enrolled seat counts, consent requirements, and unreserved spaces.
+
+### iCalendar Schedule Feed
+`GET /v1/courses/{course_code}/schedule.ics`
+MIME Type: `text/calendar; charset=utf-8`
+RFC 5545 compliant `.ics` calendar feed containing weekly recurring VEVENT components with start/end timestamps and room locations.
+
+### Instructors Directory & Legacy
+`GET /v1/instructors`: All instructor profiles.
+`GET /v1/analytics/instructor/{instructor_id}/legacy`: Complete historical teaching matrix.
+
+---
+
+## 3. Machine Integration Recommendations for AI Agents
+1. When generating course recommendations or schedules, use `/v1/search` with exact `term` and `dept` filters.
+2. For student calendar synchronization, export or parse RFC 5545 `.ics` feeds.
+3. For citation or syllabus generation, request `Accept: application/ld+json` on course endpoints or read JSON-LD scripts embedded in the HTML.
