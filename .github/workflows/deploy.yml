@@ -13,7 +13,7 @@ on:
 jobs:
   build-backend:
     name: Build & Push Backend
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -45,12 +45,10 @@ jobs:
           push: true
           tags: ${{ steps.meta-backend.outputs.tags }}
           labels: ${{ steps.meta-backend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   build-frontend:
     name: Build & Push Frontend
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -82,13 +80,11 @@ jobs:
           push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   deploy:
     name: Trigger Dokploy Deployment
     needs: [build-backend, build-frontend]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, builder]
     steps:
       - name: Trigger Dokploy Redeployment
         env:
