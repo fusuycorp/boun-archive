@@ -1,8 +1,10 @@
 import sys
 import json
 from pathlib import Path
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 import pytest
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -371,8 +373,9 @@ def test_cross_08_multi_term_to_scheduling_heatmap(client: TestClient, db_sessio
 
 def test_cross_09_scraper_sync_to_system_status_and_health(client: TestClient, db_session: Session):
     """9. Scraper Delta Ingestion -> System Status Cursor Update -> Healthcheck/Staleness."""
-    now_str = "2026-08-31T11:00:00Z"
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     client_mock = MagicMock(spec=ScraperClient)
+
     client_mock.get.return_value = [
         {"status": "completed", "completed_at": now_str}
     ]

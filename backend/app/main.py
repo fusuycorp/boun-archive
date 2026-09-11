@@ -21,10 +21,17 @@ from . import models, schemas, database
 from .analytics import MacroEngine
 from .semantic import (
     course_history_to_json_ld,
+    course_history_to_turtle,
     instructor_to_json_ld,
+    instructor_to_turtle,
     departments_to_json_ld,
-    generate_course_schedule_ics
+    departments_to_turtle,
+    generate_course_schedule_ics,
+    generate_void_description,
+    generate_dcat_catalog_jsonld
 )
+from .optimizer import solve_schedule_csp
+
 
 ALLOWED_SORTS = {"term", "course_code", "title", "instructor", "credits", "ects"}
 
@@ -566,6 +573,11 @@ def get_instructor(instructor_id: int, request: Request = None, db: Session = De
         raise HTTPException(status_code=404, detail="Instructor not found")
     if request:
         accept = request.headers.get("accept", "")
+        if "text/turtle" in accept or "application/x-turtle" in accept:
+            return Response(
+                content=instructor_to_turtle(instructor.id, instructor.full_name),
+                media_type="text/turtle; charset=utf-8"
+            )
         if "application/ld+json" in accept or "application/json-ld" in accept:
             return JSONResponse(
                 content=instructor_to_json_ld(instructor.id, instructor.full_name),
@@ -644,6 +656,11 @@ def get_departments(request: Request = None, db: Session = Depends(database.get_
     dept_dicts = [schemas.Department.model_validate(d).model_dump() for d in depts]
     if request:
         accept = request.headers.get("accept", "")
+        if "text/turtle" in accept or "application/x-turtle" in accept:
+            return Response(
+                content=departments_to_turtle(dept_dicts),
+                media_type="text/turtle; charset=utf-8"
+            )
         if "application/ld+json" in accept or "application/json-ld" in accept:
             return JSONResponse(
                 content=departments_to_json_ld(dept_dicts),
@@ -753,6 +770,11 @@ def get_course_history(course_code: str, request: Request = None, db: Session = 
     result.sort(key=lambda x: x['term_id'], reverse=True)
     if request:
         accept = request.headers.get("accept", "")
+        if "text/turtle" in accept or "application/x-turtle" in accept:
+            return Response(
+                content=course_history_to_turtle(clean_code, result),
+                media_type="text/turtle; charset=utf-8"
+            )
         if "application/ld+json" in accept or "application/json-ld" in accept:
             return JSONResponse(
                 content=course_history_to_json_ld(clean_code, result),
@@ -883,4 +905,36 @@ def get_course_changes(
     ).limit(limit).all()
 
     return [schemas.CourseChange.model_validate(c).model_dump() for c in changes]
+
+@app.get("/.well-known/void")
+@app.get("/v1/void.ttl")
+@cache(expire=86400)
+def get_void_dataset_description(request: Request):
+    base_url = str(request.base_url).rstrip("/")
+    return Response(
+        content=generate_void_description(base_url=base_url),
+        media_type="text/turtle; charset=utf-8"
+    )
+
+@app.get("/v1/catalog.jsonld")
+@cache(expire=86400)
+def get_dcat_catalog(request: Request):
+    base_url = str(request.base_url).rstrip("/")
+    return JSONResponse(
+        content=generate_dcat_catalog_jsonld(base_url=base_url),
+        media_type="application/ld+json"
+    )
+
+@app.post("/v1/optimizer/schedule", response_model=schemas.ScheduleOptimizationResponse)
+def optimize_schedule(
+    request: schemas.ScheduleOptimizationRequest,
+    db: Session = Depends(database.get_db)
+):
+    """
+    Deterministic Constraint Satisfaction Problem (CSP) schedule solver.
+    Evaluates all section slot permutations, eliminates conflicts, and optimizes
+    for minimal gap hours, reduced campus days, and confirmed instructors.
+    """
+    return solve_schedule_csp(db=db, request=request)
+
 
