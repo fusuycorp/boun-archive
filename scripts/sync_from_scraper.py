@@ -629,7 +629,7 @@ def _fetch_term_courses(client: ScraperClient, term_id: str) -> List[Dict[str, A
     export_term_param = term_id.replace("/", "-")
     try:
         data = client.get(f"feeds/exports/{export_term_param}/json")
-        if data and isinstance(data, list):
+        if isinstance(data, list):
             return data
     except Exception as e:
         logger.debug("Export feed not available (%s), falling back to /courses: %s", export_term_param, e)
@@ -929,9 +929,14 @@ def sync_terms_and_new_offerings(
             if not dry_run and synced > 0:
                 _mark_term_reconciled(session, term_id, upstream_run["started_at"])
         elif course_count == 0:
+            if _last_reconciled_run(session, term_id) is not None:
+                continue
             logger.info("Found new upstream term '%s' with 0 local courses. Starting automatic backfill...", term_id)
             synced = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
             total_synced_courses += synced
+            if not dry_run:
+                marker = upstream_run["started_at"] if upstream_run else "zero_upstream_offerings"
+                _mark_term_reconciled(session, term_id, marker)
 
     return total_synced_courses
 
@@ -979,18 +984,24 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
         sync_upstream_run_metadata(session, client, dry_run=args.dry_run)
 
         # 1. Discover upstream terms and backfill any newly scraped semester offerings
-        sync_terms_and_new_offerings(session, client, meili_index=meili_index, dry_run=args.dry_run)
+        synced_terms = sync_terms_and_new_offerings(session, client, meili_index=meili_index, dry_run=args.dry_run)
+
+        synced_backfill = 0
+        synced_deltas = 0
+        synced_quotas = 0
 
         # 2. Run configured mode
         if args.mode == "backfill":
-            backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
+            synced_backfill = backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
         elif args.mode == "full":
-            backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
-            sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
-            sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+            synced_backfill = backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
+            synced_deltas = sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
+            synced_quotas = sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
         else:
-            sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
-            sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+            synced_deltas = sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
+            synced_quotas = sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+
+        total_changes = synced_terms + synced_backfill + synced_deltas + synced_quotas
 
         if not args.dry_run:
             now_iso = datetime.now(timezone.utc).isoformat()
@@ -1003,7 +1014,10 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
                     state.last_cursor = now_iso
                     state.updated_at = func.now()
             session.commit()
-            invalidate_redis_cache()
+            if total_changes > 0:
+                invalidate_redis_cache()
+            else:
+                logger.debug("No mutations in sync cycle; preserving Redis cache.")
     except Exception:
         session.rollback()
         raise

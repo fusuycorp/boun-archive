@@ -5,6 +5,8 @@ services:
     command:
       - "postgres"
       - "-c"
+      - "max_connections=250"
+      - "-c"
       - "shared_buffers=1GB" # Adjusted for more reasonable default
       - "-c"
       - "effective_cache_size=3GB"
@@ -133,6 +135,8 @@ services:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
       REDIS_URL: ${REDIS_URL}
       PORT: ${BACKEND_PORT}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
     expose:
       - "${BACKEND_PORT}"
     depends_on:
