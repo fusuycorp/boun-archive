@@ -17,6 +17,7 @@ export const CoursePlannerSlotSchema = z.object({
     .optional()
     .nullable(),
   room_id: z.number().optional().nullable(),
+  disabled: z.boolean().optional().default(false),
 });
 
 export const CoursePlannerItemSchema = z.object({
@@ -56,11 +57,17 @@ export function safeParsePlannerCourses(jsonString: string): CoursePlannerItem[]
     }
 
     const validCourses: CoursePlannerItem[] = [];
+    const seen = new Set<string>();
     for (const item of raw) {
       if (!item || typeof item !== "object") continue;
       const result = CoursePlannerItemSchema.safeParse(item);
       if (result.success) {
-        validCourses.push(result.data);
+        const c = result.data;
+        const key = `${c.course_code.trim().toUpperCase()}_${(c.section || "01").trim()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          validCourses.push(c);
+        }
       }
     }
 

@@ -104,6 +104,23 @@ describe("Storage Resilience & Malformed Data Handling", () => {
       expect(result.length).toBe(500);
       expect(elapsed).toBeLessThan(100); // Must parse 500 items in <100ms
     });
+
+    it("deduplicates duplicate course entries with identical code and section", () => {
+      const duplicatePayload = JSON.stringify([
+        { id: 138211, course_code: "AD 211", section: "01", title: "FINANCIAL ACCOUNTING FOR ECONOMISTS" },
+        { id: 138276, course_code: "AD 211", section: "01", title: "FINANCIAL ACCOUNTING FOR ECONOMISTS" },
+        { id: 138281, course_code: "AD 211", section: "01", title: "FINANCIAL ACCOUNTING FOR ECONOMISTS" },
+        { id: 138395, course_code: "AD 211", section: "01", title: "FINANCIAL ACCOUNTING FOR ECONOMISTS" },
+        { id: 138452, course_code: "AD 211", section: "01", title: "FINANCIAL ACCOUNTING FOR ECONOMISTS" },
+        { id: 138212, course_code: "AD 213", section: "01", title: "FINANCIAL ACCOUNTING" }
+      ]);
+
+      const result = safeParsePlannerCourses(duplicatePayload);
+      expect(result.length).toBe(2);
+      expect(result[0].course_code).toBe("AD 211");
+      expect(result[0].section).toBe("01");
+      expect(result[1].course_code).toBe("AD 213");
+    });
   });
 
   describe("Session Storage Recovery Simulation", () => {

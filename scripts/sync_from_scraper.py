@@ -9,7 +9,7 @@ import urllib.error
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Set, Union
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import sessionmaker, joinedload, selectinload
 from dotenv import load_dotenv
 
@@ -978,8 +978,35 @@ def sync_upstream_run_metadata(session, client: ScraperClient, dry_run: bool = F
     return None
 
 
+def _try_acquire_sync_lock(session, lock_id: int = 4288192) -> bool:
+    try:
+        bind = session.get_bind()
+        if bind and bind.dialect.name == "postgresql":
+            res = session.execute(text("SELECT pg_try_advisory_lock(:lock_id)"), {"lock_id": lock_id}).scalar()
+            return bool(res)
+        return True
+    except Exception as e:
+        logger.debug("Advisory lock check skipped: %s", e)
+        return True
+
+
+def _release_sync_lock(session, lock_id: int = 4288192) -> None:
+    try:
+        bind = session.get_bind()
+        if bind and bind.dialect.name == "postgresql":
+            session.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": lock_id})
+    except Exception:
+        pass
+
+
 def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) -> None:
     session = session_factory()
+    lock_acquired = _try_acquire_sync_lock(session)
+    if not lock_acquired:
+        logger.info("Another sync_from_scraper cycle holds the advisory lock. Skipping concurrent execution.")
+        session.close()
+        return
+
     try:
         sync_upstream_run_metadata(session, client, dry_run=args.dry_run)
 
@@ -1022,6 +1049,7 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
         session.rollback()
         raise
     finally:
+        _release_sync_lock(session)
         session.close()
 
 

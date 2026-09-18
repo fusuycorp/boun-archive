@@ -110,7 +110,15 @@
       const res = await fetch(`${API_BASE}/v1/search?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
-        searchResults = data.hits || [];
+        const rawHits: SearchCourseHit[] = data.hits || [];
+        const seen = new Set<string>();
+        searchResults = rawHits.filter(hit => {
+          if (!hit || !hit.course_code) return false;
+          const key = `${hit.course_code.trim().toUpperCase()}_${(hit.section || "01").trim()}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
       }
     } catch (e) {
       console.error("Search failed", e);
@@ -121,9 +129,11 @@
 
   async function toggleCourse(course: SearchCourseHit | CoursePlannerItem) {
     const courseId = course.id;
+    const normCode = course.course_code.trim().toUpperCase();
+    const normSec = (course.section || "01").trim();
     const isEnrolled = myCourses.some(c => 
       (courseId != null && c.id != null && String(c.id) === String(courseId)) ||
-      (c.course_code === course.course_code && c.section === course.section)
+      (c.course_code.trim().toUpperCase() === normCode && (c.section || "01").trim() === normSec)
     );
 
     if (isEnrolled) {
@@ -134,24 +144,31 @@
         if (res.ok) {
           const detailed = await res.json();
           if (detailed && (detailed.id || detailed.course_code)) {
-            myCourses = [...myCourses, detailed];
-            saveCoursesForTerm(selectedTerm, myCourses);
+            if (!myCourses.some(c => c.course_code.trim().toUpperCase() === normCode && (c.section || "01").trim() === normSec)) {
+              myCourses = [...myCourses, detailed];
+              saveCoursesForTerm(selectedTerm, myCourses);
+            }
             return;
           }
         }
       } catch (e) {
         console.error("Failed to load full course slots, using search payload", e);
       }
-      myCourses = [...myCourses, course as CoursePlannerItem];
-      saveCoursesForTerm(selectedTerm, myCourses);
+      if (!myCourses.some(c => c.course_code.trim().toUpperCase() === normCode && (c.section || "01").trim() === normSec)) {
+        myCourses = [...myCourses, course as CoursePlannerItem];
+        saveCoursesForTerm(selectedTerm, myCourses);
+      }
     }
   }
 
   function removeCourse(id: number | string | null | undefined, code?: string | null, sec?: string | null) {
+    const normCode = code ? code.trim().toUpperCase() : null;
+    const normSec = sec ? sec.trim() : null;
     myCourses = myCourses.filter(c => {
+      if (normCode && c.course_code.trim().toUpperCase() === normCode) {
+        if (!normSec || (c.section || "01").trim() === normSec) return false;
+      }
       if (id != null && c.id != null && String(c.id) === String(id)) return false;
-      if (code && sec && c.course_code === code && c.section === sec) return false;
-      if (id != null && !code && String(c.id) === String(id)) return false;
       return true;
     });
     saveCoursesForTerm(selectedTerm, myCourses);
@@ -164,13 +181,20 @@
     }
   }
 
+  function toggleSlotDisabled(course: CoursePlannerItem, slotIndex: number) {
+    if (!course.slots || !course.slots[slotIndex]) return;
+    course.slots[slotIndex].disabled = !course.slots[slotIndex].disabled;
+    myCourses = [...myCourses];
+    saveCoursesForTerm(selectedTerm, myCourses);
+  }
+
   // Memoized Timetable Map
   const scheduleMatrix = $derived.by(() => {
     const map = new Map<string, ScheduledSlotItem[]>();
     for (const c of myCourses) {
       if (!c || !c.slots) continue;
       for (const s of c.slots) {
-        if (!s || !s.day_code || !s.slot_hour) continue;
+        if (!s || !s.day_code || !s.slot_hour || s.disabled) continue;
         const key = `${s.day_code}_${s.slot_hour}`;
         const roomStr = s.room_name || (s.room ? s.room.name : (s.room_id ? `Room ${s.room_id}` : "N/A"));
         const loc = resolveRoomLocation(roomStr, s.room?.building);
@@ -235,7 +259,7 @@
     return scheduleMatrix.get(`${day}_${hour}`) || [];
   }
 
-  function isLabOrPS(slotType: string) {
+  function isLabOrPS(slotType?: string | null) {
     if (!slotType) return false;
     const type = slotType.toLowerCase();
     return type.includes("lab") || type.includes("ps") || type.includes("practice");
@@ -329,22 +353,22 @@
   <!-- Content Body -->
   <div class="flex-1 flex flex-col lg:flex-row gap-4 sm:gap-6 min-h-0 overflow-hidden">
     <!-- Left Sidebar: Search & List -->
-    <aside class="w-full lg:w-80 flex flex-col space-y-4 shrink-0 overflow-y-auto pr-0 lg:pr-1 custom-scrollbar {mobileTab === 'courses' ? 'flex' : 'hidden lg:flex'}">
+    <aside class="w-full lg:w-96 xl:w-[420px] flex flex-col space-y-4 shrink-0 min-h-0 {mobileTab === 'courses' ? 'flex' : 'hidden lg:flex'}">
       <!-- Search Box -->
-      <div class="bg-white p-4 rounded-xl border border-[#e5e0d8] shadow-2xs space-y-3 dark:bg-[#121827] dark:border-[#1e293b]">
+      <div class="bg-white p-4 rounded-xl border border-[#e5e0d8] shadow-2xs space-y-3 shrink-0 dark:bg-[#121827] dark:border-[#1e293b]">
         <div class="relative">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-[#525f7f]" size={15} />
           <input 
             type="text" 
             bind:value={searchQuery}
             oninput={handleInput}
-            placeholder="Search courses to add..."
-            class="w-full pl-9 pr-3 py-2 bg-[#faf8f5] border border-[#e5e0d8] rounded-lg text-xs outline-none focus:ring-1 focus:ring-[#002d72] focus:border-[#002d72] dark:bg-[#0a0e1a] dark:border-[#1e293b] dark:text-white"
+            placeholder="Search courses by code or title (e.g. MIS 131, AD 211)..."
+            class="w-full pl-9 pr-3 py-2.5 bg-[#faf8f5] border border-[#e5e0d8] rounded-lg text-xs sm:text-sm outline-none focus:ring-2 focus:ring-[#002d72]/20 focus:border-[#002d72] dark:bg-[#0a0e1a] dark:border-[#1e293b] dark:text-white transition-all shadow-2xs"
           />
         </div>
 
         {#if searchResults.length > 0}
-          <div class="space-y-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+          <div class="space-y-2 max-h-72 sm:max-h-80 overflow-y-auto pr-1 custom-scrollbar">
             {#each searchResults as course}
               {@const isAdded = myCourses.some(c => (c.id != null && course.id != null && String(c.id) === String(course.id)) || (c.course_code === course.course_code && c.section === course.section))}
               <button 
@@ -374,9 +398,9 @@
         {/if}
       </div>
 
-      <!-- Selected List -->
-      <div class="bg-white p-4 rounded-xl border border-[#e5e0d8] shadow-2xs flex-1 space-y-3 dark:bg-[#121827] dark:border-[#1e293b]">
-        <div class="flex items-center justify-between px-1">
+      <!-- Selected List (Enrolled Schedule with Dynamic Height) -->
+      <div class="bg-white p-4 rounded-xl border border-[#e5e0d8] shadow-2xs flex-1 min-h-0 flex flex-col space-y-3 dark:bg-[#121827] dark:border-[#1e293b]">
+        <div class="flex items-center justify-between px-1 shrink-0">
           <h3 class="font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">Enrolled Schedule ({myCourses.length})</h3>
           {#if myCourses.length > 0}
             <div class="flex items-center space-x-2">
@@ -400,7 +424,7 @@
           {/if}
         </div>
 
-        <div class="space-y-2 max-h-72 lg:max-h-none overflow-y-auto pr-1 custom-scrollbar">
+        <div class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
           {#each myCourses as course}
             <div class="p-3 bg-[#faf8f5] border border-[#e5e0d8] rounded-lg group relative dark:bg-[#0a0e1a] dark:border-[#1e293b]">
               <div class="flex items-center space-x-2">
@@ -408,6 +432,33 @@
                 <div class="font-mono text-[10px] text-[#525f7f] dark:text-slate-400">Sec {course.section}</div>
               </div>
               <div class="font-serif text-xs text-[#161e2e] dark:text-slate-300 mt-1 pr-6">{course.title}</div>
+
+              {#if course.slots && course.slots.length > 0}
+                <div class="mt-2 pt-2 border-t border-black/5 dark:border-white/5">
+                  <div class="font-mono text-[8px] font-semibold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider mb-1">
+                    Hours (click to toggle):
+                  </div>
+                  <div class="flex flex-wrap gap-1">
+                    {#each course.slots as slot, sIdx}
+                      {@const isSpecial = isLabOrPS(slot.slot_title)}
+                      <button
+                        type="button"
+                        onclick={() => toggleSlotDisabled(course, sIdx)}
+                        class="font-mono text-[9px] px-1.5 py-0.5 rounded border transition-all cursor-pointer select-none
+                        {slot.disabled 
+                          ? 'opacity-35 line-through bg-slate-100 border-slate-200 text-slate-400 dark:bg-slate-800/40 dark:border-slate-800 dark:text-slate-600' 
+                          : isSpecial 
+                            ? 'bg-[#c5a059]/15 border-[#c5a059]/30 text-[#9a7632] dark:bg-[#c5a059]/20 dark:border-[#c5a059]/40 dark:text-[#e5a823]' 
+                            : 'bg-[#002d72]/10 border-[#002d72]/20 text-[#002d72] dark:bg-[#8cc8ea]/15 dark:border-[#8cc8ea]/30 dark:text-[#8cc8ea]'}"
+                        title="{slot.disabled ? 'Click to re-enable slot on timetable' : `Click to hide this slot from timetable${isSpecial ? ' (e.g. alternate lab/PS section)' : ''}`}"
+                      >
+                        {slot.day_code} {slot.slot_hour} {isSpecial ? '(Lab)' : ''}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
               <button 
                 onclick={() => removeCourse(course.id, course.course_code, course.section)}
                 class="absolute top-2 right-2 p-1 text-[#525f7f] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded transition-colors cursor-pointer"

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey, func, Index
+from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey, func, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -34,6 +34,7 @@ class Course(Base):
     __table_args__ = (
         Index("idx_courses_lookup", "term_id", "course_code", "section"),
         Index("idx_courses_term_dept", "term_id", "dept_kisaadi"),
+        UniqueConstraint("term_id", "course_code", "section", name="uq_courses_term_code_section"),
     )
     id = Column(Integer, primary_key=True, index=True)
     term_id = Column(String(15), ForeignKey("terms.id"), index=True)

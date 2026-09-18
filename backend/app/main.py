@@ -119,9 +119,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Meilisearch setup/configuration encountered an issue on startup: %s", e)
 
-    # 3. Start background scraper sync on boot to discover new terms immediately
-    import threading
-    threading.Thread(target=_run_scraper_sync_job, kwargs={"mode": "incremental"}, daemon=True).start()
+    # 3. Start background scraper sync on boot only if explicitly enabled (sync_worker handles daemon sync in cluster)
+    if os.getenv("ENABLE_BOOT_SYNC", "").lower() in ("true", "1", "yes"):
+        import threading
+        threading.Thread(target=_run_scraper_sync_job, kwargs={"mode": "incremental"}, daemon=True).start()
 
     try:
         yield
