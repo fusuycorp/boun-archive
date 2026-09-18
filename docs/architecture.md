@@ -6,7 +6,7 @@ This document describes the technical architecture, database schemas, background
 
 ## 1. High-Level System Architecture
 
-The BOUN Archive is structured as a containerized microservice system optimized for Docker Compose and Dokploy deployments.
+The BOUN Archive is structured as a containerized microservice system optimized for Docker Compose and container cluster orchestration deployments.
 
 ```mermaid
 graph TD

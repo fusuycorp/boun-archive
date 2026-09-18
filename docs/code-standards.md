@@ -69,7 +69,7 @@ This document defines the backend and frontend coding standards for the BOUN Arc
 *   **Dark Mode**: Implement native dark mode classes (`dark:...`). Toggle the class on `document.documentElement` inside a single layout effect.
 
 ### C. Client-Side State & URL Mirroring
-*   **Shareable Filters**: Any view filtering directories (e.g., [search/+page.svelte](file:///home/devhax/projects/fusuyfusuy/boun-archive/frontend/src/routes/search/+page.svelte)) must sync search queries, offsets, and filters to URL parameters using SvelteKit's `$page.url.searchParams`. Avoid hiding state purely in memory or `sessionStorage` unless it represents a layout layout state.
+*   **Shareable Filters**: Any view filtering directories (e.g., [search/+page.svelte](../frontend/src/routes/search/+page.svelte)) must sync search queries, offsets, and filters to URL parameters using SvelteKit's `$page.url.searchParams`. Avoid hiding state purely in memory or `sessionStorage` unless it represents a layout layout state.
 *   **User Preferences**: Use `localStorage` for weekly planner courses and light/dark theme choices.
 
 ---

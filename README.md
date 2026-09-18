@@ -6,18 +6,18 @@ An advanced academic analytics platform designed to analyze, visualize, and fore
 
 ## 1. System Architecture
 
-The BOUN Archive is designed as a distributed microservice system, containerized via Docker and optimized for both local development (`docker-compose`) and production high-concurrency deployment (Docker Swarm/Dokploy).
+The BOUN Archive is designed as a distributed microservice system, containerized via Docker and optimized for both local development (`docker compose`) and production high-concurrency deployment (Docker Swarm or container cluster orchestration).
 
 ```mermaid
 graph TD
     User([User Browser]) -->|HTTP/HTTPS| Nginx[Nginx Reverse Proxy: Port 80/443]
     
-    subgraph Nodes Deployment
-        subgraph Frontend Node: tanri
+    subgraph System Tiers
+        subgraph Web Tier
             Nginx -->|Proxy / | SvelteKit[SvelteKit Web App: Port 3000]
         end
         
-        subgraph Backend Node: worky
+        subgraph API & Data Tier
             Nginx -->|Proxy /api/ | FastAPI[FastAPI Backend: Port 8000]
             FastAPI -->|Cache Reads/Writes| Redis[(Redis Cache: Port 6379)]
             FastAPI -->|Course Search & Facets| Meilisearch[(Meilisearch: Port 7700)]
@@ -32,9 +32,9 @@ graph TD
     end
 ```
 
-### Infrastructure Nodes
-*   **`tanri` (Public-Facing Node)**: Hosts the Nginx reverse proxy and the SvelteKit frontend replicas. Optimized for network throughput and SSL termination.
-*   **`worky` (Data & Computational Node)**: Hosts the FastAPI app, PostgreSQL database, Meilisearch engine, and Redis cache. Optimized for CPU-heavy calculations and high-speed memory/disk IO.
+### System Tiers
+*   **Web Tier**: Hosts the Nginx reverse proxy and the SvelteKit frontend replicas. Optimized for high network throughput and SSL termination.
+*   **API & Data Tier**: Hosts the FastAPI app, PostgreSQL database, Meilisearch engine, and Redis cache. Optimized for analytical calculations and high-speed memory/disk IO.
 
 ---
 

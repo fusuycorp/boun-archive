@@ -1,6 +1,6 @@
 # Environment Variables Reference
 
-These variables must be configured in the Dokploy Stack "Environment" tab.
+These variables can be configured in your `.env` file for local development or within your container orchestration stack environment (e.g., Docker Swarm, Kubernetes).
 
 ## Database (PostgreSQL)
 | Variable | Value | Description |

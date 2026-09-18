@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 import logging
 import meilisearch
@@ -498,11 +499,128 @@ def get_global_facets(db: Session = Depends(database.get_db)):
         logger.warning("Meilisearch facets error, falling back to PostgreSQL: %s", e)
         return _get_global_facets_from_db(db)
 
+# Canonical Building and Campus Topology for Boğaziçi University
+# Invariant: JF (John Freely Hall) is in Güney, EF (Education Faculty) is in Kuzey
+ROOM_LOCATION_REGISTRY = {
+    # Kuzey Kampüs (North)
+    "EF": ("Education Faculty", "Kuzey"),
+    "NH": ("New Hall", "Kuzey"),
+    "KB": ("Kare Blok", "Kuzey"),
+    "KBPCLAB": ("Kare Blok PC Lab", "Kuzey"),
+    "KBZ": ("Kare Blok Basement", "Kuzey"),
+    "BM": ("Computer Engineering", "Kuzey"),
+    "ETA": ("ETA Building", "Kuzey"),
+    "ETAB": ("ETA Building Block B", "Kuzey"),
+    "ETB": ("ETA Building Block B", "Kuzey"),
+    "KP": ("Kuzey Park", "Kuzey"),
+    "KPARK": ("Kuzey Park", "Kuzey"),
+    "VY": ("Vedat Yerlici", "Kuzey"),
+    "VYKM": ("Vedat Yerlici Center", "Kuzey"),
+    "KYD": ("Kuzey YADYOK", "Kuzey"),
+    "SL": ("Student Labs", "Kuzey"),
+
+    # Güney Kampüs (South)
+    "JF": ("John Freely Hall", "Güney"),
+    "TB": ("Basic Sciences (Anderson)", "Güney"),
+    "TBA": ("Anderson Hall", "Güney"),
+    "TBD": ("Basic Sciences Block D", "Güney"),
+    "AND": ("Anderson Hall", "Güney"),
+    "IB": ("Washburn Hall (İİBF)", "Güney"),
+    "İB": ("Washburn Hall (İİBF)", "Güney"),
+    "M": ("Engineering Building", "Güney"),
+    "NB": ("Natuk Birkan", "Güney"),
+    "NBB": ("Natuk Birkan Block B", "Güney"),
+    "NBZ": ("Natuk Birkan Basement", "Güney"),
+    "ALH": ("Albert Long Hall", "Güney"),
+    "DODGE": ("Dodge Hall Gym", "Güney"),
+    "DOGE": ("Dodge Hall Gym", "Güney"),
+    "SOC": ("Sociology Seminar Rooms", "Güney"),
+    "ATA": ("Atatürk Institute", "Güney"),
+    "GYD": ("Güney YADYOK", "Güney"),
+    "SC": ("Science Hall", "Güney"),
+    "FED": ("Arts & Sciences", "Güney"),
+
+    # Hisar Kampüs
+    "HKB": ("Hisar Campus Block B", "Hisar"),
+    "HKC": ("Hisar Campus Block C", "Hisar"),
+    "HKA": ("Hisar Campus Block A", "Hisar"),
+    "HKD": ("Hisar Campus Block D", "Hisar"),
+    "HB": ("Hisar Block B", "Hisar"),
+    "HC": ("Hisar Block C", "Hisar"),
+    "HA": ("Hisar Block A", "Hisar"),
+    "HD": ("Hisar Block D", "Hisar"),
+    "HH": ("Hisar Hall", "Hisar"),
+    "HİSAR": ("Hisar Campus", "Hisar"),
+
+    # Uçaksavar Kampüs
+    "GKM": ("Garanti Culture Center", "Uçaksavar"),
+    "UÇAKSAVAR": ("Uçaksavar Athletic Field", "Uçaksavar"),
+    "UÇAKS": ("Uçaksavar Athletic Field", "Uçaksavar"),
+
+    # Kandilli Kampüs
+    "KANDİLLİ": ("Kandilli Observatory", "Kandilli"),
+    "KOERI": ("Kandilli Observatory", "Kandilli"),
+    "BME": ("Biomedical Institute", "Kandilli"),
+
+    # Sarıtepe Kampüs (Kilyos)
+    "KLY": ("Sarıtepe Prep Hall", "Kilyos"),
+    "KİLYOS": ("Sarıtepe Campus", "Kilyos"),
+    "YYD": ("Sarıtepe YADYOK", "Kilyos"),
+}
+
+def resolve_room_location(room_name: Optional[str], building: Optional[str] = None) -> tuple[str, str]:
+    if not room_name or not room_name.strip():
+        return ("General / Campus", "Campus")
+    clean = room_name.strip()
+    upper = clean.upper()
+
+    if any(tag in upper for tag in ["ONLINE", "UZAKTAN", "VIRTUAL", "WEB"]):
+        return ("Online / Remote", "Virtual")
+
+    match = re.match(r"^([A-Za-zÇĞİÖŞÜçğıöşü]+)", clean)
+    if match:
+        prefix = match.group(1).upper()
+        if prefix in ROOM_LOCATION_REGISTRY:
+            reg_bldg, reg_campus = ROOM_LOCATION_REGISTRY[prefix]
+            return (building.strip() if building and building.strip() else reg_bldg, reg_campus)
+
+    if building and building.strip():
+        b_clean = building.strip()
+        b_upper = b_clean.upper()
+        if any(w in b_upper for w in ["NEW HALL", "KARE", "EDUCATION", "EĞİTİM", "KUZEY", "COMPUTER", "ETA", "YERLICI"]):
+            return (b_clean, "Kuzey")
+        if any(w in b_upper for w in ["FREELY", "JOHN", "ANDERSON", "WASHBURN", "ENGINEERING", "NATUK", "GÜNEY", "SOUTH"]):
+            return (b_clean, "Güney")
+        if "HISAR" in b_upper:
+            return (b_clean, "Hisar")
+        if "UÇAKSAVAR" in b_upper or "GARANTI" in b_upper:
+            return (b_clean, "Uçaksavar")
+        if "KANDİLLİ" in b_upper or "KANDILLI" in b_upper:
+            return (b_clean, "Kandilli")
+        if "KİLYOS" in b_upper or "SARITEPE" in b_upper:
+            return (b_clean, "Kilyos")
+        return (b_clean, "Campus")
+
+    if upper.startswith("H"):
+        return (f"Hisar Building ({clean})", "Hisar")
+    if upper.startswith("K") and not upper.startswith("KAND") and not upper.startswith("KİL"):
+        return (f"Kuzey Building ({clean})", "Kuzey")
+    if upper.startswith(("M", "T")):
+        return (f"Güney Building ({clean})", "Güney")
+
+    return (f"Building {match.group(1).upper()}" if match else "General / Campus", "Campus")
+
+def infer_building_from_room(room_name: Optional[str], building: Optional[str] = None) -> str:
+    bldg, _ = resolve_room_location(room_name, building)
+    return bldg
+
 @app.get("/v1/analytics/ghost-schedule/{term:path}")
 @cache(expire=3600)
 def get_ghost_schedule(
     term: str, 
     dept: List[str] = Query(None),
+    building: List[str] = Query(None),
+    campus: List[str] = Query(None),
     db: Session = Depends(database.get_db)
 ):
     target_term = term
@@ -522,6 +640,7 @@ def get_ghost_schedule(
         models.CourseSlot.day_code,
         models.CourseSlot.slot_hour,
         models.Room.name.label("room_name"),
+        models.Room.building.label("building"),
         models.Course.course_code,
         models.Course.dept_kisaadi
     ).join(models.Course).join(models.Room).filter(models.Course.term_id == target_term)
@@ -532,8 +651,28 @@ def get_ghost_schedule(
         
     results = query.all()
     
-    # Convert Row objects to dictionaries for JSON serialization
-    return [r._asdict() for r in results]
+    payload = []
+    for r in results:
+        bldg, cmp_name = resolve_room_location(r.room_name, r.building)
+        payload.append({
+            "day_code": r.day_code,
+            "slot_hour": r.slot_hour,
+            "room_name": r.room_name,
+            "building": bldg,
+            "campus": cmp_name,
+            "course_code": r.course_code,
+            "dept_kisaadi": r.dept_kisaadi,
+        })
+
+    if building:
+        clean_b = {b.strip().lower() for b in building if b and b.strip()}
+        payload = [item for item in payload if item["building"].lower() in clean_b]
+
+    if campus:
+        clean_c = {c.strip().lower() for c in campus if c and c.strip()}
+        payload = [item for item in payload if item["campus"].lower() in clean_c]
+
+    return payload
 
 # Macro Analytics Endpoints
 @app.get("/v1/analytics/macro/departments-evolution")

@@ -74,6 +74,8 @@ export interface GhostScheduleItem {
   day_code: string;
   slot_hour: number;
   room_name: string;
+  building?: string | null;
+  campus?: string | null;
   course_code: string;
   dept_kisaadi: string;
 }

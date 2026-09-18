@@ -82,18 +82,18 @@ jobs:
           labels: ${{ steps.meta-frontend.outputs.labels }}
 
   deploy:
-    name: Trigger Dokploy Deployment
+    name: Trigger Remote Deployment
     needs: [build-backend, build-frontend]
     runs-on: [self-hosted, builder]
     steps:
-      - name: Trigger Dokploy Redeployment
+      - name: Trigger Cluster Redeployment
         env:
-          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL || 'https://dokploy.bogazici.app' }}
-          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-          DOKPLOY_COMPOSE_ID: ${{ secrets.DOKPLOY_COMPOSE_ID || 'FnoW3VW_TLpX8sXKPL60v' }}
+          DEPLOY_URL: ${{ secrets.DEPLOY_URL || secrets.DOKPLOY_URL }}
+          DEPLOY_API_KEY: ${{ secrets.DEPLOY_API_KEY || secrets.DOKPLOY_API_KEY }}
+          DEPLOY_STACK_ID: ${{ secrets.DEPLOY_STACK_ID || secrets.DOKPLOY_COMPOSE_ID }}
         run: |
-          echo "Triggering Dokploy Compose redeployment..."
-          curl -f -s -S -X POST "$DOKPLOY_URL/api/compose.redeploy" \
-            -H "x-api-key: $DOKPLOY_API_KEY" \
+          echo "Triggering cluster redeployment..."
+          curl -f -s -S -X POST "$DEPLOY_URL/api/compose.redeploy" \
+            -H "x-api-key: $DEPLOY_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"composeId\": \"$DOKPLOY_COMPOSE_ID\"}"
+            -d "{\"composeId\": \"$DEPLOY_STACK_ID\"}"

@@ -96,7 +96,10 @@ def test_ghost_schedule_term_format_flexibility(isolated_boundary_env):
     # Slash term
     res_slash = client.get("/v1/analytics/ghost-schedule/2026/2027-1")
     assert res_slash.status_code == 200
-    assert len(res_slash.json()) == 1
+    slash_data = res_slash.json()
+    assert len(slash_data) == 1
+    assert slash_data[0]["building"] == "New Hall"
+    assert slash_data[0]["room_name"] == "NH 101"
 
     # Hyphen term
     res_dash = client.get("/v1/analytics/ghost-schedule/2026-2027-1")
@@ -107,6 +110,118 @@ def test_ghost_schedule_term_format_flexibility(isolated_boundary_env):
     res_dept = client.get("/v1/analytics/ghost-schedule/2026/2027-1?dept=mis")
     assert res_dept.status_code == 200
     assert len(res_dept.json()) == 1
+
+    # Building filter parameter
+    res_bldg = client.get("/v1/analytics/ghost-schedule/2026/2027-1?building=New Hall")
+    assert res_bldg.status_code == 200
+    assert len(res_bldg.json()) == 1
+
+    res_bldg_none = client.get("/v1/analytics/ghost-schedule/2026/2027-1?building=NonExistent")
+    assert res_bldg_none.status_code == 200
+    assert len(res_bldg_none.json()) == 0
+
+
+def test_ghost_schedule_building_fallback_inference(isolated_boundary_env):
+    client = isolated_boundary_env["client"]
+    db_session = isolated_boundary_env["db"]
+
+    # Room without explicit building column
+    room_kb = models.Room(id=20, name="KB 433", building=None, capacity=50)
+    course_kb = models.Course(
+        id=20,
+        term_id="2026/2027-1",
+        dept_kisaadi="MIS",
+        course_code="MIS 202",
+        section="01",
+        title="DATA STRUCTURES",
+        instructor_id=1,
+        credits=3,
+        ects=5,
+        delivery_method="In-person"
+    )
+    slot_kb = models.CourseSlot(
+        course_id=20,
+        day_code="T",
+        slot_hour=3,
+        slot_title="DATA STRUCTURES",
+        room_id=20
+    )
+    db_session.add_all([room_kb, course_kb, slot_kb])
+    db_session.commit()
+
+    res = client.get("/v1/analytics/ghost-schedule/2026/2027-1?dept=MIS")
+    assert res.status_code == 200
+    items = res.json()
+    kb_items = [it for it in items if it["room_name"] == "KB 433"]
+    assert len(kb_items) == 1
+    # Should infer "Kare Blok" from "KB 433"
+    assert kb_items[0]["building"] == "Kare Blok"
+    assert kb_items[0]["campus"] == "Kuzey"
+
+
+def test_ghost_schedule_jf_south_and_ef_north_campus_invariants(isolated_boundary_env):
+    client = isolated_boundary_env["client"]
+    db_session = isolated_boundary_env["db"]
+
+    # Invariants: JF is in Güney, EF is in Kuzey
+    room_jf = models.Room(id=30, name="JF 108", building=None, capacity=40)
+    course_jf = models.Course(
+        id=30,
+        term_id="2026/2027-1",
+        dept_kisaadi="PHYS",
+        course_code="PHYS 101",
+        section="01",
+        title="PHYSICS I",
+        instructor_id=1,
+        credits=4,
+        ects=6,
+        delivery_method="In-person"
+    )
+    slot_jf = models.CourseSlot(course_id=30, day_code="W", slot_hour=1, slot_title="PHYSICS", room_id=30)
+
+    room_ef = models.Room(id=31, name="EF 206", building=None, capacity=60)
+    course_ef = models.Course(
+        id=31,
+        term_id="2026/2027-1",
+        dept_kisaadi="ED",
+        course_code="ED 101",
+        section="01",
+        title="INTRO TO EDUCATION",
+        instructor_id=1,
+        credits=3,
+        ects=5,
+        delivery_method="In-person"
+    )
+    slot_ef = models.CourseSlot(course_id=31, day_code="W", slot_hour=2, slot_title="EDUCATION", room_id=31)
+
+    db_session.add_all([room_jf, course_jf, slot_jf, room_ef, course_ef, slot_ef])
+    db_session.commit()
+
+    res = client.get("/v1/analytics/ghost-schedule/2026/2027-1")
+    assert res.status_code == 200
+    items = res.json()
+
+    jf_slot = next(it for it in items if it["room_name"] == "JF 108")
+    assert jf_slot["building"] == "John Freely Hall"
+    assert jf_slot["campus"] == "Güney"
+
+    ef_slot = next(it for it in items if it["room_name"] == "EF 206")
+    assert ef_slot["building"] == "Education Faculty"
+    assert ef_slot["campus"] == "Kuzey"
+
+    # Test campus filter parameter
+    res_guney = client.get("/v1/analytics/ghost-schedule/2026/2027-1?campus=Güney")
+    assert res_guney.status_code == 200
+    guney_items = res_guney.json()
+    assert any(it["room_name"] == "JF 108" for it in guney_items)
+    assert not any(it["room_name"] == "EF 206" for it in guney_items)
+
+    res_kuzey = client.get("/v1/analytics/ghost-schedule/2026/2027-1?campus=Kuzey")
+    assert res_kuzey.status_code == 200
+    kuzey_items = res_kuzey.json()
+    assert any(it["room_name"] == "EF 206" for it in kuzey_items)
+    assert not any(it["room_name"] == "JF 108" for it in kuzey_items)
+
 
 
 def test_scraper_upsert_normalizes_lowercase_department(isolated_boundary_env):

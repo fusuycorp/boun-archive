@@ -29,14 +29,14 @@ This document evaluates the feature set of the BOUN Archive platform, categorizi
    - *Impact*: Users cannot view schedules for classrooms beyond the first 50.
 3. **Duplicated Utility CSS**:
    - `.custom-scrollbar` and `.no-scrollbar` classes are copy-pasted into `<style>` tags across 5+ route files.
-   - *Fix*: Centralize inside [`frontend/src/routes/layout.css`](file:///home/devhax/projects/fusuyfusuy/boun-archive/frontend/src/routes/layout.css).
+   - *Fix*: Centralize inside [`frontend/src/routes/layout.css`](../frontend/src/routes/layout.css).
 4. **Loose TypeScript Typing**:
    - Ubiquitous use of `$state<any>()` and implicit `any` in API handling.
    - *Fix*: Define typed contracts in `frontend/src/lib/types.ts`.
 
 ### B. Backend Bottlenecks & Inefficiencies
 1. **In-Memory Meilisearch Indexing**:
-   - [`scripts/sync_meilisearch.py`](file:///home/devhax/projects/fusuyfusuy/boun-archive/scripts/sync_meilisearch.py) loads the entire `Course` table into RAM with `.all()` prior to chunking.
+   - [`scripts/sync_meilisearch.py`](../scripts/sync_meilisearch.py) loads the entire `Course` table into RAM with `.all()` prior to chunking.
    - *Fix*: Replace with `.yield_per(1000)` streaming.
 2. **Python-Side Aggregations**:
    - Instructor legacy calculations pull raw records into Python memory and run loops with `Counter`.

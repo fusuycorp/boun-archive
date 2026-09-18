@@ -4,11 +4,14 @@
   import { API_BASE } from "$lib/config";
   import { generateICS, downloadICS } from "$lib/ical";
   import { safeParsePlannerCourses, type CoursePlannerItem } from "$lib/schemas/planner";
+  import { resolveRoomLocation, isInterCampusCommute } from "$lib/campus";
   import type { Term, SearchCourseHit } from "$lib/types";
 
   type ScheduledSlotItem = CoursePlannerItem & {
     slot_type: string;
     room_name: string;
+    building: string;
+    campus: string;
   };
 
   // State
@@ -170,10 +173,13 @@
         if (!s || !s.day_code || !s.slot_hour) continue;
         const key = `${s.day_code}_${s.slot_hour}`;
         const roomStr = s.room_name || (s.room ? s.room.name : (s.room_id ? `Room ${s.room_id}` : "N/A"));
+        const loc = resolveRoomLocation(roomStr, s.room?.building);
         const item: ScheduledSlotItem = {
           ...c,
           slot_type: s.slot_title || "Lecture",
-          room_name: roomStr || "N/A"
+          room_name: roomStr || "N/A",
+          building: loc.building,
+          campus: loc.campus
         };
         if (!map.has(key)) {
           map.set(key, [item]);
@@ -183,6 +189,46 @@
       }
     }
     return map;
+  });
+
+  interface CommuteRisk {
+    day: string;
+    hourFrom: number;
+    hourTo: number;
+    courseFrom: string;
+    roomFrom: string;
+    campusFrom: string;
+    courseTo: string;
+    roomTo: string;
+    campusTo: string;
+  }
+
+  const commuteRisks = $derived.by(() => {
+    const risks: CommuteRisk[] = [];
+    for (const day of days) {
+      for (let h = 1; h < 14; h++) {
+        const fromCourses = scheduleMatrix.get(`${day}_${h}`) || [];
+        const toCourses = scheduleMatrix.get(`${day}_${h + 1}`) || [];
+        for (const fromC of fromCourses) {
+          for (const toC of toCourses) {
+            if (isInterCampusCommute(fromC.campus, toC.campus)) {
+              risks.push({
+                day,
+                hourFrom: h,
+                hourTo: h + 1,
+                courseFrom: fromC.course_code,
+                roomFrom: fromC.room_name,
+                campusFrom: fromC.campus,
+                courseTo: toC.course_code,
+                roomTo: toC.room_name,
+                campusTo: toC.campus
+              });
+            }
+          }
+        }
+      }
+    }
+    return risks;
   });
 
   function getCoursesAt(day: string, hour: number) {
@@ -383,6 +429,26 @@
 
     <!-- Main Calendar Grid -->
     <div class="flex-1 bg-white rounded-xl border border-[#e5e0d8] shadow-2xs overflow-hidden flex flex-col min-w-0 dark:bg-[#121827] dark:border-[#1e293b] {mobileTab === 'schedule' ? 'flex' : 'hidden lg:flex'}">
+      {#if commuteRisks.length > 0}
+        <!-- Dash of Death Inter-Campus Commute Alert Banner -->
+        <div class="p-3 bg-amber-500/10 border-b border-amber-500/30 flex items-start space-x-2.5 dark:bg-amber-950/40 dark:border-amber-500/30">
+          <AlertTriangle size={15} class="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div class="space-y-1">
+            <div class="font-mono text-xs font-bold text-amber-900 dark:text-amber-200 uppercase tracking-tight flex items-center gap-1.5 flex-wrap">
+              <span>"Dash of Death" Inter-Campus Commute Alert</span>
+              <span class="text-[9px] bg-amber-600 text-white px-1.5 py-0.2 rounded font-bold uppercase">{commuteRisks.length} {commuteRisks.length === 1 ? 'Risk' : 'Risks'}</span>
+            </div>
+            <div class="text-[11px] font-mono text-amber-800 dark:text-amber-300 space-y-0.5">
+              {#each commuteRisks as r}
+                <div>
+                  • <strong>{r.day} Hour {r.hourFrom}→{r.hourTo}:</strong> {r.courseFrom} ({r.campusFrom} Kampüs, {r.roomFrom}) → {r.courseTo} ({r.campusTo} Kampüs, {r.roomTo}) in 10 minutes.
+                </div>
+              {/each}
+            </div>
+          </div>
+        </div>
+      {/if}
+
       <div class="overflow-auto flex-1 custom-scrollbar">
         <table class="w-full border-collapse table-fixed min-w-[620px]">
           <thead class="sticky top-0 z-20 bg-[#f3efe6]/90 border-b border-[#e5e0d8] dark:bg-[#0a0e1a] dark:border-[#1e293b]">
@@ -415,10 +481,10 @@
                             <div class="font-mono font-bold truncate">{course.course_code}</div>
                             <div class="font-mono text-[8px] opacity-60">S{course.section}</div>
                           </div>
-                          <!-- Display room name directly inside slot -->
+                          <!-- Display room name and campus directly inside slot -->
                           <div class="font-mono text-[8px] opacity-75 mt-0.5 truncate flex items-center space-x-0.5">
                             <MapPin size={8} class="shrink-0" />
-                            <span>{course.room_name}</span>
+                            <span>{course.room_name} ({course.campus})</span>
                           </div>
                           <div class="flex justify-between items-center mt-0.5 border-t border-black/5 dark:border-white/5 pt-0.5 font-mono text-[7px] sm:text-[8px] uppercase">
                             <span class="opacity-75">{course.slot_type || 'Lecture'}</span>
