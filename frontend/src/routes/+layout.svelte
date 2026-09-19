@@ -182,9 +182,15 @@
               50y
             </span>
           </div>
-          <span class="font-sans text-[9px] font-semibold uppercase tracking-widest text-[#525f7f] dark:text-slate-400 mt-0.5">
-            Boğaziçi University
-          </span>
+          <div class="flex items-center gap-1.5 mt-0.5">
+            <span class="font-sans text-[9px] font-semibold uppercase tracking-widest text-[#525f7f] dark:text-slate-400">
+              Boğaziçi University
+            </span>
+            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-mono text-[8px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 shadow-2xs">
+              <span class="w-1 h-1 rounded-full bg-amber-500 animate-pulse"></span>
+              Beta
+            </span>
+          </div>
         </div>
       </a>
 
@@ -284,7 +290,13 @@
         <img src="/logo.png" alt="BOUN Logo" class="h-9 w-9 rounded-lg shadow-2xs border border-[#e5e0d8] dark:border-[#1e293b] object-cover shrink-0" />
         <div>
           <h2 class="font-serif text-base font-bold text-[#002d72] tracking-tight leading-none dark:text-slate-50">BOUN Archive</h2>
-          <p class="font-sans text-[9px] text-[#525f7f] mt-1 uppercase tracking-widest font-semibold dark:text-slate-400">Academic Analytics</p>
+          <div class="flex items-center gap-1.5 mt-1">
+            <p class="font-sans text-[9px] text-[#525f7f] uppercase tracking-widest font-semibold dark:text-slate-400">Academic Analytics</p>
+            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-mono text-[8px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 shadow-2xs">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+              Beta
+            </span>
+          </div>
         </div>
       </div>
       <button 
