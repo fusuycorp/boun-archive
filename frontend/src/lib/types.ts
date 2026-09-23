@@ -113,9 +113,19 @@ export interface InstructorPreferredSlot {
   frequency: number;
 }
 
+export interface InstructorCourseSummary {
+  course_code: string;
+  title: string;
+  sections: string[];
+  terms_count: number;
+  latest_term: string;
+  total_offerings: number;
+}
+
 export interface InstructorHistoryItem {
   term: string;
   course_code: string;
+  section?: string | null;
   title: string;
 }
 
@@ -126,6 +136,7 @@ export interface InstructorLegacy {
   most_frequent_courses: Record<string, number>;
   preferred_slots: InstructorPreferredSlot[];
   history: InstructorHistoryItem[];
+  courses_summary?: InstructorCourseSummary[];
 }
 
 export interface DepartmentEvolution {
@@ -182,6 +193,7 @@ export interface CourseHistoryItem {
   section?: string;
   title?: string;
   instructor?: string;
+  instructor_id?: number | null;
   credits?: number;
   ects?: number;
   delivery_method?: string;

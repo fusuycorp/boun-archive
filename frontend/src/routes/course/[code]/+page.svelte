@@ -240,7 +240,17 @@
                     <User size={14} class="text-[#525f7f] mt-0.5 shrink-0" />
                     <div>
                       <p class="font-mono text-[9px] text-[#525f7f] uppercase tracking-wider">Instructor</p>
-                      <p class="text-xs sm:text-sm font-semibold text-[#161e2e] dark:text-slate-200">{section.instructor}</p>
+                      {#if section.instructor_id}
+                        <a href="/instructor/{section.instructor_id}" class="text-xs sm:text-sm font-semibold text-[#002d72] dark:text-[#8cc8ea] hover:underline transition-colors block">
+                          {section.instructor}
+                        </a>
+                      {:else if section.instructor && section.instructor !== 'TBA'}
+                        <a href="/instructors?q={encodeURIComponent(section.instructor)}" class="text-xs sm:text-sm font-semibold text-[#002d72] dark:text-[#8cc8ea] hover:underline transition-colors block">
+                          {section.instructor}
+                        </a>
+                      {:else}
+                        <p class="text-xs sm:text-sm font-semibold text-[#161e2e] dark:text-slate-200">{section.instructor || 'TBA'}</p>
+                      {/if}
                     </div>
                   </div>
 

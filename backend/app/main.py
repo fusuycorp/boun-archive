@@ -843,17 +843,55 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
     courses = db.query(models.Course).filter(models.Course.instructor_id == instructor_id).all()
     total_semesters = len(set([c.term_id for c in courses]))
 
+    courses_summary = {}
+    for c in courses:
+        code = " ".join((c.course_code or "").split())
+        if not code:
+            continue
+        if code not in courses_summary:
+            courses_summary[code] = {
+                "course_code": code,
+                "title": c.title or "",
+                "sections": set(),
+                "terms": set(),
+                "latest_term": c.term_id or "",
+                "count": 0
+            }
+        if c.section:
+            courses_summary[code]["sections"].add(c.section.strip())
+        if c.term_id:
+            courses_summary[code]["terms"].add(c.term_id)
+            if not courses_summary[code]["latest_term"] or c.term_id > courses_summary[code]["latest_term"]:
+                courses_summary[code]["latest_term"] = c.term_id
+                if c.title:
+                    courses_summary[code]["title"] = c.title
+        courses_summary[code]["count"] += 1
+
+    unique_courses = [
+        {
+            "course_code": v["course_code"],
+            "title": v["title"],
+            "sections": sorted(list(v["sections"])),
+            "terms_count": len(v["terms"]),
+            "latest_term": v["latest_term"],
+            "total_offerings": v["count"]
+        }
+        for v in sorted(courses_summary.values(), key=lambda x: x["count"], reverse=True)
+    ]
+
     return {
         "instructor_name": instructor.full_name,
         "total_semesters_taught": total_semesters,
         "total_courses_taught": len(courses),
         "most_frequent_courses": most_frequent,
         "preferred_slots": slots_count,
+        "courses_summary": unique_courses,
         "history": sorted([{
             "term": c.term_id,
-            "course_code": c.course_code,
+            "course_code": " ".join((c.course_code or "").split()),
+            "section": c.section.strip() if c.section else None,
             "title": c.title
-        } for c in courses], key=lambda x: x['term'], reverse=True)
+        } for c in courses], key=lambda x: (x['term'] or '', x['course_code'] or '', x['section'] or ''), reverse=True)
     }
 
 @app.get("/v1/terms", response_model=List[schemas.Term])
@@ -968,6 +1006,7 @@ def get_course_history(course_code: str, request: Request = None, db: Session = 
             "section": c.section,
             "title": c.title,
             "instructor": c.instructor.full_name if c.instructor else "TBA",
+            "instructor_id": c.instructor_id,
             "credits": c.credits,
             "ects": c.ects,
             "delivery_method": c.delivery_method,
