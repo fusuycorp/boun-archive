@@ -9,6 +9,7 @@
     LayoutGrid, 
     User, 
     CalendarDays, 
+    Calendar,
     BookOpen,
     Sun, 
     Moon,
@@ -26,11 +27,11 @@
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutGrid },
-    { href: "/search", label: "Search", icon: Search },
     { href: "/departments", label: "Departments", icon: BookOpen },
-    { href: "/calendar", label: "Weekly Planner", icon: CalendarDays },
-    { href: "/ghost-schedule", label: "Ghost Schedule", icon: History },
     { href: "/instructors", label: "Instructors", icon: User },
+    { href: "/calendar", label: "Course Planner", icon: CalendarDays },
+    { href: "/schedule", label: "Class Schedule", icon: Calendar },
+    { href: "/search", label: "Search", icon: Search },
   ];
 
   const scrapeFreshness = $derived.by(() => {

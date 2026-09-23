@@ -10,6 +10,7 @@ export const GET: RequestHandler = async ({ fetch }) => {
     { loc: `${baseUrl}/search`, priority: "0.9", changefreq: "daily" },
     { loc: `${baseUrl}/departments`, priority: "0.8", changefreq: "weekly" },
     { loc: `${baseUrl}/calendar`, priority: "0.8", changefreq: "weekly" },
+    { loc: `${baseUrl}/schedule`, priority: "0.8", changefreq: "weekly" },
     { loc: `${baseUrl}/ghost-schedule`, priority: "0.7", changefreq: "weekly" },
     { loc: `${baseUrl}/instructors`, priority: "0.8", changefreq: "weekly" },
   ];
