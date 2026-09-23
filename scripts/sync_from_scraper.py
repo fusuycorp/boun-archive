@@ -1035,6 +1035,93 @@ def _release_sync_lock(session, lock_id: int = 4288192) -> None:
         pass
 
 
+def refresh_all_data(
+    session,
+    client: ScraperClient,
+    meili_index=None,
+    dry_run: bool = False
+) -> int:
+    """Completely refresh and standardize all academic course data from scraper.
+
+    1. Applies database hygiene (cleans invalid department codes containing digits,
+       normalizes legacy whitespace in course_code).
+    2. Synchronizes all clean academic departments from /departments.
+    3. Discovers all 146 terms and sequentially streams their precompiled bulk
+       exports from /feeds/exports/{term}/json.
+    4. Upserts courses and slot records with forward-filled contiguous rooms.
+    5. Syncs Meilisearch index in bulk batches.
+    6. Flushes Redis response cache.
+    """
+    logger.info("=== Starting Complete BOUN Archive Data Refresh ===")
+
+    # 1. Database Hygiene
+    if not dry_run:
+        logger.info("Applying database hygiene (cleaning bogus departments and course code spacing)...")
+        try:
+            session.execute(text("DELETE FROM departments WHERE kisaadi ~ '[0-9]'"))
+            session.execute(text("UPDATE courses SET course_code = regexp_replace(trim(course_code), '\\s+', ' ', 'g') WHERE course_code LIKE '%  %'"))
+            session.commit()
+        except Exception as e:
+            logger.warning("Database hygiene query notice: %s", e)
+            session.rollback()
+
+    # 2. Sync Departments from Scraper
+    logger.info("Fetching and syncing academic departments from scraper...")
+    scraper_depts = client.get("departments")
+    dept_cache: Dict[str, Department] = {d.kisaadi: d for d in session.query(Department).all()}
+    if scraper_depts and isinstance(scraper_depts, list):
+        for d_item in scraper_depts:
+            if not isinstance(d_item, dict):
+                continue
+            code = (d_item.get("code") or d_item.get("kisaadi") or "").strip().upper()
+            name = (d_item.get("name") or d_item.get("bolum") or "").strip()
+            if code and not any(ch.isdigit() for ch in code):
+                if code not in dept_cache:
+                    dept = Department(kisaadi=code, bolum=name or code)
+                    if not dry_run:
+                        session.add(dept)
+                    dept_cache[code] = dept
+        if not dry_run:
+            session.commit()
+            logger.info("Departments synchronized (%d total).", len(dept_cache))
+
+    # 3. Discover Terms
+    scraper_terms = client.get("terms")
+    if not scraper_terms or not isinstance(scraper_terms, list):
+        logger.error("Could not retrieve terms list from scraper.")
+        return 0
+
+    valid_terms = [t.strip() for t in scraper_terms if isinstance(t, str) and t.strip()]
+    logger.info("Discovered %d terms to refresh from upstream scraper.", len(valid_terms))
+
+    term_cache = {t.id: t for t in session.query(Term).all()}
+    for t_id in valid_terms:
+        ensure_term(session, t_id, term_cache)
+    if not dry_run:
+        session.commit()
+
+    # 4. Stream each term
+    total_upserted = 0
+    total_terms_count = len(valid_terms)
+
+    for idx, term_id in enumerate(valid_terms, start=1):
+        logger.info("[%d/%d] Refreshing term: %s...", idx, total_terms_count, term_id)
+        try:
+            count = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
+            total_upserted += count
+            if not dry_run:
+                _mark_term_reconciled(session, term_id, datetime.now(timezone.utc).isoformat())
+        except Exception as e:
+            logger.error("Error refreshing term %s: %s", term_id, e)
+
+    # 5. Flush Redis Cache
+    if not dry_run:
+        invalidate_redis_cache()
+
+    logger.info("=== Complete Data Refresh Finished (%d courses upserted across %d terms) ===", total_upserted, total_terms_count)
+    return total_upserted
+
+
 def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) -> None:
     session = session_factory()
     lock_acquired = _try_acquire_sync_lock(session)
@@ -1044,25 +1131,29 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
         return
 
     try:
-        sync_upstream_run_metadata(session, client, dry_run=args.dry_run)
-
-        # 1. Discover upstream terms and backfill any newly scraped semester offerings
-        synced_terms = sync_terms_and_new_offerings(session, client, meili_index=meili_index, dry_run=args.dry_run)
-
+        synced_terms = 0
         synced_backfill = 0
         synced_deltas = 0
         synced_quotas = 0
 
-        # 2. Run configured mode
-        if args.mode == "backfill":
-            synced_backfill = backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
-        elif args.mode == "full":
-            synced_backfill = backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
-            synced_deltas = sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
-            synced_quotas = sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+        if args.mode == "refresh-all":
+            synced_backfill = refresh_all_data(session, client, meili_index=meili_index, dry_run=args.dry_run)
         else:
-            synced_deltas = sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
-            synced_quotas = sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+            sync_upstream_run_metadata(session, client, dry_run=args.dry_run)
+
+            # 1. Discover upstream terms and backfill any newly scraped semester offerings
+            synced_terms = sync_terms_and_new_offerings(session, client, meili_index=meili_index, dry_run=args.dry_run)
+
+            # 2. Run configured mode
+            if args.mode == "backfill":
+                synced_backfill = backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
+            elif args.mode == "full":
+                synced_backfill = backfill_term(session, client, meili_index, term_id=args.term, dry_run=args.dry_run)
+                synced_deltas = sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
+                synced_quotas = sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
+            else:
+                synced_deltas = sync_deltas_feed(session, client, meili_index, limit=args.limit, dry_run=args.dry_run)
+                synced_quotas = sync_quota_feed(session, client, limit=args.limit, dry_run=args.dry_run)
 
         total_changes = synced_terms + synced_backfill + synced_deltas + synced_quotas
 
@@ -1107,8 +1198,8 @@ def invalidate_redis_cache() -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Ingest courses, deltas, and quota snapshots from boun-scrape")
-    parser.add_argument("--mode", choices=["incremental", "backfill", "full"], default="incremental",
-                        help="Sync mode: incremental (default), backfill (single term), or full")
+    parser.add_argument("--mode", choices=["incremental", "backfill", "full", "refresh-all"], default="incremental",
+                        help="Sync mode: incremental (default), backfill (single term), full, or refresh-all (all 146 terms)")
     parser.add_argument("--term", type=str, default="2026/2027-1", help="Target term for backfill mode")
     parser.add_argument("--limit", type=int, default=500, help="Batch limit per polling request")
     parser.add_argument("--dry-run", action="store_true", help="Perform dry run without committing database changes")

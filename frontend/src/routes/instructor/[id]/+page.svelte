@@ -74,7 +74,8 @@
       const title = (c.title || "").toLowerCase();
       const secMatch = c.sections.some(s => {
         const fullSec = `${code}.${s}`.toLowerCase();
-        return s.toLowerCase() === q || fullSec.includes(q);
+        const fullSecRaw = `${raw}.${s}`.toLowerCase();
+        return s.toLowerCase() === q || fullSec.includes(q) || fullSecRaw.includes(qNoSpace);
       });
       return code.includes(q) || raw.includes(qNoSpace) || title.includes(q) || secMatch;
     });
@@ -90,12 +91,14 @@
       const code = item.course_code.toLowerCase();
       const fullCode = `${item.course_code}${item.section ? `.${item.section}` : ""}`.toLowerCase();
       const rawCode = item.course_code.replace(/\s+/g, "").toLowerCase();
+      const rawFullCode = `${rawCode}${item.section ? `.${item.section}` : ""}`.toLowerCase();
       const title = (item.title || "").toLowerCase();
       const term = (item.term || "").toLowerCase();
       return (
         code.includes(q) ||
         rawCode.includes(qNoSpace) ||
         fullCode.includes(q) ||
+        rawFullCode.includes(qNoSpace) ||
         title.includes(q) ||
         term.includes(q) ||
         (sec && sec === q)
