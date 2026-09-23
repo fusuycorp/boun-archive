@@ -501,7 +501,7 @@ def get_global_facets(db: Session = Depends(database.get_db)):
         return _get_global_facets_from_db(db)
 
 # Canonical Building and Campus Topology for Boğaziçi University
-# Invariant: JF (John Freely Hall) is in Güney, EF (Education Faculty) is in Kuzey
+# Invariant: JF (John Freely Hall) is in Güney, EF (Education Faculty) is in Kuzey, HH (Hamlin Hall) is in Güney
 ROOM_LOCATION_REGISTRY = {
     # Kuzey Kampüs (North)
     "EF": ("Education Faculty", "Kuzey"),
@@ -513,21 +513,34 @@ ROOM_LOCATION_REGISTRY = {
     "ETA": ("ETA Building", "Kuzey"),
     "ETAB": ("ETA Building Block B", "Kuzey"),
     "ETB": ("ETA Building Block B", "Kuzey"),
+    "ET": ("ETA Building", "Kuzey"),
     "KP": ("Kuzey Park", "Kuzey"),
     "KPARK": ("Kuzey Park", "Kuzey"),
+    "PARK": ("Kuzey Park", "Kuzey"),
+    "PARK1": ("Kuzey Park", "Kuzey"),
+    "PARK2": ("Kuzey Park", "Kuzey"),
     "VY": ("Vedat Yerlici", "Kuzey"),
     "VYKM": ("Vedat Yerlici Center", "Kuzey"),
+    "VB": ("Vedat Yerlici", "Kuzey"),
     "KYD": ("Kuzey YADYOK", "Kuzey"),
     "SL": ("Student Labs", "Kuzey"),
+    "BİM": ("Bilgi İşlem Merkezi", "Kuzey"),
+    "BIM": ("Bilgi İşlem Merkezi", "Kuzey"),
+    "KGYM": ("Kuzey Spor Salonu", "Kuzey"),
 
     # Güney Kampüs (South)
     "JF": ("John Freely Hall", "Güney"),
+    "HH": ("Hamlin Hall", "Güney"),
+    "HAMLİN": ("Hamlin Hall", "Güney"),
+    "HAMLIN": ("Hamlin Hall", "Güney"),
     "TB": ("Basic Sciences (Anderson)", "Güney"),
     "TBA": ("Anderson Hall", "Güney"),
     "TBD": ("Basic Sciences Block D", "Güney"),
     "AND": ("Anderson Hall", "Güney"),
     "IB": ("Washburn Hall (İİBF)", "Güney"),
     "İB": ("Washburn Hall (İİBF)", "Güney"),
+    "İBRAHİM": ("İbrahim Bodur Oditoryumu", "Güney"),
+    "IBRAHIM": ("İbrahim Bodur Oditoryumu", "Güney"),
     "M": ("Engineering Building", "Güney"),
     "NB": ("Natuk Birkan", "Güney"),
     "NBB": ("Natuk Birkan Block B", "Güney"),
@@ -540,6 +553,16 @@ ROOM_LOCATION_REGISTRY = {
     "GYD": ("Güney YADYOK", "Güney"),
     "SC": ("Science Hall", "Güney"),
     "FED": ("Arts & Sciences", "Güney"),
+    "ÖFB": ("Öğrenci Faaliyetleri Binası", "Güney"),
+    "OFB": ("Öğrenci Faaliyetleri Binası", "Güney"),
+    "ÖZGER": ("Özger Arnas Salonu", "Güney"),
+    "OZGER": ("Özger Arnas Salonu", "Güney"),
+    "HÜLYA": ("Hülya Sanat Atölyesi", "Güney"),
+    "HULYA": ("Hülya Sanat Atölyesi", "Güney"),
+    "REVİR": ("Güney Revir", "Güney"),
+    "REVIR": ("Güney Revir", "Güney"),
+    "GÜNEY": ("Güney Kampüs", "Güney"),
+    "GUNEY": ("Güney Kampüs", "Güney"),
 
     # Hisar Kampüs
     "HKB": ("Hisar Campus Block B", "Hisar"),
@@ -550,32 +573,37 @@ ROOM_LOCATION_REGISTRY = {
     "HC": ("Hisar Block C", "Hisar"),
     "HA": ("Hisar Block A", "Hisar"),
     "HD": ("Hisar Block D", "Hisar"),
-    "HH": ("Hisar Hall", "Hisar"),
     "HİSAR": ("Hisar Campus", "Hisar"),
+    "HISAR": ("Hisar Campus", "Hisar"),
 
     # Uçaksavar Kampüs
     "GKM": ("Garanti Culture Center", "Uçaksavar"),
+    "AYHAN": ("Ayhan Şahenk Salonu", "Uçaksavar"),
     "UÇAKSAVAR": ("Uçaksavar Athletic Field", "Uçaksavar"),
     "UÇAKS": ("Uçaksavar Athletic Field", "Uçaksavar"),
+    "PARKE": ("Uçaksavar Spor Salonu", "Uçaksavar"),
 
     # Kandilli Kampüs
     "KANDİLLİ": ("Kandilli Observatory", "Kandilli"),
+    "KANDILLI": ("Kandilli Observatory", "Kandilli"),
     "KOERI": ("Kandilli Observatory", "Kandilli"),
     "BME": ("Biomedical Institute", "Kandilli"),
+    "AZ": ("Aziz Sancar Binası (BME)", "Kandilli"),
 
     # Sarıtepe Kampüs (Kilyos)
     "KLY": ("Sarıtepe Prep Hall", "Kilyos"),
     "KİLYOS": ("Sarıtepe Campus", "Kilyos"),
+    "KILYOS": ("Sarıtepe Campus", "Kilyos"),
     "YYD": ("Sarıtepe YADYOK", "Kilyos"),
 }
 
 def resolve_room_location(room_name: Optional[str], building: Optional[str] = None) -> tuple[str, str]:
     if not room_name or not room_name.strip():
-        return ("General / Campus", "Campus")
+        return ("Unassigned / Other", "Other")
     clean = room_name.strip()
     upper = clean.upper()
 
-    if any(tag in upper for tag in ["ONLINE", "UZAKTAN", "VIRTUAL", "WEB"]):
+    if any(tag in upper for tag in ["ONLINE", "UZAKTAN", "VIRTUAL", "WEB", "ZOOM"]):
         return ("Online / Remote", "Virtual")
 
     match = re.match(r"^([A-Za-zÇĞİÖŞÜçğıöşü]+)", clean)
@@ -588,28 +616,31 @@ def resolve_room_location(room_name: Optional[str], building: Optional[str] = No
     if building and building.strip():
         b_clean = building.strip()
         b_upper = b_clean.upper()
-        if any(w in b_upper for w in ["NEW HALL", "KARE", "EDUCATION", "EĞİTİM", "KUZEY", "COMPUTER", "ETA", "YERLICI"]):
+        if any(w in b_upper for w in ["NEW HALL", "KARE", "EDUCATION", "EĞİTİM", "KUZEY", "COMPUTER", "ETA", "YERLICI", "BİM"]):
             return (b_clean, "Kuzey")
-        if any(w in b_upper for w in ["FREELY", "JOHN", "ANDERSON", "WASHBURN", "ENGINEERING", "NATUK", "GÜNEY", "SOUTH"]):
+        if any(w in b_upper for w in ["FREELY", "JOHN", "ANDERSON", "WASHBURN", "ENGINEERING", "NATUK", "HAMLIN", "GÜNEY", "SOUTH"]):
             return (b_clean, "Güney")
-        if "HISAR" in b_upper:
+        if "HISAR" in b_upper or "HİSAR" in b_upper:
             return (b_clean, "Hisar")
-        if "UÇAKSAVAR" in b_upper or "GARANTI" in b_upper:
+        if "UÇAKSAVAR" in b_upper or "GARANTI" in b_upper or "ŞAHENK" in b_upper:
             return (b_clean, "Uçaksavar")
         if "KANDİLLİ" in b_upper or "KANDILLI" in b_upper:
             return (b_clean, "Kandilli")
-        if "KİLYOS" in b_upper or "SARITEPE" in b_upper:
+        if "KİLYOS" in b_upper or "KILYOS" in b_upper or "SARITEPE" in b_upper:
             return (b_clean, "Kilyos")
-        return (b_clean, "Campus")
+        return (b_clean, "Other")
 
-    if upper.startswith("H"):
+    # Specific campus prefix rules
+    if upper.startswith(("HH", "HAML", "HÜL", "HUL")):
+        return (f"Hamlin Hall ({clean})", "Güney")
+    if upper.startswith(("HK", "HB", "HC", "HA", "HD", "HİS", "HIS")):
         return (f"Hisar Building ({clean})", "Hisar")
-    if upper.startswith("K") and not upper.startswith("KAND") and not upper.startswith("KİL"):
+    if upper.startswith("K") and not upper.startswith("KAND") and not upper.startswith("KİL") and not upper.startswith("KIL"):
         return (f"Kuzey Building ({clean})", "Kuzey")
-    if upper.startswith(("M", "T")):
+    if upper.startswith(("M", "T", "JF", "İB", "IB", "NB")):
         return (f"Güney Building ({clean})", "Güney")
 
-    return (f"Building {match.group(1).upper()}" if match else "General / Campus", "Campus")
+    return (f"Building {match.group(1).upper()}" if match else "Unassigned / Other", "Other")
 
 def infer_building_from_room(room_name: Optional[str], building: Optional[str] = None) -> str:
     bldg, _ = resolve_room_location(room_name, building)
@@ -638,13 +669,15 @@ def get_ghost_schedule(
                 target_term = dash_term
 
     query = db.query(
+        models.CourseSlot.course_id,
         models.CourseSlot.day_code,
         models.CourseSlot.slot_hour,
+        models.CourseSlot.slot_title,
         models.Room.name.label("room_name"),
         models.Room.building.label("building"),
         models.Course.course_code,
         models.Course.dept_kisaadi
-    ).join(models.Course).join(models.Room).filter(models.Course.term_id == target_term)
+    ).join(models.Course).outerjoin(models.Room).filter(models.Course.term_id == target_term)
     
     if dept:
         clean_depts = [d.strip().upper() for d in dept if d and d.strip()]
@@ -652,18 +685,58 @@ def get_ghost_schedule(
         
     results = query.all()
     
-    payload = []
+    # Contiguous multi-hour slot expansion:
+    # Boğaziçi schedule tables list the classroom once for multi-hour blocks (e.g. HH 108 for hours 2-3).
+    # Forward-fill room name and building to contiguous hours within each (course_id, day_code).
+    course_day_slots: dict[tuple[int, str], list[dict]] = {}
     for r in results:
-        bldg, cmp_name = resolve_room_location(r.room_name, r.building)
-        payload.append({
-            "day_code": r.day_code,
+        key = (r.course_id, r.day_code)
+        if key not in course_day_slots:
+            course_day_slots[key] = []
+        course_day_slots[key].append({
             "slot_hour": r.slot_hour,
+            "slot_title": r.slot_title,
             "room_name": r.room_name,
-            "building": bldg,
-            "campus": cmp_name,
+            "building": r.building,
             "course_code": r.course_code,
-            "dept_kisaadi": r.dept_kisaadi,
+            "dept_kisaadi": r.dept_kisaadi
         })
+
+    payload = []
+    for (cid, d_code), slots in course_day_slots.items():
+        # Sort ascending by slot_hour
+        slots.sort(key=lambda s: s["slot_hour"] if s["slot_hour"] is not None else 0)
+        curr_room = None
+        curr_bldg = None
+        curr_hour = None
+        for s in slots:
+            hr = s["slot_hour"]
+            r_name = s["room_name"]
+            # If room is missing but hour is contiguous (hour == curr_hour + 1), forward-fill room
+            if (not r_name or r_name.strip() in ("", "N/A")) and curr_room and hr is not None and curr_hour is not None and hr == curr_hour + 1:
+                r_name = curr_room
+                s["room_name"] = curr_room
+                s["building"] = curr_bldg
+            elif r_name and r_name.strip() not in ("", "N/A"):
+                curr_room = r_name
+                curr_bldg = s["building"]
+            else:
+                curr_room = None
+                curr_bldg = None
+            curr_hour = hr
+
+            # Only include slots with an assigned classroom in the ghost schedule matrix
+            if r_name and r_name.strip() not in ("", "N/A"):
+                bldg, cmp_name = resolve_room_location(r_name, s["building"])
+                payload.append({
+                    "day_code": d_code,
+                    "slot_hour": hr,
+                    "room_name": r_name,
+                    "building": bldg,
+                    "campus": cmp_name,
+                    "course_code": s["course_code"],
+                    "dept_kisaadi": s["dept_kisaadi"],
+                })
 
     if building:
         clean_b = {b.strip().lower() for b in building if b and b.strip()}

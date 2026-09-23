@@ -22,7 +22,7 @@
   let terms = $state<Term[]>([]);
   let globalFacets = $state<FacetDistribution>({});
   let selectedTerm = $state("");
-  let selectedCampus = $state("");
+  let selectedCampuses = $state<string[]>([]); // empty array means All Campuses
   let selectedBuilding = $state("");
   let selectedHour = $state<number | null>(null); // null means All Hours
   let availabilityFilter = $state<"all" | "occupied" | "free" | "conflicts">("all");
@@ -45,6 +45,7 @@
   };
 
   const hours = Array.from({ length: 14 }, (_, i) => i + 1);
+  const CAMPUS_ORDER = ["Güney", "Kuzey", "Hisar", "Uçaksavar", "Kandilli", "Kilyos", "Virtual", "Other"];
 
   // Active Day
   let activeDay = $state("M");
@@ -71,9 +72,10 @@
     for (const s of scheduleData) {
       if (!map.has(s.room_name)) {
         const loc = resolveRoomLocation(s.room_name, s.building);
+        const resolvedCampus = (loc.campus === "Campus" || !loc.campus) ? "Other" : loc.campus;
         map.set(s.room_name, {
           building: s.building || loc.building,
-          campus: s.campus || loc.campus
+          campus: s.campus && s.campus !== "Campus" ? s.campus : resolvedCampus
         });
       }
     }
@@ -92,20 +94,29 @@
     const cMap = new Map<string, Set<string>>();
     for (const s of scheduleData) {
       const loc = roomLocationMap.get(s.room_name) || resolveRoomLocation(s.room_name, s.building);
-      if (!cMap.has(loc.campus)) cMap.set(loc.campus, new Set());
-      cMap.get(loc.campus)!.add(s.room_name);
+      const cName = (loc.campus === "Campus" || !loc.campus) ? "Other" : loc.campus;
+      if (!cMap.has(cName)) cMap.set(cName, new Set());
+      cMap.get(cName)!.add(s.room_name);
     }
     return Array.from(cMap.entries())
       .map(([name, set]) => ({ name, count: set.size }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => {
+        const idxA = CAMPUS_ORDER.indexOf(a.name);
+        const idxB = CAMPUS_ORDER.indexOf(b.name);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return a.name.localeCompare(b.name);
+      });
   });
 
-  // Available unique buildings (filtered by selectedCampus if active)
+  // Available unique buildings (filtered by selectedCampuses if active)
   let availableBuildings = $derived.by(() => {
     const bCountMap = new Map<string, Set<string>>();
     for (const s of scheduleData) {
       const loc = roomLocationMap.get(s.room_name) || resolveRoomLocation(s.room_name, s.building);
-      if (selectedCampus && loc.campus !== selectedCampus) continue;
+      const cName = (loc.campus === "Campus" || !loc.campus) ? "Other" : loc.campus;
+      if (selectedCampuses.length > 0 && !selectedCampuses.includes(cName)) continue;
       if (!bCountMap.has(loc.building)) bCountMap.set(loc.building, new Set());
       bCountMap.get(loc.building)!.add(s.room_name);
     }
@@ -119,6 +130,12 @@
     building: string;
     campus: string;
     rooms: string[];
+  }
+
+  interface CampusGroup {
+    campus: string;
+    buildings: BuildingGroup[];
+    totalRooms: number;
   }
 
   let buildingGroups = $derived.by(() => {
@@ -135,9 +152,10 @@
         }
       }
 
-      // Campus filter
+      // Multi-select campus filter
       const loc = roomLocationMap.get(room) || resolveRoomLocation(room);
-      if (selectedCampus && loc.campus !== selectedCampus) {
+      const cName = (loc.campus === "Campus" || !loc.campus) ? "Other" : loc.campus;
+      if (selectedCampuses.length > 0 && !selectedCampuses.includes(cName)) {
         continue;
       }
 
@@ -150,12 +168,10 @@
       if (availabilityFilter === "conflicts") {
         if (!conflictRoomNames.has(room)) continue;
       } else if (availabilityFilter === "free") {
-        // Must be free at selected hour, or free for all slots if selectedHour is null
         if (selectedHour !== null) {
           const slots = slotMap.get(`${room}|${selectedHour}`);
-          if (slots && slots.length > 0) continue; // Occupied at this hour
+          if (slots && slots.length > 0) continue;
         } else {
-          // If no specific hour selected, show rooms that have at least one free slot
           let hasFreeSlot = false;
           for (const h of hours) {
             const slots = slotMap.get(`${room}|${h}`);
@@ -167,7 +183,6 @@
           if (!hasFreeSlot) continue;
         }
       } else if (availabilityFilter === "occupied") {
-        // Must have class at selected hour, or have at least one class on active day
         if (selectedHour !== null) {
           const slots = slotMap.get(`${room}|${selectedHour}`);
           if (!slots || slots.length === 0) continue;
@@ -185,7 +200,7 @@
       }
 
       if (!bMap.has(loc.building)) {
-        bMap.set(loc.building, { campus: loc.campus, rooms: [] });
+        bMap.set(loc.building, { campus: cName, rooms: [] });
       }
       bMap.get(loc.building)!.rooms.push(room);
     }
@@ -199,6 +214,32 @@
     return groups;
   });
 
+  // Hierarchical Campus -> Building groups for clean tabular presentation
+  let campusGroups = $derived.by(() => {
+    const cMap = new Map<string, BuildingGroup[]>();
+    for (const bg of buildingGroups) {
+      if (!cMap.has(bg.campus)) cMap.set(bg.campus, []);
+      cMap.get(bg.campus)!.push(bg);
+    }
+    const groups: CampusGroup[] = [];
+    for (const [campus, bldgs] of cMap.entries()) {
+      groups.push({
+        campus,
+        buildings: bldgs,
+        totalRooms: bldgs.reduce((sum, b) => sum + b.rooms.length, 0)
+      });
+    }
+    groups.sort((a, b) => {
+      const idxA = CAMPUS_ORDER.indexOf(a.campus);
+      const idxB = CAMPUS_ORDER.indexOf(b.campus);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.campus.localeCompare(b.campus);
+    });
+    return groups;
+  });
+
   let totalVisibleRooms = $derived(buildingGroups.reduce((sum, g) => sum + g.rooms.length, 0));
 
   const filteredDepts = $derived(
@@ -208,6 +249,22 @@
           .filter(d => d.toLowerCase().includes(deptSearch.toLowerCase()))
       : []
   );
+
+  function toggleCampus(campusName: string) {
+    if (campusName === "") {
+      selectedCampuses = [];
+    } else if (selectedCampuses.includes(campusName)) {
+      selectedCampuses = selectedCampuses.filter(c => c !== campusName);
+    } else {
+      selectedCampuses = [...selectedCampuses, campusName];
+    }
+    selectedBuilding = "";
+  }
+
+  function isCampusActive(campusName: string): boolean {
+    if (campusName === "") return selectedCampuses.length === 0;
+    return selectedCampuses.includes(campusName);
+  }
 
   function toggleDept(dept: string) {
     if (selectedDepts.includes(dept)) {
@@ -246,9 +303,7 @@
     try {
       const params = new URLSearchParams();
       selectedDepts.forEach(d => params.append("dept", d));
-      if (selectedCampus) params.append("campus", selectedCampus);
-      if (selectedBuilding) params.append("building", selectedBuilding);
-      
+      // Load term schedule so campus selections toggle instantly in-memory without destructive loss
       const res = await fetch(`${API_BASE}/v1/analytics/ghost-schedule/${selectedTerm}?${params.toString()}`);
       if (res.ok) {
         scheduleData = await res.json();
@@ -285,7 +340,7 @@
   }
 
   function resetAllFilters() {
-    selectedCampus = "";
+    selectedCampuses = [];
     selectedBuilding = "";
     selectedHour = null;
     availabilityFilter = "all";
@@ -344,11 +399,15 @@
         <label for="matrix-campus-select" class="font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">Campus Filter</label>
         <select 
           id="matrix-campus-select"
-          bind:value={selectedCampus} 
-          onchange={() => { selectedBuilding = ""; fetchSchedule(); }}
+          value={selectedCampuses.length === 1 ? selectedCampuses[0] : ""} 
+          onchange={(e) => {
+            const val = (e.target as HTMLSelectElement).value;
+            selectedCampuses = val ? [val] : [];
+            selectedBuilding = "";
+          }}
           class="w-full p-2 bg-[#faf8f5] border border-[#e5e0d8] rounded-lg text-xs font-semibold text-[#161e2e] outline-hidden focus:ring-1 focus:ring-[#002d72] transition-colors dark:bg-[#0a0e1a] dark:border-[#1e293b] dark:text-slate-200 cursor-pointer font-mono"
         >
-          <option value="">All Campuses ({availableCampuses.reduce((acc, c) => acc + c.count, 0)})</option>
+          <option value="">{selectedCampuses.length === 0 ? 'All Campuses' : `${selectedCampuses.length} Campuses Active`} ({availableCampuses.reduce((acc, c) => acc + c.count, 0)})</option>
           {#each availableCampuses as c}
             <option value={c.name}>{c.name} Kampüs ({c.count})</option>
           {/each}
@@ -361,7 +420,6 @@
         <select 
           id="matrix-building-select"
           bind:value={selectedBuilding} 
-          onchange={fetchSchedule}
           class="w-full p-2 bg-[#faf8f5] border border-[#e5e0d8] rounded-lg text-xs font-semibold text-[#161e2e] outline-hidden focus:ring-1 focus:ring-[#002d72] transition-colors dark:bg-[#0a0e1a] dark:border-[#1e293b] dark:text-slate-200 cursor-pointer font-mono"
         >
           <option value="">All Buildings ({availableBuildings.reduce((acc, b) => acc + b.count, 0)})</option>
@@ -439,33 +497,38 @@
       </div>
     </div>
 
-    <!-- Campus Shortcut Pills -->
+    <!-- Campus Shortcut Pills (Multi-Select Non-Destructive Filter) -->
     <div class="flex flex-wrap items-center gap-1.5 pt-2 border-t border-[#e5e0d8]/60 dark:border-[#1e293b]/60">
       <span class="font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider mr-1">
-        Campus:
+        Campuses:
       </span>
       <button 
         type="button"
-        onclick={() => { selectedCampus = ""; selectedBuilding = ""; fetchSchedule(); }}
+        onclick={() => toggleCampus("")}
         class="px-2.5 py-1 text-xs font-mono rounded-md border transition-all cursor-pointer {
-          selectedCampus === '' 
-            ? 'bg-[#002d72] text-white border-[#002d72] shadow-2xs dark:bg-[#8cc8ea] dark:text-[#0a0e1a]' 
+          selectedCampuses.length === 0 
+            ? 'bg-[#002d72] text-white border-[#002d72] shadow-2xs dark:bg-[#8cc8ea] dark:text-[#0a0e1a] font-bold' 
             : 'bg-[#faf8f5] text-[#525f7f] border-[#e5e0d8] hover:text-[#002d72] dark:bg-[#0a0e1a] dark:text-slate-400 dark:border-slate-800'
         }"
       >
         All Campuses
       </button>
       {#each availableCampuses as c}
+        {@const active = isCampusActive(c.name)}
         <button 
           type="button"
-          onclick={() => { selectedCampus = c.name; selectedBuilding = ""; fetchSchedule(); }}
-          class="px-2.5 py-1 text-xs font-mono rounded-md border transition-all cursor-pointer {
-            selectedCampus === c.name 
-              ? 'bg-[#002d72] text-white border-[#002d72] shadow-2xs dark:bg-[#8cc8ea] dark:text-[#0a0e1a]' 
-              : 'bg-[#faf8f5] text-[#525f7f] border-[#e5e0d8] hover:text-[#002d72] dark:bg-[#0a0e1a] dark:text-slate-400 dark:border-slate-800'
+          onclick={() => toggleCampus(c.name)}
+          class="px-2.5 py-1 text-xs font-mono rounded-md border transition-all cursor-pointer flex items-center space-x-1 {
+            active && selectedCampuses.length > 0
+              ? 'bg-[#002d72] text-white border-[#002d72] shadow-2xs dark:bg-[#8cc8ea] dark:text-[#0a0e1a] font-bold' 
+              : active && selectedCampuses.length === 0
+                ? 'bg-[#002d72]/15 text-[#002d72] border-[#002d72]/30 dark:bg-[#8cc8ea]/20 dark:text-[#8cc8ea] dark:border-[#8cc8ea]/30 font-medium'
+                : 'bg-[#faf8f5] text-[#525f7f] border-[#e5e0d8] hover:text-[#002d72] dark:bg-[#0a0e1a] dark:text-slate-400 dark:border-slate-800'
           }"
+          title="Toggle {c.name} in view"
         >
-          {c.name} ({c.count})
+          <span>{c.name}</span>
+          <span class="opacity-75 text-[10px]">({c.count})</span>
         </button>
       {/each}
     </div>
@@ -545,7 +608,7 @@
         </select>
       </div>
 
-      <!-- Classroom Search Box -->
+      <!-- Room Search Input -->
       <div class="md:col-span-4 flex flex-col space-y-1">
         <label for="room-search" class="font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">
           Room Name Search
@@ -556,7 +619,7 @@
             id="room-search"
             type="text" 
             bind:value={roomSearch}
-            placeholder="e.g. NH 101, KB 201, M 1100..."
+            placeholder="e.g. HH 108, NH 101, KB 201..."
             class="w-full pl-8 pr-3 py-1.5 text-xs bg-[#faf8f5] dark:bg-[#0a0e1a] border border-[#e5e0d8] dark:border-[#1e293b] rounded-lg text-[#161e2e] dark:text-slate-100 placeholder-[#8a94a6] focus:outline-hidden focus:ring-1 focus:ring-[#002d72] font-mono"
           />
         </div>
@@ -636,7 +699,7 @@
     <div class="bg-white rounded-xl border border-[#e5e0d8] shadow-2xs overflow-hidden dark:bg-[#121827] dark:border-[#1e293b]">
       <div class="p-3 bg-[#faf8f5] dark:bg-[#0f172a] border-b border-[#e5e0d8] dark:border-[#1e293b] flex items-center justify-between text-xs text-[#525f7f] dark:text-slate-400">
         <span class="font-mono">
-          Showing <strong>{totalVisibleRooms}</strong> classrooms across <strong>{buildingGroups.length}</strong> buildings
+          Showing <strong>{totalVisibleRooms}</strong> classrooms across <strong>{campusGroups.length}</strong> campuses & <strong>{buildingGroups.length}</strong> buildings
         </span>
         {#if selectedHour !== null}
           <span class="font-mono px-2 py-0.5 rounded bg-[#002d72]/10 text-[#002d72] dark:bg-[#8cc8ea]/15 dark:text-[#8cc8ea]">
@@ -665,69 +728,88 @@
             </tr>
           </thead>
           <tbody>
-            {#each buildingGroups as group}
-              <!-- Building & Campus Group Header Row -->
-              <tr class="bg-[#ede8dc]/85 border-y border-[#dfd9cc] dark:bg-[#0d1322] dark:border-[#1e293b]/80">
-                <td colspan={15} class="py-2 px-3 sticky left-0 z-15 bg-[#ede8dc] dark:bg-[#0d1322]">
-                  <div class="flex items-center space-x-2 flex-wrap gap-y-1">
-                    <Building2 size={13} class="text-[#002d72] dark:text-[#8cc8ea] shrink-0" />
-                    <span class="font-mono text-xs font-bold text-[#002d72] dark:text-[#8cc8ea] uppercase tracking-wide">{group.building}</span>
-                    <span class="font-mono text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider
-                      {group.campus === 'Güney' ? 'bg-emerald-100 text-emerald-900 border border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800' :
-                       group.campus === 'Kuzey' ? 'bg-blue-100 text-blue-900 border border-blue-300 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800' :
-                       group.campus === 'Hisar' ? 'bg-purple-100 text-purple-900 border border-purple-300 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800' :
-                       'bg-slate-100 text-slate-800 border border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'}">
-                      {group.campus} Kampüs
-                    </span>
-                    <span class="font-mono text-[10px] text-[#525f7f] dark:text-slate-400 font-semibold">({group.rooms.length} {group.rooms.length === 1 ? 'room' : 'rooms'})</span>
+            {#each campusGroups as cGroup}
+              <!-- Campus Section Header Row -->
+              <tr class="bg-[#002d72] text-white dark:bg-[#1a2333] border-t-2 border-b border-[#002d72] dark:border-[#2b3a51]">
+                <td colspan={15} class="py-2.5 px-3 sticky left-0 z-16 bg-[#002d72] dark:bg-[#1a2333]">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                      <span class="font-mono text-xs font-bold uppercase tracking-wider text-white dark:text-[#8cc8ea]">
+                        {cGroup.campus === 'Güney' ? '🏛️ Güney Kampüs (South)' :
+                         cGroup.campus === 'Kuzey' ? '🏫 Kuzey Kampüs (North)' :
+                         cGroup.campus === 'Hisar' ? '🏰 Hisar Kampüs' :
+                         cGroup.campus === 'Uçaksavar' ? '🏃 Uçaksavar Kampüs' :
+                         cGroup.campus === 'Kandilli' ? '🔭 Kandilli Kampüs' :
+                         cGroup.campus === 'Kilyos' ? '🌊 Sarıtepe Kampüs (Kilyos)' :
+                         cGroup.campus === 'Virtual' ? '💻 Virtual / Remote' :
+                         `${cGroup.campus} Kampüs`}
+                      </span>
+                      <span class="font-mono text-[10px] text-white/80 dark:text-slate-300">
+                        ({cGroup.buildings.length} {cGroup.buildings.length === 1 ? 'building' : 'buildings'}, {cGroup.totalRooms} rooms)
+                      </span>
+                    </div>
                   </div>
                 </td>
               </tr>
 
-              <!-- Room Rows within this Building -->
-              {#each group.rooms as room}
-                <tr class="border-b border-[#e5e0d8] hover:bg-[#f3efe6]/40 transition-colors dark:border-[#1e293b] dark:hover:bg-slate-800/40">
-                  <td class="p-3 text-xs font-mono font-bold text-[#161e2e] dark:text-slate-200 border-r border-[#e5e0d8] dark:border-[#1e293b] bg-[#f3efe6]/80 dark:bg-[#0a0e1a] sticky left-0 z-10 truncate max-w-[140px] sm:max-w-none shadow-2xs">
-                    <div class="flex flex-col">
-                      <span class="truncate">{room}</span>
-                      <span class="text-[9px] font-normal text-[#525f7f] dark:text-slate-400 truncate">{group.building}</span>
+              <!-- Buildings within this Campus -->
+              {#each cGroup.buildings as group}
+                <!-- Building Row Header -->
+                <tr class="bg-[#ede8dc]/85 border-y border-[#dfd9cc] dark:bg-[#0d1322] dark:border-[#1e293b]/80">
+                  <td colspan={15} class="py-2 px-3 sticky left-0 z-15 bg-[#ede8dc] dark:bg-[#0d1322]">
+                    <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+                      <Building2 size={13} class="text-[#002d72] dark:text-[#8cc8ea] shrink-0" />
+                      <span class="font-mono text-xs font-bold text-[#002d72] dark:text-[#8cc8ea] uppercase tracking-wide">{group.building}</span>
+                      <span class="font-mono text-[10px] text-[#525f7f] dark:text-slate-400 font-semibold">({group.rooms.length} {group.rooms.length === 1 ? 'room' : 'rooms'})</span>
                     </div>
                   </td>
-                  {#each hours as hour}
-                    {@const slots = slotMap.get(`${room}|${hour}`)}
-                    {@const isFocusedHour = selectedHour === hour}
-                    <td class="p-1 text-center h-14 sm:h-16 {isFocusedHour ? 'bg-[#002d72]/5 dark:bg-[#8cc8ea]/5' : ''}">
-                      {#if !slots || slots.length === 0}
-                        <div class="h-full w-full bg-[#faf8f5]/40 dark:bg-[#0a0e1a]/40 rounded-lg border border-transparent flex items-center justify-center">
-                          <span class="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-700"></span>
-                        </div>
-                      {:else if slots.length === 1}
-                        <div class="h-full w-full bg-[#002d72]/10 border border-[#002d72]/20 rounded-lg p-1 flex flex-col justify-center items-center shadow-2xs dark:bg-[#8cc8ea]/15 dark:border-[#8cc8ea]/30">
-                          <span class="font-mono text-[9px] sm:text-[10px] font-bold text-[#002d72] dark:text-[#8cc8ea] leading-tight truncate max-w-[80px]">{slots[0].course_code}</span>
-                          <span class="font-mono text-[7px] sm:text-[8px] text-[#0080c9] dark:text-slate-300 uppercase font-semibold">{slots[0].dept_kisaadi}</span>
-                        </div>
-                      {:else}
-                        <!-- Multi-Course Collision / Double Booking -->
-                        <div 
-                          class="h-full w-full bg-amber-500/15 border border-amber-500/70 rounded-lg p-1 flex flex-col justify-between items-center shadow-2xs dark:bg-amber-950/50 dark:border-amber-500/70 relative overflow-hidden"
-                          title="Conflict: {slots.map(s => `${s.course_code} (${s.dept_kisaadi})`).join(' vs ')}"
-                        >
-                          <div class="flex items-center space-x-0.5 text-[7px] font-bold text-amber-700 dark:text-amber-300 uppercase leading-none mb-0.5">
-                            <AlertTriangle size={8} class="text-amber-600 dark:text-amber-400 shrink-0" />
-                            <span>Conflict ({slots.length})</span>
-                          </div>
-                          <div class="w-full flex flex-col items-center gap-0.5 overflow-hidden">
-                            {#each slots as slot}
-                              <div class="font-mono text-[8px] sm:text-[9px] font-bold text-amber-950 dark:text-amber-100 truncate max-w-[85px] leading-tight">
-                                {slot.course_code} <span class="text-[7px] font-normal text-amber-800 dark:text-amber-300">({slot.dept_kisaadi})</span>
-                              </div>
-                            {/each}
-                          </div>
-                        </div>
-                      {/if}
-                    </td>
-                  {/each}
                 </tr>
+
+                <!-- Room Rows within this Building -->
+                {#each group.rooms as room}
+                  <tr class="border-b border-[#e5e0d8] hover:bg-[#f3efe6]/40 transition-colors dark:border-[#1e293b] dark:hover:bg-slate-800/40">
+                    <td class="p-3 text-xs font-mono font-bold text-[#161e2e] dark:text-slate-200 border-r border-[#e5e0d8] dark:border-[#1e293b] bg-[#f3efe6]/80 dark:bg-[#0a0e1a] sticky left-0 z-10 truncate max-w-[140px] sm:max-w-none shadow-2xs">
+                      <div class="flex flex-col">
+                        <span class="truncate">{room}</span>
+                        <span class="text-[9px] font-normal text-[#525f7f] dark:text-slate-400 truncate">{group.building}</span>
+                      </div>
+                    </td>
+                    {#each hours as hour}
+                      {@const slots = slotMap.get(`${room}|${hour}`)}
+                      {@const isFocusedHour = selectedHour === hour}
+                      <td class="p-1 text-center h-14 sm:h-16 {isFocusedHour ? 'bg-[#002d72]/5 dark:bg-[#8cc8ea]/5' : ''}">
+                        {#if !slots || slots.length === 0}
+                          <div class="h-full w-full bg-[#faf8f5]/40 dark:bg-[#0a0e1a]/40 rounded-lg border border-transparent flex items-center justify-center">
+                            <span class="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+                          </div>
+                        {:else if slots.length === 1}
+                          <div class="h-full w-full bg-[#002d72]/10 border border-[#002d72]/20 rounded-lg p-1 flex flex-col justify-center items-center shadow-2xs dark:bg-[#8cc8ea]/15 dark:border-[#8cc8ea]/30">
+                            <span class="font-mono text-[9px] sm:text-[10px] font-bold text-[#002d72] dark:text-[#8cc8ea] leading-tight truncate max-w-[80px]">{slots[0].course_code}</span>
+                            <span class="font-mono text-[7px] sm:text-[8px] text-[#0080c9] dark:text-slate-300 uppercase font-semibold">{slots[0].dept_kisaadi}</span>
+                          </div>
+                        {:else}
+                          <!-- Multi-Course Collision / Double Booking -->
+                          <div 
+                            class="h-full w-full bg-amber-500/15 border border-amber-500/70 rounded-lg p-1 flex flex-col justify-between items-center shadow-2xs dark:bg-amber-950/50 dark:border-amber-500/70 relative overflow-hidden"
+                            title="Conflict: {slots.map(s => `${s.course_code} (${s.dept_kisaadi})`).join(' vs ')}"
+                          >
+                            <div class="flex items-center space-x-0.5 text-[7px] font-bold text-amber-700 dark:text-amber-300 uppercase leading-none mb-0.5">
+                              <AlertTriangle size={8} class="text-amber-600 dark:text-amber-400 shrink-0" />
+                              <span>Conflict ({slots.length})</span>
+                            </div>
+                            <div class="w-full flex flex-col items-center gap-0.5 overflow-hidden">
+                              {#each slots as slot}
+                                <div class="font-mono text-[8px] sm:text-[9px] font-bold text-amber-950 dark:text-amber-100 truncate max-w-[85px] leading-tight">
+                                  {slot.course_code} <span class="text-[7px] font-normal text-amber-800 dark:text-amber-300">({slot.dept_kisaadi})</span>
+                                </div>
+                              {/each}
+                            </div>
+                          </div>
+                        {/if}
+                      </td>
+                    {/each}
+                  </tr>
+                {/each}
               {/each}
             {/each}
           </tbody>

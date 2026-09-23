@@ -449,6 +449,9 @@ def _sync_course_slots(
     if slots_payload is None or dry_run:
         return
     session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete(synchronize_session="fetch")
+
+    # Sort slots by (day, hour) for deterministic contiguous processing
+    parsed_slots = []
     for s in slots_payload:
         slot_hour = clean_int(s.get("hour") or s.get("slot_hour"))
         if slot_hour is None or slot_hour < 1 or slot_hour > 14:
@@ -457,17 +460,45 @@ def _sync_course_slots(
         if not day_raw:
             continue
         day_code = day_raw if day_raw in VALID_DAYS else (day_raw.capitalize() if day_raw.capitalize() in VALID_DAYS else "M")
+        room_name = (s.get("room") or s.get("room_name") or "").strip()
+        parsed_slots.append({
+            "day_code": day_code,
+            "slot_hour": slot_hour,
+            "slot_title": s.get("slot_title"),
+            "room_name": room_name if room_name and room_name != "N/A" else None
+        })
 
-        room_name = s.get("room") or s.get("room_name")
-        room_id = ensure_room(session, room_name, room_cache)
-        slot = CourseSlot(
-            course_id=course_id,
-            day_code=day_code,
-            slot_hour=slot_hour,
-            slot_title=s.get("slot_title"),
-            room_id=room_id
-        )
-        session.add(slot)
+    # Group by day and forward-fill contiguous hours within the same session
+    day_groups: Dict[str, List[Dict[str, Any]]] = {}
+    for ps in parsed_slots:
+        day_groups.setdefault(ps["day_code"], []).append(ps)
+
+    for day_code, day_slots in day_groups.items():
+        day_slots.sort(key=lambda x: x["slot_hour"])
+        curr_room = None
+        curr_hour = None
+        for ps in day_slots:
+            hr = ps["slot_hour"]
+            r_name = ps["room_name"]
+            if not r_name and curr_room and curr_hour is not None and hr == curr_hour + 1:
+                r_name = curr_room
+                ps["room_name"] = curr_room
+            elif r_name:
+                curr_room = r_name
+            else:
+                curr_room = None
+            curr_hour = hr
+
+            room_id = ensure_room(session, ps["room_name"], room_cache) if ps["room_name"] else None
+            slot = CourseSlot(
+                course_id=course_id,
+                day_code=ps["day_code"],
+                slot_hour=ps["slot_hour"],
+                slot_title=ps["slot_title"],
+                room_id=room_id
+            )
+            session.add(slot)
+
     session.flush()
 
 

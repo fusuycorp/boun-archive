@@ -308,3 +308,49 @@ def test_sync_quota_feed_normalizes_department(isolated_boundary_env):
     ).first()
     assert quota is not None
     assert quota.department == "MIS"
+
+
+def test_ghost_schedule_hamlin_hall_south_and_contiguous_slot_expansion(isolated_boundary_env):
+    """
+    Invariants:
+    1. HH (Hamlin Hall) is on Güney Kampüs (not Hisar).
+    2. Contiguous slots where room is missing (e.g. 2-hour lab in HH 108) forward-fill the classroom.
+    3. 'Campus' is never emitted as a campus name.
+    """
+    client = isolated_boundary_env["client"]
+    db_session = isolated_boundary_env["db"]
+
+    room_hh = models.Room(id=40, name="HH 108 LAB", building=None, capacity=35)
+    course_mis = models.Course(
+        id=40,
+        term_id="2026/2027-1",
+        dept_kisaadi="MIS",
+        course_code="MIS 131",
+        section="01",
+        title="INTRO TO ALGORITHMS & PROGRAMMING",
+        instructor_id=1,
+        credits=4,
+        ects=6,
+        delivery_method="In-person"
+    )
+    # Hour 2 has HH 108 LAB, contiguous hour 3 has room_id=None
+    slot_hr2 = models.CourseSlot(course_id=40, day_code="F", slot_hour=2, slot_title="LAB", room_id=40)
+    slot_hr3 = models.CourseSlot(course_id=40, day_code="F", slot_hour=3, slot_title="LAB", room_id=None)
+
+    db_session.add_all([room_hh, course_mis, slot_hr2, slot_hr3])
+    db_session.commit()
+
+    res = client.get("/v1/analytics/ghost-schedule/2026/2027-1?dept=MIS")
+    assert res.status_code == 200
+    items = res.json()
+
+    # Both hours 2 and 3 must appear with HH 108 LAB
+    hh_slots = [it for it in items if it["room_name"] == "HH 108 LAB"]
+    assert len(hh_slots) == 2, f"Expected 2 contiguous lab hours, got: {hh_slots}"
+    assert {s["slot_hour"] for s in hh_slots} == {2, 3}
+
+    for s in hh_slots:
+        assert s["building"] == "Hamlin Hall"
+        assert s["campus"] == "Güney"
+        assert s["campus"] != "Campus"
+

@@ -29,11 +29,21 @@ describe("Campus & Building Resolution Suite", () => {
     expect(resolveRoomLocation("ETA A2")).toEqual({ building: "ETA Building", campus: "Kuzey" });
   });
 
-  it("resolves South Campus buildings correctly (TB, IB, M, NB)", () => {
+  it("resolves South Campus buildings correctly (TB, IB, M, NB, HH)", () => {
     expect(resolveRoomLocation("TB 240")).toEqual({ building: "Basic Sciences (Anderson)", campus: "Güney" });
     expect(resolveRoomLocation("IB 102")).toEqual({ building: "Washburn Hall (İİBF)", campus: "Güney" });
     expect(resolveRoomLocation("M 1100")).toEqual({ building: "Engineering Building", campus: "Güney" });
     expect(resolveRoomLocation("NB 118")).toEqual({ building: "Natuk Birkan", campus: "Güney" });
+    // Hamlin Hall invariant
+    expect(resolveRoomLocation("HH 108")).toEqual({ building: "Hamlin Hall", campus: "Güney" });
+    expect(resolveRoomLocation("HH 108 LAB")).toEqual({ building: "Hamlin Hall", campus: "Güney" });
+  });
+
+  it("never returns 'Campus' as a campus name for unclassified or missing rooms", () => {
+    expect(resolveRoomLocation("").campus).not.toBe("Campus");
+    expect(resolveRoomLocation(null).campus).not.toBe("Campus");
+    expect(resolveRoomLocation("UNKNOWN_ROOM_XYZ").campus).not.toBe("Campus");
+    expect(resolveRoomLocation("").campus).toBe("Other");
   });
 
   it("resolves Hisar, Uçaksavar, Kandilli, and Kilyos campuses correctly", () => {
