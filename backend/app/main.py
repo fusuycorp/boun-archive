@@ -32,6 +32,7 @@ from .semantic import (
     generate_dcat_catalog_jsonld
 )
 from .optimizer import solve_schedule_csp
+from .sync import verify_webhook_signature, apply_deltas_batch, record_scrape_summary
 
 
 ALLOWED_SORTS = {"term", "course_code", "title", "instructor", "credits", "ects"}
@@ -1189,5 +1190,137 @@ def optimize_schedule(
     for minimal gap hours, reduced campus days, and confirmed instructors.
     """
     return solve_schedule_csp(db=db, request=request)
+
+
+@app.post("/v1/webhooks/scraper")
+async def handle_scraper_webhook(
+    request: Request,
+    db: Session = Depends(database.get_db)
+):
+    """
+    Real-time webhook ingestion endpoint for upstream boun-scrape events.
+    Receives and processes HMAC-SHA256 signed delta change events and scrape completion summaries.
+    """
+    raw_body = await request.body()
+    signature = request.headers.get("x-boun-signature")
+    secret = os.getenv("WEBHOOK_SECRET")
+
+    if not verify_webhook_signature(raw_body, signature, secret):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    import json
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Malformed JSON payload: {e}")
+
+    event_type = request.headers.get("x-boun-event") or (payload.get("event") if isinstance(payload, dict) else "")
+
+    meili_index = None
+    try:
+        meili_index = MEILI_CLIENT.index("courses")
+    except Exception:
+        pass
+
+    # 1. Delta Changes Event
+    if event_type == "courses.deltas" or (isinstance(payload, dict) and "deltas" in payload):
+        deltas = payload.get("deltas") if isinstance(payload, dict) and "deltas" in payload else payload
+        if not isinstance(deltas, list):
+            deltas = [deltas] if isinstance(deltas, dict) else []
+
+        touched_ids = apply_deltas_batch(
+            session=db,
+            deltas=deltas,
+            meili_index=meili_index,
+            dry_run=False
+        )
+
+        try:
+            await FastAPICache.clear()
+        except Exception as e:
+            logger.debug("FastAPICache clear skipped: %s", e)
+
+        return {
+            "status": "ok",
+            "event": "courses.deltas",
+            "received_count": len(deltas),
+            "touched_courses": len(touched_ids),
+            "touched_course_ids": touched_ids
+        }
+
+    # 2. Scrape Completion Summary Event
+    elif event_type == "scrape.summary" or (isinstance(payload, dict) and "run_id" in payload and "status" in payload):
+        record_scrape_summary(session=db, summary=payload, dry_run=False)
+        return {
+            "status": "ok",
+            "event": "scrape.summary",
+            "run_id": payload.get("run_id"),
+            "term": payload.get("term"),
+            "changes_detected": payload.get("changes_detected")
+        }
+
+    # 3. Direct Single Delta (fallback)
+    elif isinstance(payload, dict) and payload.get("change_type") and payload.get("course_code"):
+        touched_ids = apply_deltas_batch(
+            session=db,
+            deltas=[payload],
+            meili_index=meili_index,
+            dry_run=False
+        )
+        try:
+            await FastAPICache.clear()
+        except Exception:
+            pass
+        return {
+            "status": "ok",
+            "event": "course.delta",
+            "touched_courses": len(touched_ids),
+            "touched_course_ids": touched_ids
+        }
+
+    return {
+        "status": "ignored",
+        "detail": f"Unrecognized webhook event type: '{event_type}'"
+    }
+
+
+@app.get("/v1/system/sync-status")
+def get_sync_status(db: Session = Depends(database.get_db)):
+    """
+    Integration observability endpoint reporting health, cursors, and lag.
+    """
+    total_courses = db.query(func.count(models.Course.id)).scalar() or 0
+    total_terms = db.query(func.count(models.Term.id)).scalar() or 0
+    total_depts = db.query(func.count(models.Department.kisaadi)).scalar() or 0
+    latest_term = db.query(models.Term).order_by(models.Term.id.desc()).first()
+
+    sync_states = db.query(models.SyncState).all()
+    cursors = {
+        s.feed_name: {
+            "last_cursor": s.last_cursor,
+            "updated_at": s.updated_at.isoformat() if s.updated_at else None
+        }
+        for s in sync_states
+    }
+
+    scraper_url = os.getenv("SCRAPER_API_URL", "https://scraper.bountools.com/api/v1")
+    webhook_secret_set = bool(os.getenv("WEBHOOK_SECRET"))
+
+    return {
+        "status": "healthy",
+        "service": "boun-archive",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "upstream_scraper": {
+            "url": scraper_url,
+            "webhook_secret_configured": webhook_secret_set,
+        },
+        "database": {
+            "total_courses": total_courses,
+            "total_terms": total_terms,
+            "total_departments": total_depts,
+            "latest_term": latest_term.id if latest_term else None,
+        },
+        "cursors": cursors
+    }
 
 
