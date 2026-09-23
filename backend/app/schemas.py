@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 from typing import List, Optional, Dict, Any
 
 class TermBase(BaseModel):
@@ -41,7 +41,14 @@ class CourseSlotBase(BaseModel):
 class CourseSlot(CourseSlotBase):
     id: int
     room_name: Optional[str] = None
+    room: Optional[Room] = None
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def resolve_room_name(self):
+        if (not self.room_name or self.room_name == "N/A") and self.room:
+            self.room_name = self.room.name
+        return self
 
 class CourseBase(BaseModel):
     term_id: str

@@ -154,6 +154,8 @@ def ensure_department(
     if not dept_kisaadi:
         return None
     dept_kisaadi = str(dept_kisaadi)[:10].strip().upper()
+    if any(c.isdigit() for c in dept_kisaadi):
+        return None
 
     if dept_cache is not None and dept_kisaadi in dept_cache:
         cached = dept_cache[dept_kisaadi]
@@ -591,10 +593,13 @@ def _apply_delta_event(
     course_code = normalize_code(item.get("course_code"))
     raw_dept = item.get("department")
     if not raw_dept and course_code:
-        parts = course_code.strip().split()
-        if parts:
-            raw_dept = parts[0]
+        import re
+        match = re.match(r"^([A-Za-z]+)", course_code.strip())
+        if match:
+            raw_dept = match.group(1)
     dept_kisaadi = raw_dept.strip().upper() if raw_dept else None
+    if dept_kisaadi and any(c.isdigit() for c in dept_kisaadi):
+        dept_kisaadi = None
     section = normalize_section(item.get("section"))
     timestamp = item.get("timestamp") or ""
 

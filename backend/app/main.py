@@ -767,7 +767,7 @@ def get_course(course_id: int, db: Session = Depends(database.get_db)):
     ).filter(models.Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    return course
+    return schemas.Course.model_validate(course).model_dump()
 
 @app.get("/v1/instructors", response_model=List[schemas.Instructor])
 @cache(expire=3600)
@@ -904,7 +904,8 @@ def get_terms(db: Session = Depends(database.get_db)):
 @cache(expire=300)
 def get_departments(request: Request = None, db: Session = Depends(database.get_db)):
     depts = db.query(models.Department).order_by(models.Department.kisaadi).all()
-    dept_dicts = [schemas.Department.model_validate(d).model_dump() for d in depts]
+    valid_depts = [d for d in depts if d.kisaadi and not any(ch.isdigit() for ch in d.kisaadi)]
+    dept_dicts = [schemas.Department.model_validate(d).model_dump() for d in valid_depts]
     if request:
         accept = request.headers.get("accept", "")
         if "text/turtle" in accept or "application/x-turtle" in accept:

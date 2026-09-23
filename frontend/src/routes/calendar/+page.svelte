@@ -193,22 +193,48 @@
     const map = new Map<string, ScheduledSlotItem[]>();
     for (const c of myCourses) {
       if (!c || !c.slots) continue;
+
+      // Group course slots by day to forward-fill contiguous hours within same session
+      const daySlotsMap = new Map<string, typeof c.slots>();
       for (const s of c.slots) {
-        if (!s || !s.day_code || !s.slot_hour || s.disabled) continue;
-        const key = `${s.day_code}_${s.slot_hour}`;
-        const roomStr = s.room_name || (s.room ? s.room.name : (s.room_id ? `Room ${s.room_id}` : "N/A"));
-        const loc = resolveRoomLocation(roomStr, s.room?.building);
-        const item: ScheduledSlotItem = {
-          ...c,
-          slot_type: s.slot_title || "Lecture",
-          room_name: roomStr || "N/A",
-          building: loc.building,
-          campus: loc.campus
-        };
-        if (!map.has(key)) {
-          map.set(key, [item]);
-        } else {
-          map.get(key)!.push(item);
+        if (!s || !s.day_code || !s.slot_hour) continue;
+        if (!daySlotsMap.has(s.day_code)) daySlotsMap.set(s.day_code, []);
+        daySlotsMap.get(s.day_code)!.push(s);
+      }
+
+      for (const [day, dSlots] of daySlotsMap.entries()) {
+        dSlots.sort((a, b) => (a.slot_hour || 0) - (b.slot_hour || 0));
+        let prevRoom = "";
+        let prevHour = -1;
+        let prevTitle = "";
+        for (const s of dSlots) {
+          if (s.disabled) continue;
+          let rName = s.room_name || (s.room ? s.room.name : "");
+          if (rName === "N/A") rName = "";
+          const hr = s.slot_hour || 0;
+          const title = s.slot_title || "";
+          if (!rName && prevRoom && hr === prevHour + 1 && (!title || !prevTitle || title === prevTitle)) {
+            rName = prevRoom;
+          } else if (rName) {
+            prevRoom = rName;
+          }
+          prevHour = hr;
+          prevTitle = title;
+
+          const key = `${day}_${hr}`;
+          const loc = resolveRoomLocation(rName || "N/A", s.room?.building);
+          const item: ScheduledSlotItem = {
+            ...c,
+            slot_type: s.slot_title || "Lecture",
+            room_name: rName || "N/A",
+            building: loc.building,
+            campus: loc.campus
+          };
+          if (!map.has(key)) {
+            map.set(key, [item]);
+          } else {
+            map.get(key)!.push(item);
+          }
         }
       }
     }
