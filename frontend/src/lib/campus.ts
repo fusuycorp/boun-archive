@@ -109,11 +109,16 @@ export const ROOM_LOCATION_REGISTRY: Record<string, LocationInfo> = {
 
 export function resolveRoomLocation(roomName?: string | null, explicitBuilding?: string | null): LocationInfo {
   if (!roomName || !roomName.trim()) {
-    return { building: explicitBuilding?.trim() || "Unassigned / Other", campus: "Other" };
+    return { building: explicitBuilding?.trim() || "Unassigned", campus: "" };
   }
 
   const clean = roomName.trim();
   const upper = clean.toUpperCase();
+
+  // Guard against unassigned / placeholder markers
+  if (["N/A", "TBA", "UNKNOWN", "UNASSIGNED", "NONE", "NULL"].includes(upper)) {
+    return { building: explicitBuilding?.trim() || "Unassigned", campus: "" };
+  }
 
   if (upper.includes("ONLINE") || upper.includes("UZAKTAN") || upper.includes("VIRTUAL") || upper.includes("WEB") || upper.includes("ZOOM")) {
     return { building: "Online / Remote", campus: "Virtual" };

@@ -764,6 +764,7 @@ def get_heatmap(decade: Optional[int] = Query(None), db: Session = Depends(datab
 @cache(expire=3600)
 def get_course(course_id: int, db: Session = Depends(database.get_db)):
     course = db.query(models.Course).options(
+        joinedload(models.Course.instructor),
         joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
     ).filter(models.Course.id == course_id).first()
     if not course:

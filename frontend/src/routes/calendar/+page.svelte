@@ -49,6 +49,7 @@
           } catch {
             saveCoursesForTerm(term, validated);
           }
+          rehydrateEnrolledCourses(term);
         }
         return;
       }
@@ -127,6 +128,75 @@
     }
   }
 
+  function normalizeSlotType(title?: string | null): string {
+    if (!title) return "Lecture";
+    const t = title.trim().toUpperCase();
+    if (t.includes("LAB")) return "Lab";
+    if (t.includes("P.S.") || t.includes("PS") || t.includes("PROBLEM")) return "P.S.";
+    if (t.includes("PRACTICE")) return "Practice";
+    if (t.includes("RECITATION")) return "Recitation";
+    if (t.includes("SEMINAR")) return "Seminar";
+    if (t.includes("STUDIO")) return "Studio";
+    if (t.includes("WORKSHOP")) return "Workshop";
+    return "Lecture";
+  }
+
+  async function rehydrateEnrolledCourses(term: string) {
+    if (!term || myCourses.length === 0) return;
+    try {
+      let hasChanges = false;
+      const updatedCourses = await Promise.all(
+        myCourses.map(async (course) => {
+          if (!course.id) return course;
+          try {
+            const res = await fetch(`${API_BASE}/v1/courses/${course.id}`);
+            if (res.ok) {
+              const detailed = await res.json();
+              if (detailed && detailed.slots && Array.isArray(detailed.slots)) {
+                // Preserve user-toggled disabled slots
+                const disabledSlots = new Set<string>();
+                for (const s of course.slots || []) {
+                  if (s.disabled) {
+                    disabledSlots.add(`${s.day_code}_${s.slot_hour}`);
+                  }
+                }
+                const mergedSlots = detailed.slots.map((s: any) => ({
+                  ...s,
+                  disabled: disabledSlots.has(`${s.day_code}_${s.slot_hour}`)
+                }));
+
+                const oldSlotsStr = JSON.stringify(course.slots || []);
+                const newSlotsStr = JSON.stringify(mergedSlots);
+                const oldInstructor = course.instructor_name || (course as any).instructor;
+                const newInstructor = detailed.instructor_name || (detailed as any).instructor;
+
+                if (oldSlotsStr !== newSlotsStr || (!oldInstructor && newInstructor)) {
+                  hasChanges = true;
+                  return {
+                    ...course,
+                    ...detailed,
+                    instructor_name: newInstructor || oldInstructor,
+                    slots: mergedSlots
+                  };
+                }
+              }
+            }
+          } catch (e) {
+            // Silently ignore network failures on rehydration
+          }
+          return course;
+        })
+      );
+
+      if (hasChanges && selectedTerm === term) {
+        myCourses = updatedCourses;
+        saveCoursesForTerm(term, myCourses);
+      }
+    } catch (e) {
+      console.error("Failed to rehydrate enrolled courses", e);
+    }
+  }
+
   async function toggleCourse(course: SearchCourseHit | CoursePlannerItem) {
     const courseId = course.id;
     const normCode = course.course_code.trim().toUpperCase();
@@ -145,6 +215,9 @@
           const detailed = await res.json();
           if (detailed && (detailed.id || detailed.course_code)) {
             if (!myCourses.some(c => c.course_code.trim().toUpperCase() === normCode && (c.section || "01").trim() === normSec)) {
+              if (!detailed.instructor_name && (course as any).instructor) {
+                detailed.instructor_name = (course as any).instructor;
+              }
               myCourses = [...myCourses, detailed];
               saveCoursesForTerm(selectedTerm, myCourses);
             }
@@ -225,7 +298,7 @@
           const loc = resolveRoomLocation(rName || "N/A", s.room?.building);
           const item: ScheduledSlotItem = {
             ...c,
-            slot_type: s.slot_title || "Lecture",
+            slot_type: normalizeSlotType(s.slot_title),
             room_name: rName || "N/A",
             building: loc.building,
             campus: loc.campus
@@ -458,6 +531,11 @@
                 <div class="font-mono text-[10px] text-[#525f7f] dark:text-slate-400">Sec {course.section}</div>
               </div>
               <div class="font-serif text-xs text-[#161e2e] dark:text-slate-300 mt-1 pr-6">{course.title}</div>
+              {#if course.instructor_name || (course as any).instructor}
+                <div class="font-sans text-[10px] text-[#525f7f] dark:text-slate-400 mt-0.5 font-medium">
+                  {course.instructor_name || (course as any).instructor}
+                </div>
+              {/if}
 
               {#if course.slots && course.slots.length > 0}
                 <div class="mt-2 pt-2 border-t border-black/5 dark:border-white/5">
@@ -561,7 +639,11 @@
                           <!-- Display room name and campus directly inside slot -->
                           <div class="font-mono text-[8px] opacity-75 mt-0.5 truncate flex items-center space-x-0.5">
                             <MapPin size={8} class="shrink-0" />
-                            <span>{course.room_name} ({course.campus})</span>
+                            {#if !course.room_name || course.room_name === 'N/A' || course.room_name === 'TBA'}
+                              <span class="text-amber-700 dark:text-amber-400 font-medium italic">TBA</span>
+                            {:else}
+                              <span>{course.room_name}{course.campus && course.campus !== 'Other' ? ` (${course.campus})` : ''}</span>
+                            {/if}
                           </div>
                           <div class="flex justify-between items-center mt-0.5 border-t border-black/5 dark:border-white/5 pt-0.5 font-mono text-[7px] sm:text-[8px] uppercase">
                             <span class="opacity-75">{course.slot_type || 'Lecture'}</span>

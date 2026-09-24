@@ -64,7 +64,15 @@ class CourseBase(BaseModel):
 class Course(CourseBase):
     id: int
     slots: List[CourseSlot] = []
+    instructor_name: Optional[str] = None
+    instructor: Optional[Instructor] = None
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def resolve_instructor_name(self):
+        if not self.instructor_name and self.instructor:
+            self.instructor_name = self.instructor.full_name
+        return self
 
 class QuotaSnapshotBase(BaseModel):
     term_id: str

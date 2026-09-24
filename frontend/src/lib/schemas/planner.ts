@@ -30,6 +30,7 @@ export const CoursePlannerItemSchema = z.object({
   dept_kisaadi: z.string().optional().nullable(),
   instructor_id: z.number().optional().nullable(),
   instructor_name: z.string().optional().nullable(),
+  instructor: z.string().optional().nullable(),
   credits: z.number().optional().nullable(),
   ects: z.number().optional().nullable(),
   delivery_method: z.string().optional().nullable(),
