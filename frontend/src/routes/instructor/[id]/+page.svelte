@@ -2,7 +2,7 @@
   import { page } from "$app/state";
   import { User, History, BookOpen, Clock, Calendar, Download, Info, ArrowLeft, Search, ArrowRight, ExternalLink } from "lucide-svelte";
   import { exportToCSV, formatSlotTime } from "$lib/utils";
-  import { generateInstructorJsonLd } from "$lib/semantic";
+  import { generateInstructorJsonLd, serializeJsonLd } from "$lib/semantic";
   import type { InstructorHistoryItem, InstructorCourseSummary } from "$lib/types";
   import type { PageData } from "./$types";
 
@@ -129,7 +129,7 @@
   <meta property="og:type" content="profile" />
   <meta property="og:url" content="https://archive.bogazici.app/instructor/{instructorId}" />
   {#if legacyData}
-    {@html `<script type="application/ld+json">${JSON.stringify(generateInstructorJsonLd(instructorId || '', legacyData.instructor_name, legacyData.history))}<\/script>`}
+    {@html `<script type="application/ld+json">${serializeJsonLd(generateInstructorJsonLd(instructorId || '', legacyData.instructor_name, legacyData.history))}<\/script>`}
   {/if}
 </svelte:head>
 

@@ -55,7 +55,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-:global(.dark) body {
+.dark body {
   background-color: var(--color-canvas-dark);
   color: #f1f5f9;
 }
@@ -71,13 +71,13 @@ body {
   background: #d1cbc1;
   border-radius: 6px;
 }
-:global(.dark) .custom-scrollbar::-webkit-scrollbar-thumb {
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
   background: #1e293b;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #a89f91;
 }
-:global(.dark) .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #334155;
 }
 .no-scrollbar::-webkit-scrollbar {

@@ -3,7 +3,7 @@
   import { BookOpen, Search, ChevronRight, Hash, ArrowUpDown, User, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { exportToCSV } from "$lib/utils";
-  import { generateDepartmentsJsonLd } from "$lib/semantic";
+  import { generateDepartmentsJsonLd, serializeJsonLd } from "$lib/semantic";
   import DeptCourseTable from "$lib/components/departments/DeptCourseTable.svelte";
   import DeptInstructorTable from "$lib/components/departments/DeptInstructorTable.svelte";
   import type { DepartmentUniqueCourse, DepartmentInstructor } from "$lib/types";
@@ -189,7 +189,7 @@
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://archive.bogazici.app/departments" />
   {#if departments.length > 0}
-    {@html `<script type="application/ld+json">${JSON.stringify(generateDepartmentsJsonLd(departments))}<\/script>`}
+    {@html `<script type="application/ld+json">${serializeJsonLd(generateDepartmentsJsonLd(departments))}<\/script>`}
   {/if}
 </svelte:head>
 

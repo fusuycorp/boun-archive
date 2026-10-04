@@ -17,8 +17,8 @@ export function exportToCSV(data: Record<string, unknown>[], filename: string) {
     ...data.map(row => 
       headers.map(header => {
         let val = ('' + (row[header] ?? ''));
-        // Neutralize CSV formula injection characters
-        if (/^[=+\-@\t\r]/.test(val)) {
+        // Neutralize CSV formula injection characters (including leading whitespace)
+        if (/^\s*[=+\-@\t\r|]/.test(val)) {
           val = "'" + val;
         }
         const escaped = val.replace(/"/g, '""');
@@ -38,6 +38,7 @@ export function exportToCSV(data: Record<string, unknown>[], filename: string) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /**

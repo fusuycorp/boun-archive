@@ -3,7 +3,7 @@
   import { Calendar, User, Clock, MapPin, Hash, BookOpen, Info, Users, Activity, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { formatSlotTime } from "$lib/utils";
-  import { generateCourseJsonLd } from "$lib/semantic";
+  import { generateCourseJsonLd, serializeJsonLd } from "$lib/semantic";
   import { generateICS, downloadICS } from "$lib/ical";
   import type { QuotaSnapshot, CourseHistoryItem } from "$lib/types";
   import type { PageData } from "./$types";
@@ -88,7 +88,7 @@
   <meta name="DC.creator" content="Boğaziçi University" />
   <meta name="DC.identifier" content="https://archive.bogazici.app/course/{encodeURIComponent(courseCode || '')}" />
   <meta name="DC.type" content="Course" />
-  {@html `<script type="application/ld+json">${JSON.stringify(generateCourseJsonLd(courseCode || '', history, latestInfo))}<\/script>`}
+  {@html `<script type="application/ld+json">${serializeJsonLd(generateCourseJsonLd(courseCode || '', history, latestInfo))}<\/script>`}
 </svelte:head>
 
 <div class="max-w-6xl mx-auto space-y-6 sm:space-y-8">

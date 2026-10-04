@@ -158,14 +158,23 @@ def solve_schedule_csp(
     elective_course_keys = [e.upper() for e in request.candidate_electives if filtered_by_course.get(e.upper())]
     num_electives = min(request.num_electives_needed, len(elective_course_keys))
 
+    import time
+    start_time = time.monotonic()
+    MAX_TIMEOUT_SECONDS = 5.0
+    MAX_EXPLORED_STATES = 10000
+    MAX_COLLECTED_RESULTS = 500
+
     candidate_group_sets: List[List[str]] = []
     if num_electives > 0:
         for elect_comb in combinations(elective_course_keys, num_electives):
             candidate_group_sets.append(required_course_keys + list(elect_comb))
+            if len(candidate_group_sets) >= 50:
+                break
     else:
         candidate_group_sets.append(required_course_keys)
 
     valid_combinations: List[Dict[str, Any]] = []
+    states_count = [0]
 
     def backtrack(
         course_list: List[str],
@@ -173,6 +182,15 @@ def solve_schedule_csp(
         current_assignment: List[SectionSlotData],
         current_occupied: Set[Tuple[str, int]]
     ):
+        if len(valid_combinations) >= MAX_COLLECTED_RESULTS:
+            return
+        if states_count[0] >= MAX_EXPLORED_STATES:
+            return
+        if time.monotonic() - start_time > MAX_TIMEOUT_SECONDS:
+            return
+
+        states_count[0] += 1
+
         if index == len(course_list):
             metrics = calculate_schedule_metrics(current_assignment)
             if request.max_campus_days and len(metrics["campus_days"]) > request.max_campus_days:
@@ -194,9 +212,13 @@ def solve_schedule_csp(
                     current_assignment + [sec],
                     current_occupied.union(sec.occupied_slots)
                 )
+                if len(valid_combinations) >= MAX_COLLECTED_RESULTS or states_count[0] >= MAX_EXPLORED_STATES:
+                    break
 
     for group_set in candidate_group_sets:
         backtrack(group_set, 0, [], set())
+        if len(valid_combinations) >= MAX_COLLECTED_RESULTS or states_count[0] >= MAX_EXPLORED_STATES or time.monotonic() - start_time > MAX_TIMEOUT_SECONDS:
+            break
 
     valid_combinations.sort(
         key=lambda x: (-x["metrics"]["score"], x["metrics"]["total_gap_hours"], len(x["metrics"]["campus_days"]))

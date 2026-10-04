@@ -18,7 +18,7 @@
   } from "lucide-svelte";
 
   import { API_BASE } from "$lib/config";
-  import { generateWebSiteJsonLd } from "$lib/semantic";
+  import { generateWebSiteJsonLd, serializeJsonLd } from "$lib/semantic";
   import type { SystemStatus } from "$lib/types";
 
   let isDark = $state(false);
@@ -160,7 +160,7 @@
 
 <svelte:head>
   <title>BOUN Archive • Boğaziçi University Academic Catalog</title>
-  {@html `<script type="application/ld+json">${JSON.stringify(generateWebSiteJsonLd())}<\/script>`}
+  {@html `<script type="application/ld+json">${serializeJsonLd(generateWebSiteJsonLd())}<\/script>`}
 </svelte:head>
 
 <div class="min-h-screen w-full bg-[#faf8f5] text-[#161e2e] transition-colors duration-200 dark:bg-[#0a0e1a] dark:text-slate-100 flex flex-col antialiased selection:bg-[#002d72]/20 selection:text-[#002d72] dark:selection:bg-[#8cc8ea]/25 dark:selection:text-[#8cc8ea]">

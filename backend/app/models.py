@@ -49,8 +49,8 @@ class Course(Base):
 
     term = relationship("Term", back_populates="courses")
     department = relationship("Department", back_populates="courses")
-    instructor = relationship("Instructor", back_populates="courses")
-    slots = relationship("CourseSlot", back_populates="course")
+    instructor = relationship("Instructor", back_populates="courses", lazy="joined")
+    slots = relationship("CourseSlot", back_populates="course", lazy="selectin", cascade="all, delete-orphan", passive_deletes=True)
 
 class CourseSlot(Base):
     __tablename__ = "course_slots"
@@ -58,14 +58,14 @@ class CourseSlot(Base):
         Index("idx_slots_course_room", "course_id", "room_id"),
     )
     id = Column(Integer, primary_key=True, index=True)
-    course_id = Column(Integer, ForeignKey("courses.id"), index=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
     day_code = Column(String(10), index=True)
     slot_hour = Column(Integer, index=True)
     slot_title = Column(String(255))
     room_id = Column(Integer, ForeignKey("rooms.id"), index=True)
 
     course = relationship("Course", back_populates="slots")
-    room = relationship("Room", back_populates="slots")
+    room = relationship("Room", back_populates="slots", lazy="joined")
 
     @property
     def room_name(self) -> str:

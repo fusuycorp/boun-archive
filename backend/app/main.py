@@ -219,7 +219,7 @@ def _get_global_facets_from_db(db: Session) -> dict:
         }
     except Exception as e:
         logger.error("DB facet fallback error: %s", e)
-        return {"term": {}, "dept_code": {}, "delivery_method": {}}
+        raise HTTPException(status_code=503, detail="Database facet service temporarily unavailable")
 
 def _search_courses_from_db(
     db: Session,
@@ -343,14 +343,7 @@ def _search_courses_from_db(
         }
     except Exception as e:
         logger.error("DB search fallback error: %s", e)
-        return {
-            "hits": [],
-            "offset": offset,
-            "limit": limit,
-            "estimatedTotalHits": 0,
-            "totalHits": 0,
-            "facetDistribution": {}
-        }
+        raise HTTPException(status_code=503, detail="Search fallback service temporarily unavailable")
 
 @app.get("/")
 def read_root():
@@ -495,11 +488,19 @@ def get_global_facets(db: Session = Depends(database.get_db)):
         })
         facet_dist = results.get('facetDistribution', {})
         if not facet_dist or not facet_dist.get('term'):
-            return _get_global_facets_from_db(db)
+            facets_from_db = _get_global_facets_from_db(db)
+            if not facets_from_db or not facets_from_db.get('term'):
+                raise HTTPException(status_code=503, detail="Search facets temporarily unavailable")
+            return facets_from_db
         return facet_dist
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("Meilisearch facets error, falling back to PostgreSQL: %s", e)
-        return _get_global_facets_from_db(db)
+        facets_from_db = _get_global_facets_from_db(db)
+        if not facets_from_db or not facets_from_db.get('term'):
+            raise HTTPException(status_code=503, detail="Search facets temporarily unavailable")
+        return facets_from_db
 
 # Canonical Building and Campus Topology for Boğaziçi University
 # Invariant: JF (John Freely Hall) is in Güney, EF (Education Faculty) is in Kuzey, HH (Hamlin Hall) is in Güney
@@ -1205,6 +1206,9 @@ async def handle_scraper_webhook(
     raw_body = await request.body()
     signature = request.headers.get("x-boun-signature")
     secret = os.getenv("WEBHOOK_SECRET")
+    env = os.getenv("ENVIRONMENT", "").lower()
+    if env in ("production", "prod") and (not secret or not secret.strip()):
+        raise HTTPException(status_code=401, detail="Webhook secret not configured in production")
 
     if not verify_webhook_signature(raw_body, signature, secret):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
@@ -1252,6 +1256,11 @@ async def handle_scraper_webhook(
     # 2. Scrape Completion Summary Event
     elif event_type == "scrape.summary" or (isinstance(payload, dict) and "run_id" in payload and "status" in payload):
         record_scrape_summary(session=db, summary=payload, dry_run=False)
+        if payload.get("changes_detected", 0) > 0:
+            try:
+                await FastAPICache.clear()
+            except Exception:
+                pass
         return {
             "status": "ok",
             "event": "scrape.summary",

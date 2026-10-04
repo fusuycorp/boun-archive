@@ -109,7 +109,7 @@ export const ROOM_LOCATION_REGISTRY: Record<string, LocationInfo> = {
 
 export function resolveRoomLocation(roomName?: string | null, explicitBuilding?: string | null): LocationInfo {
   if (!roomName || !roomName.trim()) {
-    return { building: explicitBuilding?.trim() || "Unassigned", campus: "" };
+    return { building: explicitBuilding?.trim() || "Unassigned", campus: "Other" };
   }
 
   const clean = roomName.trim();
@@ -117,7 +117,7 @@ export function resolveRoomLocation(roomName?: string | null, explicitBuilding?:
 
   // Guard against unassigned / placeholder markers
   if (["N/A", "TBA", "UNKNOWN", "UNASSIGNED", "NONE", "NULL"].includes(upper)) {
-    return { building: explicitBuilding?.trim() || "Unassigned", campus: "" };
+    return { building: explicitBuilding?.trim() || "Unassigned", campus: "Other" };
   }
 
   if (upper.includes("ONLINE") || upper.includes("UZAKTAN") || upper.includes("VIRTUAL") || upper.includes("WEB") || upper.includes("ZOOM")) {
@@ -159,7 +159,14 @@ export function resolveRoomLocation(roomName?: string | null, explicitBuilding?:
   if (upper.startsWith("HK") || upper.startsWith("HB") || upper.startsWith("HC") || upper.startsWith("HA") || upper.startsWith("HD") || upper.startsWith("HİS") || upper.startsWith("HIS")) {
     return { building: `Hisar Building (${clean})`, campus: "Hisar" };
   }
-  if (upper.startsWith("K") && !upper.startsWith("KAND") && !upper.startsWith("KİL") && !upper.startsWith("KIL")) {
+  if (
+    (upper.startsWith("K") && !upper.startsWith("KAND") && !upper.startsWith("KİL") && !upper.startsWith("KIL")) ||
+    upper.startsWith("EF") ||
+    upper.startsWith("NH") ||
+    upper.startsWith("BM") ||
+    upper.startsWith("ETA") ||
+    upper.startsWith("VY")
+  ) {
     return { building: `Kuzey Building (${clean})`, campus: "Kuzey" };
   }
   if (upper.startsWith("M") || upper.startsWith("T") || upper.startsWith("JF") || upper.startsWith("İB") || upper.startsWith("IB") || upper.startsWith("NB")) {

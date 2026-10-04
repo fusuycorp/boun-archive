@@ -1,4 +1,5 @@
 -- Target PostgreSQL Schema for BOUN Archive
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE IF NOT EXISTS terms (
     id VARCHAR(15) PRIMARY KEY,
@@ -33,12 +34,13 @@ CREATE TABLE IF NOT EXISTS courses (
     instructor_id INTEGER REFERENCES instructors(id),
     credits INTEGER,
     ects INTEGER,
-    delivery_method VARCHAR(50)
+    delivery_method VARCHAR(50),
+    CONSTRAINT uq_courses_term_code_section UNIQUE (term_id, course_code, section)
 );
 
 CREATE TABLE IF NOT EXISTS course_slots (
     id SERIAL PRIMARY KEY,
-    course_id INTEGER REFERENCES courses(id),
+    course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
     day_code VARCHAR(10),
     slot_hour INTEGER,
     slot_title VARCHAR(255),
@@ -54,6 +56,8 @@ CREATE INDEX IF NOT EXISTS idx_courses_instructor ON courses(instructor_id);
 CREATE INDEX IF NOT EXISTS idx_courses_lookup ON courses(term_id, course_code, section);
 CREATE INDEX IF NOT EXISTS idx_slots_course ON course_slots(course_id);
 CREATE INDEX IF NOT EXISTS idx_slots_room ON course_slots(room_id);
+CREATE INDEX IF NOT EXISTS idx_courses_title_trgm ON courses USING gin (title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_courses_code_trgm ON courses USING gin (course_code gin_trgm_ops);
 
 CREATE TABLE IF NOT EXISTS quota_snapshots (
     id SERIAL PRIMARY KEY,

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import List, Optional, Dict, Any
 
 class TermBase(BaseModel):
@@ -141,14 +141,14 @@ class SystemStatusResponse(BaseModel):
 
 class ScheduleOptimizationRequest(BaseModel):
     term_id: str
-    target_courses: List[str]
-    candidate_electives: List[str] = []
-    num_electives_needed: int = 0
-    avoid_days: List[str] = []
-    min_hour: int = 1
-    max_hour: int = 14
-    max_campus_days: Optional[int] = None
-    max_results: int = 5
+    target_courses: List[str] = Field(default=[], max_length=20)
+    candidate_electives: List[str] = Field(default=[], max_length=30)
+    num_electives_needed: int = Field(default=0, ge=0, le=10)
+    avoid_days: List[str] = Field(default=[], max_length=7)
+    min_hour: int = Field(default=1, ge=1, le=14)
+    max_hour: int = Field(default=14, ge=1, le=14)
+    max_campus_days: Optional[int] = Field(default=None, ge=1, le=7)
+    max_results: int = Field(default=5, ge=1, le=50)
 
 class TimetableSection(BaseModel):
     course_code: str

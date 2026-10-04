@@ -9,6 +9,7 @@ import hmac
 import hashlib
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Union
@@ -55,10 +56,13 @@ def verify_webhook_signature(raw_body: bytes, signature: Optional[str], secret: 
     """Verify HMAC-SHA256 signature from boun-scrape WebhookDispatcher.
 
     Returns True if:
-      - secret is None or empty (signature check disabled for local development)
+      - secret is None or empty (signature check disabled only for local non-production development)
       - signature matches the computed HMAC-SHA256 hex digest using constant-time comparison
     """
     if not secret or not secret.strip():
+        env = os.getenv("ENVIRONMENT", "").lower()
+        if env in ("production", "prod"):
+            return False
         return True
     if not signature:
         return False

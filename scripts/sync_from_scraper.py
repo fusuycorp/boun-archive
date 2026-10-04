@@ -622,7 +622,7 @@ def _apply_delta_event(
         )
         session.add(change_log)
 
-    if change_type in ("added", "insert", "inserted", "create", "created", "modified", "update", "updated", "modify"):
+    if change_type in ("added", "insert", "inserted", "create", "created", "modified", "update", "updated", "modify", "room_changed", "slots_changed", "instructor_changed"):
         val_payload = item.get("new_value") or {}
         if not val_payload and any(k in item for k in ("course_name", "title", "instructor", "credits", "ects", "slots", "course_slots")):
             val_payload = item
@@ -1188,10 +1188,17 @@ def invalidate_redis_cache() -> None:
     try:
         import redis
         r = redis.from_url(redis_url)
-        keys = r.keys("fastapi-cache:*")
-        if keys:
-            r.delete(*keys)
-            logger.info("Invalidated %d cached FastAPI response key(s) in Redis.", len(keys))
+        deleted_count = 0
+        batch = []
+        for key in r.scan_iter(match="fastapi-cache:*", count=500):
+            batch.append(key)
+            if len(batch) >= 500:
+                deleted_count += r.delete(*batch)
+                batch = []
+        if batch:
+            deleted_count += r.delete(*batch)
+        if deleted_count > 0:
+            logger.info("Invalidated %d cached FastAPI response key(s) in Redis via SCAN.", deleted_count)
     except Exception as e:
         logger.debug("Redis cache invalidation skipped: %s", e)
 
