@@ -1,5 +1,5 @@
 # Stage 1: Build SvelteKit application
-FROM oven/bun:1-alpine AS builder
+FROM --platform=$BUILDPLATFORM oven/bun:1-alpine AS builder
 
 WORKDIR /app
 
