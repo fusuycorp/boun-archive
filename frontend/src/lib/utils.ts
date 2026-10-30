@@ -12,7 +12,7 @@ export function exportToCSV(data: Record<string, unknown>[], filename: string) {
   // Create CSV rows
   const csvRows = [
     // Header row
-    headers.join(','),
+    headers.map(h => `"${String(h).replace(/"/g, '""')}"`).join(','),
     // Data rows
     ...data.map(row => 
       headers.map(header => {

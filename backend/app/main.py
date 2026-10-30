@@ -60,7 +60,13 @@ def custom_key_builder(
         k: v for k, v in kwargs.items()
         if not isinstance(v, (Session, Request)) and k not in ("db", "request")
     }
-    accept_hdr = request.headers.get("accept", "") if request and hasattr(request, "headers") else ""
+    accept_raw = request.headers.get("accept", "") if request and hasattr(request, "headers") else ""
+    if "text/turtle" in accept_raw or "application/x-turtle" in accept_raw:
+        accept_hdr = "text/turtle"
+    elif "application/ld+json" in accept_raw or "application/json-ld" in accept_raw:
+        accept_hdr = "application/ld+json"
+    else:
+        accept_hdr = "application/json"
     cache_key = hashlib.md5(
         f"{func.__module__}:{func.__name__}:{filtered_args}:{filtered_kwargs}:{accept_hdr}".encode()
     ).hexdigest()
@@ -985,7 +991,7 @@ def get_course_history(course_code: str, request: Request = None, db: Session = 
     
     courses = db.query(models.Course).options(
         joinedload(models.Course.instructor),
-        joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
+        selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
     ).filter(
         func.upper(models.Course.course_code) == clean_code.upper()
     ).order_by(models.Course.term_id.desc(), models.Course.section.asc()).limit(1000).all()
@@ -994,7 +1000,7 @@ def get_course_history(course_code: str, request: Request = None, db: Session = 
         no_spaces = clean_code.replace(" ", "").upper()
         courses = db.query(models.Course).options(
             joinedload(models.Course.instructor),
-            joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
+            selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
         ).filter(
             func.upper(func.replace(models.Course.course_code, ' ', '')) == no_spaces
         ).order_by(models.Course.term_id.desc(), models.Course.section.asc()).limit(1000).all()
@@ -1047,7 +1053,7 @@ def get_course_schedule_ics_feed(course_code: str, db: Session = Depends(databas
     
     courses = db.query(models.Course).options(
         joinedload(models.Course.instructor),
-        joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
+        selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
     ).filter(
         func.upper(models.Course.course_code) == clean_code.upper()
     ).order_by(models.Course.term_id.desc(), models.Course.section.asc()).limit(1000).all()
@@ -1056,7 +1062,7 @@ def get_course_schedule_ics_feed(course_code: str, db: Session = Depends(databas
         no_spaces = clean_code.replace(" ", "").upper()
         courses = db.query(models.Course).options(
             joinedload(models.Course.instructor),
-            joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
+            selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
         ).filter(
             func.upper(func.replace(models.Course.course_code, ' ', '')) == no_spaces
         ).order_by(models.Course.term_id.desc(), models.Course.section.asc()).limit(1000).all()

@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS courses (
 
 CREATE TABLE IF NOT EXISTS course_slots (
     id SERIAL PRIMARY KEY,
-    course_id INTEGER REFERENCES courses(id) ON DELETE CASCADE,
+    course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     day_code VARCHAR(10),
     slot_hour INTEGER,
     slot_title VARCHAR(255),
@@ -50,12 +50,14 @@ CREATE TABLE IF NOT EXISTS course_slots (
 -- Indices for performance
 CREATE INDEX IF NOT EXISTS idx_courses_term ON courses(term_id);
 CREATE INDEX IF NOT EXISTS idx_courses_dept ON courses(dept_kisaadi);
+CREATE INDEX IF NOT EXISTS idx_courses_term_dept ON courses(term_id, dept_kisaadi);
 CREATE INDEX IF NOT EXISTS idx_courses_code ON courses(course_code);
 CREATE INDEX IF NOT EXISTS idx_courses_code_upper ON courses(UPPER(course_code));
 CREATE INDEX IF NOT EXISTS idx_courses_instructor ON courses(instructor_id);
 CREATE INDEX IF NOT EXISTS idx_courses_lookup ON courses(term_id, course_code, section);
 CREATE INDEX IF NOT EXISTS idx_slots_course ON course_slots(course_id);
 CREATE INDEX IF NOT EXISTS idx_slots_room ON course_slots(room_id);
+CREATE INDEX IF NOT EXISTS idx_slots_course_room ON course_slots(course_id, room_id);
 CREATE INDEX IF NOT EXISTS idx_courses_title_trgm ON courses USING gin (title gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_courses_code_trgm ON courses USING gin (course_code gin_trgm_ops);
 
@@ -73,13 +75,15 @@ CREATE TABLE IF NOT EXISTS quota_snapshots (
     is_consent BOOLEAN DEFAULT FALSE,
     is_unlimited BOOLEAN DEFAULT FALSE,
     available INTEGER,
-    captured_at VARCHAR(50) NOT NULL
+    captured_at VARCHAR(50) NOT NULL,
+    CONSTRAINT uq_quota_snapshot_entry UNIQUE (term_id, course_code, section, department, captured_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_quota_term ON quota_snapshots(term_id);
 CREATE INDEX IF NOT EXISTS idx_quota_code ON quota_snapshots(course_code);
 CREATE INDEX IF NOT EXISTS idx_quota_code_upper ON quota_snapshots(UPPER(course_code));
 CREATE INDEX IF NOT EXISTS idx_quota_captured_at ON quota_snapshots(captured_at);
+CREATE INDEX IF NOT EXISTS idx_quota_course_captured ON quota_snapshots(course_code, captured_at);
 CREATE INDEX IF NOT EXISTS idx_quota_code_term_captured ON quota_snapshots(course_code, term_id, captured_at DESC);
 
 CREATE TABLE IF NOT EXISTS course_changes (

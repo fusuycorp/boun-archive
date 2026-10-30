@@ -147,26 +147,79 @@ def departments_to_json_ld(
         ]
     }
 
+VTIMEZONE_ISTANBUL = "\r\n".join([
+    "BEGIN:VTIMEZONE",
+    "TZID:Europe/Istanbul",
+    "BEGIN:STANDARD",
+    "TZOFFSETFROM:+0300",
+    "TZOFFSETTO:+0300",
+    "TZNAME:+03",
+    "DTSTART:19700101T000000",
+    "END:STANDARD",
+    "END:VTIMEZONE"
+])
+
+def _escape_ical_text(text: Any) -> str:
+    if text is None:
+        return ""
+    return (
+        str(text)
+        .replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\r\n", "\\n")
+        .replace("\n", "\\n")
+    )
+
+def _resolve_semester_bounds(term_id: Optional[str]) -> tuple[int, int, int, str]:
+    # Returns (base_year, base_month, base_monday, until_utc)
+    if term_id:
+        clean = term_id.strip().replace("/", "-")
+        parts = clean.split("-")
+        try:
+            start_yr = int(parts[0])
+            sem = int(parts[-1]) if len(parts) >= 2 else 1
+            if sem == 2:
+                # Spring semester: mid-February to mid-June
+                from datetime import date
+                d = date(start_yr + 1 if len(parts) > 2 else start_yr, 2, 15)
+                monday = 15 + ((0 - d.weekday()) % 7)
+                yr = d.year
+                return (yr, 2, monday, f"{yr}0615T235959Z")
+            elif sem == 3:
+                # Summer semester: late June to late August
+                from datetime import date
+                d = date(start_yr + 1 if len(parts) > 2 else start_yr, 6, 22)
+                monday = 22 + ((0 - d.weekday()) % 7)
+                yr = d.year
+                return (yr, 6, monday, f"{yr}0825T235959Z")
+            else:
+                from datetime import date
+                d = date(start_yr, 9, 18)
+                monday = 18 + ((0 - d.weekday()) % 7)
+                return (start_yr, 9, monday, f"{start_yr + 1}0125T235959Z")
+        except Exception:
+            pass
+    return (2026, 9, 21, "20270125T235959Z")
+
 def generate_course_schedule_ics(
     course_code: str,
     history_or_course: List[Dict[str, Any]],
     calendar_title: Optional[str] = None
 ) -> str:
-    cal_title = calendar_title or f"BOUN {course_code} Schedule"
+    cal_title = _escape_ical_text(calendar_title or f"BOUN {course_code} Schedule")
     now_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    
-    # Semester reference: Fall 2026 starting Monday 2026-09-21
-    base_year = 2026
-    base_month = 9
-    base_monday = 21
 
     events = []
     # Filter to most recent term if history list provided
+    latest_term = None
     if history_or_course:
-        latest_term = history_or_course[0].get("term_id")
-        target_items = [h for h in history_or_course if h.get("term_id") == latest_term] or history_or_course
+        latest_term = history_or_course[0].get("term_id") or history_or_course[0].get("term")
+        target_items = [h for h in history_or_course if (h.get("term_id") or h.get("term")) == latest_term] or history_or_course
     else:
         target_items = []
+
+    base_year, base_month, base_monday, until_utc = _resolve_semester_bounds(latest_term)
 
     for item in target_items:
         sec = f".{item.get('section')}" if item.get("section") else ""
@@ -194,7 +247,14 @@ def generate_course_schedule_ics(
             uid = f"{course_code}{sec}-{day_code}-{slot_hour}-{idx}@archive.bogazici.app"
             location = s.get("room") or s.get("room_name") or "TBA"
 
-            description = f"Course: {course_code}{sec}\\nTitle: {title}\\nInstructor: {instructor}\\nRoom: {location}"
+            summary_escaped = _escape_ical_text(f"{course_code}{sec} - {title}")
+            location_escaped = _escape_ical_text(location)
+            desc_escaped = (
+                f"Course: {_escape_ical_text(course_code + sec)}\\n"
+                f"Title: {_escape_ical_text(title)}\\n"
+                f"Instructor: {_escape_ical_text(instructor)}\\n"
+                f"Room: {location_escaped}"
+            )
 
             event_lines = [
                 "BEGIN:VEVENT",
@@ -202,10 +262,10 @@ def generate_course_schedule_ics(
                 f"DTSTAMP:{now_str}",
                 f"DTSTART;TZID=Europe/Istanbul:{dt_start}",
                 f"DTEND;TZID=Europe/Istanbul:{dt_end}",
-                f"RRULE:FREQ=WEEKLY;BYDAY={by_day};UNTIL=20270125T235959Z",
-                f"SUMMARY:{course_code}{sec} - {title}",
-                f"LOCATION:{location}",
-                f"DESCRIPTION:{description}",
+                f"RRULE:FREQ=WEEKLY;BYDAY={by_day};UNTIL={until_utc}",
+                f"SUMMARY:{summary_escaped}",
+                f"LOCATION:{location_escaped}",
+                f"DESCRIPTION:{desc_escaped}",
                 "STATUS:CONFIRMED",
                 "END:VEVENT"
             ]
@@ -219,6 +279,7 @@ def generate_course_schedule_ics(
         "METHOD:PUBLISH",
         f"X-WR-CALNAME:{cal_title}",
         "X-WR-TIMEZONE:Europe/Istanbul",
+        VTIMEZONE_ISTANBUL,
         *events,
         "END:VCALENDAR"
     ]) + "\r\n"
@@ -289,7 +350,7 @@ def course_history_to_turtle(
     for item in history:
         t_id = item.get("term_id", "").replace("/", "-")
         sec = item.get("section") or "01"
-        inst_uri = f'boun:course/{clean_code}/{t_id}/{sec}'
+        inst_uri = f'{base_url}/id/course/{clean_code}/{t_id}/{sec}'
         course_props.append(f'schema:hasCourseInstance <{inst_uri}>')
 
     lines.append(f'boun:course/{clean_code} ' + ' ;\n    '.join(course_props) + ' .\n')

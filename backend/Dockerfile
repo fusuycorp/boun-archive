@@ -1,28 +1,30 @@
-FROM python:3.11-slim-bookworm
+FROM python:3.11-slim-bookworm AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
+RUN mkdir app && touch app/__init__.py
+RUN uv pip install --system --no-cache ".[scripts]"
+
+FROM python:3.11-slim-bookworm AS runtime
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
     wget \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy files needed for dependency installation
-# We copy README.md because pyproject.toml references it
-COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Create a dummy app directory to satisfy the build system 
-# during the dependency-only install phase (caching)
-RUN mkdir app && touch app/__init__.py
-
-# Install dependencies, including the migration/indexing script extra used by entrypoint.sh
-RUN uv pip install --system --no-cache ".[scripts]"
-
-# Now copy the actual source code
+# Copy actual source code
 COPY backend/app/ ./app/
 COPY backend/wait_for_services.py ./
 COPY backend/entrypoint.sh ./

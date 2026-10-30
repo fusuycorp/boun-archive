@@ -164,8 +164,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PORT: ${BACKEND_PORT:-8000}
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
-      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
-      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
     networks:
       - backend_net
       - frontend_net
@@ -200,6 +200,12 @@ services:
       PORT: ${FRONTEND_PORT}
     networks:
       - frontend_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:$${PORT:-3000}/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     deploy:
       replicas: 3
       update_config:
@@ -229,6 +235,12 @@ services:
         target: /etc/nginx/nginx.conf
     networks:
       - frontend_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     deploy:
       replicas: 2
       restart_policy:

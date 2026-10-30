@@ -36,7 +36,7 @@
       </div>
 
       <div class="pt-2 text-right">
-        <a href="/course/{course.course_code}" class="inline-flex items-center space-x-1 text-xs font-semibold text-[#002d72] dark:text-[#8cc8ea] hover:underline">
+        <a href="/course/{encodeURIComponent(course.course_code)}" class="inline-flex items-center space-x-1 text-xs font-semibold text-[#002d72] dark:text-[#8cc8ea] hover:underline">
           <span>View History</span> <ArrowRight size={13} />
         </a>
       </div>
@@ -88,7 +88,7 @@
             </div>
           </td>
           <td class="p-4 text-right">
-            <a href="/course/{course.course_code}" class="inline-flex items-center space-x-1.5 text-xs font-semibold text-[#525f7f] hover:text-[#002d72] dark:hover:text-[#8cc8ea] transition-colors">
+            <a href="/course/{encodeURIComponent(course.course_code)}" class="inline-flex items-center space-x-1.5 text-xs font-semibold text-[#525f7f] hover:text-[#002d72] dark:hover:text-[#8cc8ea] transition-colors">
               <span>History</span> <ArrowRight size={13} />
             </a>
           </td>

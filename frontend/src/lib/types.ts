@@ -41,6 +41,7 @@ export interface Course {
   title?: string | null;
   instructor_id?: number | null;
   instructor_name?: string | null;
+  instructor?: Instructor | null;
   credits?: number | null;
   ects?: number | null;
   delivery_method?: string | null;

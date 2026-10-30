@@ -40,6 +40,58 @@ export interface GenericCourseSchedule {
   slots?: GenericScheduleSlot[] | null;
 }
 
+const VTIMEZONE_ISTANBUL = [
+  "BEGIN:VTIMEZONE",
+  "TZID:Europe/Istanbul",
+  "BEGIN:STANDARD",
+  "TZOFFSETFROM:+0300",
+  "TZOFFSETTO:+0300",
+  "TZNAME:+03",
+  "DTSTART:19700101T000000",
+  "END:STANDARD",
+  "END:VTIMEZONE"
+].join("\r\n");
+
+function escapeIcalText(val: unknown): string {
+  if (val === null || val === undefined) return "";
+  return String(val)
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r?\n/g, "\\n");
+}
+
+function resolveSemesterBounds(termId?: string | null): {
+  baseYear: number;
+  baseMonth: number;
+  baseMonday: number;
+  untilUtc: string;
+} {
+  if (termId) {
+    const clean = termId.trim().replace(/\//g, "-");
+    const parts = clean.split("-");
+    const startYr = parseInt(parts[0], 10);
+    const sem = parts.length >= 2 ? parseInt(parts[parts.length - 1], 10) : 1;
+    if (!isNaN(startYr)) {
+      const calYear = parts.length > 2 && sem >= 2 ? startYr + 1 : startYr;
+      if (sem === 2) {
+        const d = new Date(Date.UTC(calYear, 1, 15));
+        const offset = (1 - d.getUTCDay() + 7) % 7;
+        return { baseYear: calYear, baseMonth: 2, baseMonday: 15 + offset, untilUtc: `${calYear}0615T235959Z` };
+      } else if (sem === 3) {
+        const d = new Date(Date.UTC(calYear, 5, 22));
+        const offset = (1 - d.getUTCDay() + 7) % 7;
+        return { baseYear: calYear, baseMonth: 6, baseMonday: 22 + offset, untilUtc: `${calYear}0825T235959Z` };
+      } else {
+        const d = new Date(Date.UTC(startYr, 8, 18));
+        const offset = (1 - d.getUTCDay() + 7) % 7;
+        return { baseYear: startYr, baseMonth: 9, baseMonday: 18 + offset, untilUtc: `${startYr + 1}0125T235959Z` };
+      }
+    }
+  }
+  return { baseYear: 2026, baseMonth: 9, baseMonday: 21, untilUtc: "20270125T235959Z" };
+}
+
 /**
  * Generates an RFC 5545 compliant iCalendar string (.ics) from a list of courses and slots.
  */
@@ -50,11 +102,10 @@ export function generateICS(
 ): string {
   const events: string[] = [];
   const nowStr = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
-  
-  // Base reference Monday for semester start (Fall 2026: September 21, 2026)
-  const baseYear = 2026;
-  const baseMonth = 9;
-  const baseMonday = 21;
+
+  const firstCourse = courses[0] as any;
+  const termHint = firstCourse?.term_id || firstCourse?.term || null;
+  const { baseYear, baseMonth, baseMonday, untilUtc } = resolveSemesterBounds(termHint);
 
   courses.forEach((course) => {
     const rawCourse = course as any;
@@ -65,6 +116,7 @@ export function generateICS(
     const sec = rawCourse.section ? `.${rawCourse.section}` : "";
 
     slots.forEach((slot: any, slotIdx: number) => {
+      if (slot.disabled) return;
       const dayCode = slot.day_code || slot.day;
       const slotHour = slot.slot_hour ?? slot.hour;
       if (!dayCode || !slotHour) return;
@@ -82,7 +134,9 @@ export function generateICS(
       const uid = `${code}${sec}-${dayCode}-${slotHour}-${slotIdx}@archive.bogazici.app`;
 
       const location = slot.room_name || slot.room || "TBA";
-      const description = `Course: ${code}${sec}\\nTitle: ${title}\\nInstructor: ${instructor}\\nRoom: ${location}`;
+      const summaryEscaped = escapeIcalText(`${code}${sec} - ${title}`);
+      const locationEscaped = escapeIcalText(location);
+      const description = `Course: ${escapeIcalText(code + sec)}\\nTitle: ${escapeIcalText(title)}\\nInstructor: ${escapeIcalText(instructor)}\\nRoom: ${locationEscaped}`;
 
       events.push([
         "BEGIN:VEVENT",
@@ -90,9 +144,9 @@ export function generateICS(
         `DTSTAMP:${nowStr}`,
         `DTSTART;TZID=Europe/Istanbul:${dtStart}`,
         `DTEND;TZID=Europe/Istanbul:${dtEnd}`,
-        `RRULE:FREQ=WEEKLY;BYDAY=${byDay};UNTIL=20270125T235959Z`,
-        `SUMMARY:${code}${sec} - ${title}`,
-        `LOCATION:${location}`,
+        `RRULE:FREQ=WEEKLY;BYDAY=${byDay};UNTIL=${untilUtc}`,
+        `SUMMARY:${summaryEscaped}`,
+        `LOCATION:${locationEscaped}`,
         `DESCRIPTION:${description}`,
         "STATUS:CONFIRMED",
         "END:VEVENT"
@@ -106,8 +160,9 @@ export function generateICS(
     "PRODID:-//BOUN Archive//Course Planner 1.0//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    `X-WR-CALNAME:${calendarTitle}`,
+    `X-WR-CALNAME:${escapeIcalText(calendarTitle)}`,
     "X-WR-TIMEZONE:Europe/Istanbul",
+    VTIMEZONE_ISTANBUL,
     ...events,
     "END:VCALENDAR"
   ].join("\r\n") + "\r\n";

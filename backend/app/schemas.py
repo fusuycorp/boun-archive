@@ -40,6 +40,7 @@ class CourseSlotBase(BaseModel):
 
 class CourseSlot(CourseSlotBase):
     id: int
+    course_id: Optional[int] = None
     room_name: Optional[str] = None
     room: Optional[Room] = None
     model_config = ConfigDict(from_attributes=True)

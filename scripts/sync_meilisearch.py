@@ -82,11 +82,13 @@ def sync_meilisearch(force: bool = False):
     for c in query.yield_per(chunk_size):
         slots_data = []
         for s in c.slots:
+            r_name = s.room.name if s.room else None
             slots_data.append({
                 'day_code': s.day_code,
                 'slot_hour': s.slot_hour,
                 'slot_title': s.slot_title,
-                'room_name': s.room.name if s.room else None
+                'room': r_name,
+                'room_name': r_name
             })
 
         doc = {
@@ -150,6 +152,8 @@ def sync_meilisearch(force: bool = False):
             print("No orphaned course documents to prune.")
     except Exception as e:
         print(f"Warning: Document pruning check encountered an error: {e}")
+    finally:
+        session.close()
         
     print("Meilisearch sync completed!")
 

@@ -76,6 +76,7 @@ class QuotaSnapshot(Base):
     __table_args__ = (
         Index("idx_quota_code_term_captured", "course_code", "term_id", "captured_at"),
         Index("idx_quota_course_captured", "course_code", "captured_at"),
+        UniqueConstraint("term_id", "course_code", "section", "department", "captured_at", name="uq_quota_snapshot_entry"),
     )
     id = Column(Integer, primary_key=True, index=True)
     term_id = Column(String(15), ForeignKey("terms.id"), index=True)
@@ -87,8 +88,8 @@ class QuotaSnapshot(Base):
     current = Column(String(20))
     quota_numeric = Column(Integer, nullable=True)
     current_numeric = Column(Integer, nullable=True)
-    is_consent = Column(Boolean, default=False)
-    is_unlimited = Column(Boolean, default=False)
+    is_consent = Column(Boolean, default=False, server_default="false")
+    is_unlimited = Column(Boolean, default=False, server_default="false")
     available = Column(Integer, nullable=True)
     captured_at = Column(String(50), nullable=False, index=True)
 

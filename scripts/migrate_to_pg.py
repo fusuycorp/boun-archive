@@ -45,9 +45,7 @@ def clean_int(value):
 def migrate():
     print("Starting migration from SQLite to PostgreSQL...")
     
-    # 1. Setup Connections
-    schedules_db_path = find_data_file('schedules.db')
-    sqlite_conn = sqlite3.connect(schedules_db_path)
+    # 1. Setup Connections & Idempotency Check
     pg_url = os.getenv("DATABASE_URL")
     engine = create_engine(pg_url)
     
@@ -62,6 +60,9 @@ def migrate():
                     return
         except Exception as e:
             print(f"Error checking course table status (table may be corrupted): {e}. Proceeding with fresh migration.")
+
+    schedules_db_path = find_data_file('schedules.db')
+    sqlite_conn = sqlite3.connect(schedules_db_path)
 
     Session = sessionmaker(bind=engine)
     session = Session()

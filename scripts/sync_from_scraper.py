@@ -61,12 +61,15 @@ def normalize_section(section: Any) -> Optional[str]:
 
 
 class StrictRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Prevent cross-domain redirects that could leak authorization headers."""
+    """Prevent cross-domain or protocol-downgrade redirects that could leak authorization headers."""
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        orig_netloc = urllib.parse.urlparse(req.full_url).netloc
-        new_netloc = urllib.parse.urlparse(newurl).netloc
-        if orig_netloc != new_netloc:
-            logger.warning("Blocked cross-domain redirect from %s to %s", orig_netloc, new_netloc)
+        orig_parsed = urllib.parse.urlparse(req.full_url)
+        new_parsed = urllib.parse.urlparse(newurl)
+        if orig_parsed.netloc != new_parsed.netloc:
+            logger.warning("Blocked cross-domain redirect from %s to %s", orig_parsed.netloc, new_parsed.netloc)
+            return None
+        if orig_parsed.scheme == "https" and new_parsed.scheme != "https":
+            logger.warning("Blocked protocol downgrade redirect from %s to %s", orig_parsed.scheme, new_parsed.scheme)
             return None
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -94,19 +97,26 @@ class ScraperClient:
             headers["X-Feed-Token"] = self.token
 
         req = urllib.request.Request(url, headers=headers)
-        try:
-            with self.opener.open(req, timeout=30) as resp:
-                content = resp.read().decode("utf-8")
-                return json.loads(content)
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                logger.debug("Endpoint not found (404): %s", url)
-                return None
-            logger.error("HTTP error %s requesting %s: %s", e.code, url, e.reason)
-            raise
-        except Exception as e:
-            logger.error("Network error requesting %s: %s", url, e)
-            raise
+        for attempt in range(3):
+            try:
+                with self.opener.open(req, timeout=30) as resp:
+                    content = resp.read().decode("utf-8")
+                    return json.loads(content)
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    logger.debug("Endpoint not found (404): %s", url)
+                    return None
+                if e.code in (502, 503, 504, 429) and attempt < 2:
+                    time.sleep(2 ** attempt)
+                    continue
+                logger.error("HTTP error %s requesting %s: %s", e.code, url, e.reason)
+                raise
+            except Exception as e:
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+                    continue
+                logger.error("Network error requesting %s: %s", url, e)
+                raise
 
 
 def ensure_term(session, term_id: str, term_cache: Optional[Union[Set[str], Dict[str, Any]]] = None) -> Term:
@@ -195,7 +205,7 @@ def ensure_department(
 
 
 def ensure_instructor(session, full_name: Optional[str], inst_cache: Dict[str, int]) -> Optional[int]:
-    if not full_name or not full_name.strip():
+    if not full_name or not full_name.strip() or full_name.strip().upper() in ("STAFF", "TBA", "OFFERED", "NONE"):
         return None
     name = full_name.strip()
     if name in inst_cache:
@@ -211,7 +221,7 @@ def ensure_instructor(session, full_name: Optional[str], inst_cache: Dict[str, i
 
 
 def ensure_room(session, room_name: Optional[str], room_cache: Dict[str, int]) -> Optional[int]:
-    if not room_name or not room_name.strip():
+    if not room_name or not room_name.strip() or room_name.strip().upper() in ("TBA", "N/A", "NONE"):
         return None
     name = room_name.strip()
     if name in room_cache:
@@ -233,11 +243,13 @@ def sync_meili_documents(meili_index, courses: List[Course], chunk_size: int = 1
     for c in courses:
         slots_data = []
         for s in c.slots:
+            r_name = s.room.name if s.room else None
             slots_data.append({
                 "day_code": s.day_code,
                 "slot_hour": s.slot_hour,
                 "slot_title": s.slot_title,
-                "room_name": s.room.name if s.room else None
+                "room": r_name,
+                "room_name": r_name
             })
         doc = {
             "id": c.id,
@@ -290,77 +302,81 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
 
         last_captured_at = cursor
         for item in data:
-            term_id = item.get("term")
-            course_code = normalize_code(item.get("course_code"))
-            section = normalize_section(item.get("section"))
-            if not term_id or not course_code:
-                continue
+            try:
+                with session.begin_nested():
+                    term_id = item.get("term")
+                    course_code = normalize_code(item.get("course_code"))
+                    section = normalize_section(item.get("section"))
+                    if not term_id or not course_code:
+                        continue
 
-            ensure_term(session, term_id, term_cache)
+                    ensure_term(session, term_id, term_cache)
 
-            captured = item.get("captured_at") or item.get("timestamp") or datetime.now(timezone.utc).isoformat()
-            dept_raw = item.get("department")
-            if not dept_raw and course_code:
-                parts = course_code.strip().split()
-                if parts:
-                    dept_raw = parts[0]
-            dept = dept_raw.strip().upper() if dept_raw else None
-            status = item.get("status")
-            quota_raw = str(item.get("quota")) if item.get("quota") is not None else None
-            current_raw = str(item.get("current")) if item.get("current") is not None else None
-            quota_num = clean_int(item.get("quota_numeric")) if item.get("quota_numeric") is not None else clean_int(item.get("quota"))
-            current_num = clean_int(item.get("current_numeric")) if item.get("current_numeric") is not None else clean_int(item.get("current"))
-            avail = clean_int(item.get("available"))
-            if avail is None and quota_num is not None and current_num is not None:
-                avail = max(0, quota_num - current_num)
+                    captured = item.get("captured_at") or item.get("timestamp") or datetime.now(timezone.utc).isoformat()
+                    dept_raw = item.get("department")
+                    if not dept_raw and course_code:
+                        parts = course_code.strip().split()
+                        if parts:
+                            dept_raw = parts[0]
+                    dept = dept_raw.strip().upper() if dept_raw else None
+                    status = item.get("status")
+                    quota_raw = str(item.get("quota")) if item.get("quota") is not None else None
+                    current_raw = str(item.get("current")) if item.get("current") is not None else None
+                    quota_num = clean_int(item.get("quota_numeric")) if item.get("quota_numeric") is not None else clean_int(item.get("quota"))
+                    current_num = clean_int(item.get("current_numeric")) if item.get("current_numeric") is not None else clean_int(item.get("current"))
+                    avail = clean_int(item.get("available"))
+                    if avail is None and quota_num is not None and current_num is not None:
+                        avail = max(0, quota_num - current_num)
 
-            # Deduplication & idempotent upsert
-            existing = session.query(QuotaSnapshot).filter(
-                QuotaSnapshot.term_id == term_id,
-                QuotaSnapshot.course_code == course_code,
-                QuotaSnapshot.section == section,
-                QuotaSnapshot.department == dept,
-                QuotaSnapshot.captured_at == captured
-            ).first()
+                    # Deduplication & idempotent upsert
+                    existing = session.query(QuotaSnapshot).filter(
+                        QuotaSnapshot.term_id == term_id,
+                        QuotaSnapshot.course_code == course_code,
+                        QuotaSnapshot.section == section,
+                        QuotaSnapshot.department == dept,
+                        QuotaSnapshot.captured_at == captured
+                    ).first()
 
-            if not existing:
-                snapshot = QuotaSnapshot(
-                    term_id=term_id,
-                    course_code=course_code,
-                    section=section,
-                    department=dept,
-                    status=status,
-                    quota=quota_raw,
-                    current=current_raw,
-                    quota_numeric=quota_num,
-                    current_numeric=current_num,
-                    is_consent=bool(item.get("is_consent", False)),
-                    is_unlimited=bool(item.get("is_unlimited", False)),
-                    available=avail,
-                    captured_at=captured
-                )
-                if not dry_run:
-                    session.add(snapshot)
-            else:
-                if status is not None:
-                    existing.status = status
-                if quota_raw is not None:
-                    existing.quota = quota_raw
-                if current_raw is not None:
-                    existing.current = current_raw
-                if quota_num is not None:
-                    existing.quota_numeric = quota_num
-                if current_num is not None:
-                    existing.current_numeric = current_num
-                existing.is_consent = bool(item.get("is_consent", existing.is_consent))
-                existing.is_unlimited = bool(item.get("is_unlimited", existing.is_unlimited))
-                if avail is not None:
-                    existing.available = avail
+                    if not existing:
+                        snapshot = QuotaSnapshot(
+                            term_id=term_id,
+                            course_code=course_code,
+                            section=section,
+                            department=dept,
+                            status=status,
+                            quota=quota_raw,
+                            current=current_raw,
+                            quota_numeric=quota_num,
+                            current_numeric=current_num,
+                            is_consent=bool(item.get("is_consent", False)),
+                            is_unlimited=bool(item.get("is_unlimited", False)),
+                            available=avail,
+                            captured_at=captured
+                        )
+                        if not dry_run:
+                            session.add(snapshot)
+                    else:
+                        if status is not None:
+                            existing.status = status
+                        if quota_raw is not None:
+                            existing.quota = quota_raw
+                        if current_raw is not None:
+                            existing.current = current_raw
+                        if quota_num is not None:
+                            existing.quota_numeric = quota_num
+                        if current_num is not None:
+                            existing.current_numeric = current_num
+                        existing.is_consent = bool(item.get("is_consent", existing.is_consent))
+                        existing.is_unlimited = bool(item.get("is_unlimited", existing.is_unlimited))
+                        if avail is not None:
+                            existing.available = avail
 
-            if captured:
-                if last_captured_at is None or captured > last_captured_at:
-                    last_captured_at = captured
-            total_synced += 1
+                    if captured:
+                        if last_captured_at is None or captured > last_captured_at:
+                            last_captured_at = captured
+                    total_synced += 1
+            except Exception as e:
+                logger.warning("Skipping anomalous quota snapshot item %s: %s", item.get("course_code"), e)
 
         if not dry_run:
             if not last_captured_at:
@@ -741,18 +757,22 @@ def sync_deltas_feed(
             if ts and (last_timestamp is None or ts > last_timestamp):
                 last_timestamp = ts
 
-            _apply_delta_event(
-                session=session,
-                item=item,
-                inst_cache=inst_cache,
-                room_cache=room_cache,
-                dept_cache=dept_cache,
-                term_cache=term_cache,
-                touched_course_ids=touched_course_ids,
-                meili_index=meili_index,
-                dry_run=dry_run
-            )
-            total_synced += 1
+            try:
+                with session.begin_nested():
+                    _apply_delta_event(
+                        session=session,
+                        item=item,
+                        inst_cache=inst_cache,
+                        room_cache=room_cache,
+                        dept_cache=dept_cache,
+                        term_cache=term_cache,
+                        touched_course_ids=touched_course_ids,
+                        meili_index=meili_index,
+                        dry_run=dry_run
+                    )
+                total_synced += 1
+            except Exception as e:
+                logger.warning("Skipping anomalous delta item %s: %s", item.get("course_code"), e)
 
         if not dry_run:
             if not last_timestamp:
@@ -1111,6 +1131,7 @@ def refresh_all_data(
             total_upserted += count
             if not dry_run:
                 _mark_term_reconciled(session, term_id, datetime.now(timezone.utc).isoformat())
+            session.expunge_all()
         except Exception as e:
             logger.error("Error refreshing term %s: %s", term_id, e)
 

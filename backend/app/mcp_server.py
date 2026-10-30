@@ -2,7 +2,7 @@ import sys
 import json
 import logging
 from typing import Dict, Any, List, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload, joinedload
 from . import database, models, schemas
 from .optimizer import solve_schedule_csp
 
@@ -125,7 +125,10 @@ def execute_tool(name: str, args: Dict[str, Any], db: Session) -> Dict[str, Any]
         dept = args.get("dept")
         limit = min(int(args.get("limit", 10)), 50)
 
-        q = db.query(models.Course).join(models.Course.instructor, isouter=True)
+        q = db.query(models.Course).options(
+            joinedload(models.Course.instructor),
+            selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
+        ).join(models.Course.instructor, isouter=True)
         if term:
             q = q.filter(models.Course.term_id == term)
         if dept:
@@ -158,7 +161,10 @@ def execute_tool(name: str, args: Dict[str, Any], db: Session) -> Dict[str, Any]
     elif name == "boun_get_course_history":
         course_code = args.get("course_code", "").strip()
         clean_code = " ".join(course_code.split()).upper()
-        courses = db.query(models.Course).filter(
+        courses = db.query(models.Course).options(
+            joinedload(models.Course.instructor),
+            selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
+        ).filter(
             models.Course.course_code.ilike(clean_code)
         ).order_by(models.Course.term_id.desc()).limit(100).all()
 
@@ -225,101 +231,101 @@ def execute_tool(name: str, args: Dict[str, Any], db: Session) -> Dict[str, Any]
 
 
 def run_stdio_mcp_server():
-    db_gen = database.get_db()
-    db = next(db_gen)
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
 
-    try:
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
+        try:
+            msg = json.loads(line)
+        except Exception as e:
+            logger.error(f"Invalid JSON: {e}")
+            continue
 
+        msg_id = msg.get("id")
+        method = msg.get("method")
+        params = msg.get("params", {})
+
+        if method == "initialize":
+            resp = {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "boun-archive-mcp",
+                        "version": "1.0.0"
+                    }
+                }
+            }
+            sys.stdout.write(json.dumps(resp) + "\n")
+            sys.stdout.flush()
+
+        elif method == "notifications/initialized":
+            pass
+
+        elif method == "tools/list":
+            resp = {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "result": {
+                    "tools": TOOLS_DEFINITIONS
+                }
+            }
+            sys.stdout.write(json.dumps(resp) + "\n")
+            sys.stdout.flush()
+
+        elif method == "tools/call":
+            tool_name = params.get("name")
+            tool_args = params.get("arguments", {})
+
+            db_gen = database.get_db()
+            db = next(db_gen)
             try:
-                msg = json.loads(line)
-            except Exception as e:
-                logger.error(f"Invalid JSON: {e}")
-                continue
-
-            msg_id = msg.get("id")
-            method = msg.get("method")
-            params = msg.get("params", {})
-
-            if method == "initialize":
+                tool_res = execute_tool(tool_name, tool_args, db)
                 resp = {
                     "jsonrpc": "2.0",
                     "id": msg_id,
                     "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {
-                            "tools": {}
-                        },
-                        "serverInfo": {
-                            "name": "boun-archive-mcp",
-                            "version": "1.0.0"
-                        }
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": json.dumps(tool_res, indent=2, ensure_ascii=False)
+                            }
+                        ],
+                        "isError": False
                     }
                 }
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-
-            elif method == "notifications/initialized":
-                pass
-
-            elif method == "tools/list":
+            except Exception as ex:
                 resp = {
                     "jsonrpc": "2.0",
                     "id": msg_id,
                     "result": {
-                        "tools": TOOLS_DEFINITIONS
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Error executing {tool_name}: {str(ex)}"
+                            }
+                        ],
+                        "isError": True
                     }
                 }
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-
-            elif method == "tools/call":
-                tool_name = params.get("name")
-                tool_args = params.get("arguments", {})
-
+            finally:
                 try:
-                    tool_res = execute_tool(tool_name, tool_args, db)
-                    resp = {
-                        "jsonrpc": "2.0",
-                        "id": msg_id,
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": json.dumps(tool_res, indent=2, ensure_ascii=False)
-                                }
-                            ],
-                            "isError": False
-                        }
-                    }
-                except Exception as ex:
-                    resp = {
-                        "jsonrpc": "2.0",
-                        "id": msg_id,
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": f"Error executing {tool_name}: {str(ex)}"
-                                }
-                            ],
-                            "isError": True
-                        }
-                    }
+                    next(db_gen)
+                except StopIteration:
+                    pass
 
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
+            sys.stdout.write(json.dumps(resp) + "\n")
+            sys.stdout.flush()
 
-            elif method == "ping":
-                resp = {"jsonrpc": "2.0", "id": msg_id, "result": {}}
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
-
-    finally:
-        db.close()
+        elif method == "ping":
+            resp = {"jsonrpc": "2.0", "id": msg_id, "result": {}}
+            sys.stdout.write(json.dumps(resp) + "\n")
+            sys.stdout.flush()
 
 
 if __name__ == "__main__":

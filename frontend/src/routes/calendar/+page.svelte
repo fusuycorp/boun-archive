@@ -144,53 +144,66 @@
   async function rehydrateEnrolledCourses(term: string) {
     if (!term || myCourses.length === 0) return;
     try {
-      let hasChanges = false;
-      const updatedCourses = await Promise.all(
-        myCourses.map(async (course) => {
-          if (!course.id) return course;
+      const snapshot = [...myCourses];
+      const updatesByKey = new Map<string, CoursePlannerItem>();
+
+      await Promise.all(
+        snapshot.map(async (course) => {
+          if (!course.id) return;
           try {
             const res = await fetch(`${API_BASE}/v1/courses/${course.id}`);
             if (res.ok) {
               const detailed = await res.json();
               if (detailed && detailed.slots && Array.isArray(detailed.slots)) {
-                // Preserve user-toggled disabled slots
-                const disabledSlots = new Set<string>();
-                for (const s of course.slots || []) {
-                  if (s.disabled) {
-                    disabledSlots.add(`${s.day_code}_${s.slot_hour}`);
-                  }
-                }
-                const mergedSlots = detailed.slots.map((s: any) => ({
-                  ...s,
-                  disabled: disabledSlots.has(`${s.day_code}_${s.slot_hour}`)
-                }));
-
-                const oldSlotsStr = JSON.stringify(course.slots || []);
-                const newSlotsStr = JSON.stringify(mergedSlots);
-                const oldInstructor = course.instructor_name || (course as any).instructor;
-                const newInstructor = detailed.instructor_name || (detailed as any).instructor;
-
-                if (oldSlotsStr !== newSlotsStr || (!oldInstructor && newInstructor)) {
-                  hasChanges = true;
-                  return {
-                    ...course,
-                    ...detailed,
-                    instructor_name: newInstructor || oldInstructor,
-                    slots: mergedSlots
-                  };
-                }
+                const key = `${course.course_code.trim().toUpperCase()}_${(course.section || "01").trim()}`;
+                updatesByKey.set(key, detailed);
               }
             }
-          } catch (e) {
+          } catch {
             // Silently ignore network failures on rehydration
           }
-          return course;
         })
       );
 
-      if (hasChanges && selectedTerm === term) {
-        myCourses = updatedCourses;
-        saveCoursesForTerm(term, myCourses);
+      if (updatesByKey.size > 0 && selectedTerm === term) {
+        let hasChanges = false;
+        const reconciled = myCourses.map((currentCourse) => {
+          const key = `${currentCourse.course_code.trim().toUpperCase()}_${(currentCourse.section || "01").trim()}`;
+          const detailed = updatesByKey.get(key);
+          if (!detailed || !Array.isArray(detailed.slots)) return currentCourse;
+
+          const disabledSlots = new Set<string>();
+          for (const s of currentCourse.slots || []) {
+            if (s.disabled) {
+              disabledSlots.add(`${s.day_code}_${s.slot_hour}`);
+            }
+          }
+          const mergedSlots = detailed.slots.map((s: any) => ({
+            ...s,
+            disabled: disabledSlots.has(`${s.day_code}_${s.slot_hour}`)
+          }));
+
+          const oldSlotsStr = JSON.stringify(currentCourse.slots || []);
+          const newSlotsStr = JSON.stringify(mergedSlots);
+          const oldInstructor = currentCourse.instructor_name || (currentCourse as any).instructor;
+          const newInstructor = detailed.instructor_name || (detailed as any).instructor;
+
+          if (oldSlotsStr !== newSlotsStr || (!oldInstructor && newInstructor)) {
+            hasChanges = true;
+            return {
+              ...currentCourse,
+              ...detailed,
+              instructor_name: newInstructor || oldInstructor,
+              slots: mergedSlots
+            };
+          }
+          return currentCourse;
+        });
+
+        if (hasChanges) {
+          myCourses = reconciled;
+          saveCoursesForTerm(term, myCourses);
+        }
       }
     } catch (e) {
       console.error("Failed to rehydrate enrolled courses", e);
@@ -209,23 +222,25 @@
     if (isEnrolled) {
       removeCourse(courseId, course.course_code, course.section);
     } else {
-      try {
-        const res = await fetch(`${API_BASE}/v1/courses/${courseId}`);
-        if (res.ok) {
-          const detailed = await res.json();
-          if (detailed && (detailed.id || detailed.course_code)) {
-            if (!myCourses.some(c => c.course_code.trim().toUpperCase() === normCode && (c.section || "01").trim() === normSec)) {
-              if (!detailed.instructor_name && (course as any).instructor) {
-                detailed.instructor_name = (course as any).instructor;
+      if (courseId != null) {
+        try {
+          const res = await fetch(`${API_BASE}/v1/courses/${courseId}`);
+          if (res.ok) {
+            const detailed = await res.json();
+            if (detailed && (detailed.id || detailed.course_code)) {
+              if (!myCourses.some(c => c.course_code.trim().toUpperCase() === normCode && (c.section || "01").trim() === normSec)) {
+                if (!detailed.instructor_name && (course as any).instructor) {
+                  detailed.instructor_name = (course as any).instructor;
+                }
+                myCourses = [...myCourses, detailed];
+                saveCoursesForTerm(selectedTerm, myCourses);
               }
-              myCourses = [...myCourses, detailed];
-              saveCoursesForTerm(selectedTerm, myCourses);
+              return;
             }
-            return;
           }
+        } catch (e) {
+          console.error("Failed to load full course slots, using search payload", e);
         }
-      } catch (e) {
-        console.error("Failed to load full course slots, using search payload", e);
       }
       if (!myCourses.some(c => c.course_code.trim().toUpperCase() === normCode && (c.section || "01").trim() === normSec)) {
         myCourses = [...myCourses, course as CoursePlannerItem];

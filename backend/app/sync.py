@@ -228,6 +228,61 @@ def _sync_course_slots(
     session.flush()
 
 
+def _sanitize_shifted_payload(val_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Self-healing normalizer for upstream scraper table parsing shifts.
+    Detects when table columns were shifted (e.g. instructor='Info', slots broken into character array).
+    Reconstructs instructor name, slot hours, and rooms without failing ingestion.
+    """
+    if not isinstance(val_payload, dict):
+        return val_payload
+
+    raw_inst = (val_payload.get("instructor") or "").strip()
+    raw_delivery = str(val_payload.get("delivery_method") or "").strip()
+    raw_exam_date = (val_payload.get("exam_date") or "").strip()
+    slots = val_payload.get("slots") or val_payload.get("course_slots") or []
+
+    is_shifted = (
+        raw_inst.lower() in ("info", "detay", "details") and
+        len(slots) > 0 and
+        all(len(s.get("day", s.get("day_code", ""))) == 1 for s in slots)
+    )
+
+    if not is_shifted:
+        return val_payload
+
+    p = dict(val_payload)
+    reconstructed_inst = "".join(s.get("day", s.get("day_code", "")) for s in slots if s.get("day") or s.get("day_code")).strip()
+    p["instructor"] = reconstructed_inst if reconstructed_inst else "TBA"
+
+    hours = []
+    if raw_delivery.isdigit():
+        hours = [int(ch) for ch in raw_delivery if ch.isdigit() and 1 <= int(ch) <= 14]
+        p["delivery_method"] = ""
+
+    rooms = [r.strip() for r in raw_exam_date.split("|") if r.strip()]
+    new_slots = []
+    if hours:
+        for idx, hr in enumerate(hours):
+            room_str = rooms[idx] if idx < len(rooms) else (rooms[0] if rooms else "")
+            parts = room_str.split(None, 1)
+            if parts and parts[0] in VALID_DAYS:
+                day_code = parts[0]
+                room_val = parts[1] if len(parts) > 1 else ""
+            else:
+                day_code = "M"
+                room_val = room_str
+            new_slots.append({
+                "day": day_code,
+                "hour": hr,
+                "room": room_val,
+                "slot_title": p.get("course_name") or p.get("title"),
+                "instructor": reconstructed_inst
+            })
+    p["slots"] = new_slots
+    return p
+
+
 def _upsert_course(
     session: Session,
     term_id: str,
@@ -242,6 +297,7 @@ def _upsert_course(
     dry_run: bool = False
 ) -> Optional[models.Course]:
     """Upsert course and its corresponding session slots."""
+    val_payload = _sanitize_shifted_payload(val_payload)
     ensure_term(session, term_id, term_cache)
 
     if dept_kisaadi and str(dept_kisaadi).strip():
@@ -428,7 +484,7 @@ def sync_meili_documents(meili_index, courses: List[models.Course], chunk_size: 
             "course_code": c.course_code,
             "section": c.section or "01",
             "title": c.title or "",
-            "dept_code": c.dept_kisaadi,
+            "dept_code": (c.dept_kisaadi.upper() if c.dept_kisaadi else (c.course_code.split()[0].upper() if c.course_code else None)),
             "department": c.department.bolum if c.department else c.dept_kisaadi,
             "instructor": c.instructor.full_name if c.instructor else "TBA",
             "instructor_id": c.instructor_id,
@@ -463,17 +519,18 @@ def apply_deltas_batch(
 
     for item in deltas:
         try:
-            apply_delta_event(
-                session=session,
-                item=item,
-                inst_cache=inst_cache,
-                room_cache=room_cache,
-                dept_cache=dept_cache,
-                term_cache=term_cache,
-                touched_course_ids=touched_ids,
-                meili_index=meili_index,
-                dry_run=dry_run
-            )
+            with session.begin_nested():
+                apply_delta_event(
+                    session=session,
+                    item=item,
+                    inst_cache=inst_cache,
+                    room_cache=room_cache,
+                    dept_cache=dept_cache,
+                    term_cache=term_cache,
+                    touched_course_ids=touched_ids,
+                    meili_index=meili_index,
+                    dry_run=dry_run
+                )
         except Exception as e:
             logger.warning("Error applying delta item %s: %s", item, e)
 
