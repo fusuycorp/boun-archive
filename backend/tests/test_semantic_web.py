@@ -48,20 +48,22 @@ def test_course_history_json_ld_content_negotiation(client: TestClient):
     assert instance["courseSchedule"][0]["startTime"] == "09:00"
 
 def test_course_schedule_ics_feed(client: TestClient):
-    """GET /v1/courses/CMPE%20150/schedule.ics returns valid RFC 5545 iCalendar stream"""
-    response = client.get("/v1/courses/CMPE%20150/schedule.ics")
-    assert response.status_code == 200
-    assert "text/calendar" in response.headers.get("content-type", "")
-    assert "attachment; filename=" in response.headers.get("content-disposition", "")
-    
-    body = response.text
-    assert body.startswith("BEGIN:VCALENDAR\r\n")
-    assert "VERSION:2.0\r\n" in body
-    assert "BEGIN:VEVENT\r\n" in body
-    assert "SUMMARY:CMPE 150.01 -" in body
-    assert "LOCATION:NH101" in body
-    assert "RRULE:FREQ=WEEKLY;BYDAY=MO" in body
-    assert body.endswith("END:VCALENDAR\r\n")
+    """GET /v1/courses/CMPE%20150/schedule.ics returns valid RFC 5545 iCalendar stream on both miss and hit"""
+    for _ in range(2):
+        response = client.get("/v1/courses/CMPE%20150/schedule.ics")
+        assert response.status_code == 200
+        assert "text/calendar" in response.headers.get("content-type", "")
+        assert "attachment; filename=" in response.headers.get("content-disposition", "")
+        
+        body = response.text
+        assert body.startswith("BEGIN:VCALENDAR\r\n")
+        assert "VERSION:2.0\r\n" in body
+        assert "BEGIN:VTIMEZONE\r\n" in body
+        assert "BEGIN:VEVENT\r\n" in body
+        assert "SUMMARY:CMPE 150.01 -" in body
+        assert "LOCATION:NH101" in body
+        assert "RRULE:FREQ=WEEKLY;BYDAY=MO" in body
+        assert body.endswith("END:VCALENDAR\r\n")
 
 def test_openapi_semantic_metadata(client: TestClient):
     """GET /openapi.json contains descriptive OpenAPI 3.1 title and descriptions"""
@@ -94,13 +96,14 @@ def test_departments_turtle_content_negotiation(client: TestClient):
     assert 'schema:alternateName "CMPE"' in response.text
 
 def test_course_history_turtle_content_negotiation(client: TestClient):
-    """GET /v1/courses/history/CMPE 150 with Accept: text/turtle returns valid Turtle RDF"""
-    response = client.get("/v1/courses/history/CMPE%20150", headers={"Accept": "text/turtle"})
-    assert response.status_code == 200
-    assert "text/turtle" in response.headers.get("content-type", "")
-    assert "@prefix schema:" in response.text
-    assert "boun:course/CMPE150 a schema:Course" in response.text
-    assert 'schema:courseCode "CMPE 150"' in response.text
+    """GET /v1/courses/history/CMPE 150 with Accept: text/turtle returns valid Turtle RDF on both miss and hit"""
+    for _ in range(2):
+        response = client.get("/v1/courses/history/CMPE%20150", headers={"Accept": "text/turtle"})
+        assert response.status_code == 200
+        assert "text/turtle" in response.headers.get("content-type", "")
+        assert "@prefix schema:" in response.text
+        assert "boun:course/CMPE150 a schema:Course" in response.text
+        assert 'schema:courseCode "CMPE 150"' in response.text
 
 def test_void_dataset_description_endpoint(client: TestClient):
     """GET /.well-known/void returns W3C VoID dataset description in Turtle"""

@@ -12,10 +12,12 @@ from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from datetime import datetime, timezone
-from typing import Literal, List, Optional
+from typing import Any, Literal, List, Optional
+import json
 from redis import asyncio as aioredis
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
+from fastapi_cache.coder import JsonCoder
 from fastapi_cache.decorator import cache
 
 from . import models, schemas, database
@@ -45,6 +47,65 @@ def escape_meili_filter(s: str) -> str:
 def escape_sql_wildcards(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
+class ResponseAwareJsonCoder(JsonCoder):
+    """JSON coder that preserves Starlette Response/JSONResponse media types and headers across cache hits."""
+
+    @classmethod
+    def encode(cls, value: Any) -> bytes:
+        if isinstance(value, Response):
+            body_text = (
+                value.body.decode("utf-8")
+                if isinstance(value.body, (bytes, bytearray))
+                else str(value.body)
+            )
+            headers = {
+                k.decode("latin-1"): v.decode("latin-1")
+                for k, v in getattr(value, "raw_headers", [])
+                if k.decode("latin-1").lower() not in ("content-length", "content-type")
+            }
+            return json.dumps(
+                {
+                    "_cached_starlette_response": True,
+                    "content": body_text,
+                    "status_code": value.status_code,
+                    "media_type": value.media_type,
+                    "headers": headers,
+                }
+            ).encode("utf-8")
+        return super().encode(value)
+
+    @classmethod
+    def decode(cls, value: bytes) -> Any:
+        decoded = super().decode(value)
+        if isinstance(decoded, dict):
+            if decoded.get("_cached_starlette_response") is True:
+                return Response(
+                    content=decoded.get("content", ""),
+                    status_code=decoded.get("status_code", 200),
+                    media_type=decoded.get("media_type"),
+                    headers=decoded.get("headers") or {},
+                )
+            if (
+                "status_code" in decoded
+                and "media_type" in decoded
+                and "body" in decoded
+                and "raw_headers" in decoded
+            ):
+                headers = {
+                    k: v
+                    for k, v in decoded.get("raw_headers", [])
+                    if isinstance(k, str)
+                    and k.lower() not in ("content-length", "content-type")
+                }
+                return Response(
+                    content=decoded.get("body", ""),
+                    status_code=decoded.get("status_code", 200),
+                    media_type=decoded.get("media_type"),
+                    headers=headers,
+                )
+        return decoded
+
+
 def custom_key_builder(
     func,
     namespace: str = "",
@@ -70,13 +131,18 @@ def custom_key_builder(
     cache_key = hashlib.md5(
         f"{func.__module__}:{func.__name__}:{filtered_args}:{filtered_kwargs}:{accept_hdr}".encode()
     ).hexdigest()
-    return f"{namespace}:{cache_key}"
+    return f"{namespace}:v2:{cache_key}"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
     redis = aioredis.from_url(redis_url)
-    FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache", key_builder=custom_key_builder)
+    FastAPICache.init(
+        RedisBackend(redis),
+        prefix="fastapi-cache",
+        coder=ResponseAwareJsonCoder,
+        key_builder=custom_key_builder,
+    )
     
     # Ensure Meilisearch 'courses' index exists with primary key 'id' and correct settings
     try:

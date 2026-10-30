@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
 
-from app.main import app
+from app.main import app, ResponseAwareJsonCoder
 from app.database import Base, get_db
 from app import models
 
@@ -29,7 +29,11 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
     # Initialize in-memory cache for FastAPI Cache
-    FastAPICache.init(InMemoryBackend(), prefix="test-cache")
+    FastAPICache.init(
+        InMemoryBackend(),
+        prefix="test-cache",
+        coder=ResponseAwareJsonCoder,
+    )
     
     # Create all DB schema tables
     Base.metadata.create_all(bind=engine)
