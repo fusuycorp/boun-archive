@@ -171,42 +171,85 @@ def _escape_ical_text(text: Any) -> str:
         .replace("\n", "\\n")
     )
 
-def _resolve_semester_bounds(term_id: Optional[str]) -> tuple[int, int, int, str]:
-    # Returns (base_year, base_month, base_monday, until_utc)
+# Exact official semester start ("Classes begin") and end ("Classes end" / "Last day of classes")
+# sourced from https://academiccalendar.bogazici.edu.tr (akademiktakvim.bogazici.edu.tr)
+OFFICIAL_TERM_BOUNDS: Dict[str, tuple[tuple[int, int, int], str]] = {
+    "2014-2015-1": ((2014, 9, 22), "20141224T235959Z"),
+    "2014-2015-2": ((2015, 2, 9), "20150513T235959Z"),
+    "2014-2015-3": ((2015, 6, 18), "20150805T235959Z"),
+    "2015-2016-1": ((2015, 9, 28), "20151225T235959Z"),
+    "2015-2016-2": ((2016, 2, 8), "20160513T235959Z"),
+    "2015-2016-3": ((2016, 6, 16), "20160805T235959Z"),
+    "2016-2017-1": ((2016, 9, 19), "20161216T235959Z"),
+    "2016-2017-2": ((2017, 2, 6), "20170515T235959Z"),
+    "2016-2017-3": ((2017, 6, 15), "20170801T235959Z"),
+    "2017-2018-1": ((2017, 9, 18), "20171215T235959Z"),
+    "2017-2018-2": ((2018, 2, 5), "20180511T235959Z"),
+    "2017-2018-3": ((2018, 6, 25), "20180807T235959Z"),
+    "2018-2019-1": ((2018, 9, 20), "20181219T235959Z"),
+    "2018-2019-2": ((2019, 2, 7), "20190515T235959Z"),
+    "2018-2019-3": ((2019, 6, 24), "20190806T235959Z"),
+    "2019-2020-1": ((2019, 9, 19), "20191218T235959Z"),
+    "2019-2020-2": ((2020, 2, 6), "20200612T235959Z"),
+    "2019-2020-3": ((2020, 8, 4), "20200914T235959Z"),
+    "2020-2021-1": ((2020, 10, 22), "20210120T235959Z"),
+    "2020-2021-2": ((2021, 3, 18), "20210616T235959Z"),
+    "2020-2021-3": ((2021, 7, 16), "20210903T235959Z"),
+    "2021-2022-1": ((2021, 10, 6), "20220104T235959Z"),
+    "2021-2022-2": ((2022, 2, 23), "20220524T235959Z"),
+    "2021-2022-3": ((2022, 6, 24), "20220816T235959Z"),
+    "2022-2023-1": ((2022, 9, 28), "20221227T235959Z"),
+    "2022-2023-2": ((2023, 2, 20), "20230518T235959Z"),
+    "2022-2023-3": ((2023, 6, 20), "20230811T235959Z"),
+    "2023-2024-1": ((2023, 9, 27), "20231226T235959Z"),
+    "2023-2024-2": ((2024, 2, 12), "20240517T235959Z"),
+    "2023-2024-3": ((2024, 6, 25), "20240812T235959Z"),
+    "2024-2025-1": ((2024, 9, 23), "20241220T235959Z"),
+    "2024-2025-2": ((2025, 2, 10), "20250516T235959Z"),
+    "2024-2025-3": ((2025, 6, 24), "20250811T235959Z"),
+    "2025-2026-1": ((2025, 9, 22), "20251219T235959Z"),
+    "2025-2026-2": ((2026, 2, 9), "20260515T235959Z"),
+    "2025-2026-3": ((2026, 6, 24), "20260812T235959Z"),
+    "2026-2027-1": ((2026, 9, 21), "20261211T235959Z"),
+    "2026-2027-2": ((2027, 1, 18), "20270422T235959Z"),
+    "2026-2027-3": ((2027, 6, 30), "20270810T235959Z"),
+}
+
+def _resolve_semester_bounds(term_id: Optional[str]) -> tuple[tuple[int, int, int], str]:
+    # Returns ((start_year, start_month, start_day), until_utc)
     if term_id:
         clean = term_id.strip().replace("/", "-")
+        if clean in OFFICIAL_TERM_BOUNDS:
+            return OFFICIAL_TERM_BOUNDS[clean]
         parts = clean.split("-")
         try:
             start_yr = int(parts[0])
             sem = int(parts[-1]) if len(parts) >= 2 else 1
+            from datetime import date
             if sem == 2:
-                # Spring semester: mid-February to mid-June
-                from datetime import date
-                d = date(start_yr + 1 if len(parts) > 2 else start_yr, 2, 15)
-                monday = 15 + ((0 - d.weekday()) % 7)
+                d = date(start_yr + 1 if len(parts) > 2 else start_yr, 2, 9)
+                monday = 9 + ((0 - d.weekday()) % 7)
                 yr = d.year
-                return (yr, 2, monday, f"{yr}0615T235959Z")
+                return ((yr, 2, monday), f"{yr}0515T235959Z")
             elif sem == 3:
-                # Summer semester: late June to late August
-                from datetime import date
                 d = date(start_yr + 1 if len(parts) > 2 else start_yr, 6, 22)
                 monday = 22 + ((0 - d.weekday()) % 7)
                 yr = d.year
-                return (yr, 6, monday, f"{yr}0825T235959Z")
+                return ((yr, 6, monday), f"{yr}0812T235959Z")
             else:
-                from datetime import date
                 d = date(start_yr, 9, 18)
                 monday = 18 + ((0 - d.weekday()) % 7)
-                return (start_yr, 9, monday, f"{start_yr + 1}0125T235959Z")
+                return ((start_yr, 9, monday), f"{start_yr}1220T235959Z")
         except Exception:
             pass
-    return (2026, 9, 21, "20270125T235959Z")
+    return OFFICIAL_TERM_BOUNDS["2026-2027-1"]
 
 def generate_course_schedule_ics(
     course_code: str,
     history_or_course: List[Dict[str, Any]],
     calendar_title: Optional[str] = None
 ) -> str:
+    from datetime import date, timedelta
     cal_title = _escape_ical_text(calendar_title or f"BOUN {course_code} Schedule")
     now_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -219,7 +262,8 @@ def generate_course_schedule_ics(
     else:
         target_items = []
 
-    base_year, base_month, base_monday, until_utc = _resolve_semester_bounds(latest_term)
+    (start_yr, start_mo, start_day), until_utc = _resolve_semester_bounds(latest_term)
+    sem_start_date = date(start_yr, start_mo, start_day)
 
     for item in target_items:
         sec = f".{item.get('section')}" if item.get("section") else ""
@@ -238,12 +282,13 @@ def generate_course_schedule_ics(
             if not by_day:
                 continue
 
-            event_day = base_monday + day_offset
+            days_ahead = (day_offset - sem_start_date.weekday()) % 7
+            first_occurrence = sem_start_date + timedelta(days=days_ahead)
             start_hour = 8 + int(slot_hour)
             end_hour = 9 + int(slot_hour)
 
-            dt_start = f"{base_year}{base_month:02d}{event_day:02d}T{start_hour:02d}0000"
-            dt_end = f"{base_year}{base_month:02d}{event_day:02d}T{end_hour:02d}0000"
+            dt_start = f"{first_occurrence.strftime('%Y%m%d')}T{start_hour:02d}0000"
+            dt_end = f"{first_occurrence.strftime('%Y%m%d')}T{end_hour:02d}0000"
             uid = f"{course_code}{sec}-{day_code}-{slot_hour}-{idx}@archive.bogazici.app"
             location = s.get("room") or s.get("room_name") or "TBA"
 

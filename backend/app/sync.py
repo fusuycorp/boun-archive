@@ -359,6 +359,70 @@ def _upsert_course(
     return course
 
 
+SUBJECT_PREFIX_TO_DEPT: Dict[str, str] = {
+    "FA": "LL",
+    "EL": "LL",
+    "CL": "LL",
+    "AL": "LL",
+    "LIT": "LL",
+    "CRIT": "LL",
+    "DRA": "LL",
+    "HUM": "LL",
+    "ESC": "ENV",
+    "ADEX": "XMBA",
+    "SFL": "YADYOK",
+    "AE": "YADYOK",
+    "GER": "YADYOK",
+    "FR": "YADYOK",
+    "SPA": "YADYOK",
+    "ITA": "YADYOK",
+    "RUS": "YADYOK",
+    "ARA": "YADYOK",
+    "PER": "YADYOK",
+    "CHI": "YADYOK",
+    "ARM": "YADYOK",
+    "KUR": "YADYOK",
+    "TK": "TKL",
+    "TKF": "TKL",
+    "TKR": "TKL",
+}
+
+
+def _resolve_dept_for_course(
+    session: Session,
+    raw_dept: Optional[str],
+    course_code: Optional[str],
+    term_id: Optional[str] = None,
+    section: Optional[str] = None,
+) -> Optional[str]:
+    if raw_dept and str(raw_dept).strip():
+        cand = str(raw_dept).strip().upper()
+        if not any(c.isdigit() for c in cand):
+            return cand
+
+    if not course_code:
+        return None
+
+    # Check if this course_code already has an authoritative dept_kisaadi in PostgreSQL
+    existing = (
+        session.query(models.Course.dept_kisaadi)
+        .filter(
+            models.Course.course_code == course_code,
+            models.Course.dept_kisaadi.isnot(None),
+        )
+        .order_by(models.Course.term_id.desc())
+        .first()
+    )
+    if existing and existing[0]:
+        return str(existing[0]).strip().upper()
+
+    match = re.match(r"^([A-Za-z]+)", course_code.strip())
+    if match:
+        prefix = match.group(1).upper()
+        return SUBJECT_PREFIX_TO_DEPT.get(prefix, prefix)
+    return None
+
+
 def apply_delta_event(
     session: Session,
     item: Dict[str, Any],
@@ -374,18 +438,10 @@ def apply_delta_event(
     raw_change_type = item.get("change_type")
     term_id = item.get("term")
     course_code = normalize_code(item.get("course_code"))
-    raw_dept = item.get("department")
-
-    if not raw_dept and course_code:
-        match = re.match(r"^([A-Za-z]+)", course_code.strip())
-        if match:
-            raw_dept = match.group(1)
-
-    dept_kisaadi = raw_dept.strip().upper() if raw_dept else None
-    if dept_kisaadi and any(c.isdigit() for c in dept_kisaadi):
-        dept_kisaadi = None
-
     section = normalize_section(item.get("section"))
+    dept_kisaadi = _resolve_dept_for_course(
+        session, item.get("department"), course_code, term_id=term_id, section=section
+    )
     timestamp = item.get("timestamp") or datetime.now(timezone.utc).isoformat()
 
     if not raw_change_type or not term_id or not course_code:

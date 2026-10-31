@@ -593,6 +593,58 @@ def _upsert_course(
     return course
 
 
+SUBJECT_PREFIX_TO_DEPT: Dict[str, str] = {
+    "FA": "LL",
+    "EL": "LL",
+    "CL": "LL",
+    "AL": "LL",
+    "LIT": "LL",
+    "CRIT": "LL",
+    "DRA": "LL",
+    "HUM": "LL",
+    "ESC": "ENV",
+    "ADEX": "XMBA",
+    "SFL": "YADYOK",
+    "AE": "YADYOK",
+    "GER": "YADYOK",
+    "FR": "YADYOK",
+    "SPA": "YADYOK",
+    "ITA": "YADYOK",
+    "RUS": "YADYOK",
+    "ARA": "YADYOK",
+    "PER": "YADYOK",
+    "CHI": "YADYOK",
+    "ARM": "YADYOK",
+    "KUR": "YADYOK",
+    "TK": "TKL",
+    "TKF": "TKL",
+    "TKR": "TKL",
+}
+
+
+def _resolve_dept_for_course(session, raw_dept: Optional[str], course_code: Optional[str]) -> Optional[str]:
+    if raw_dept and str(raw_dept).strip():
+        cand = str(raw_dept).strip().upper()
+        if not any(c.isdigit() for c in cand):
+            return cand
+    if not course_code:
+        return None
+    existing = (
+        session.query(Course.dept_kisaadi)
+        .filter(Course.course_code == course_code, Course.dept_kisaadi.isnot(None))
+        .order_by(Course.term_id.desc())
+        .first()
+    )
+    if existing and existing[0]:
+        return str(existing[0]).strip().upper()
+    import re
+    match = re.match(r"^([A-Za-z]+)", course_code.strip())
+    if match:
+        prefix = match.group(1).upper()
+        return SUBJECT_PREFIX_TO_DEPT.get(prefix, prefix)
+    return None
+
+
 def _apply_delta_event(
     session,
     item: Dict[str, Any],
@@ -607,15 +659,7 @@ def _apply_delta_event(
     raw_change_type = item.get("change_type")
     term_id = item.get("term")
     course_code = normalize_code(item.get("course_code"))
-    raw_dept = item.get("department")
-    if not raw_dept and course_code:
-        import re
-        match = re.match(r"^([A-Za-z]+)", course_code.strip())
-        if match:
-            raw_dept = match.group(1)
-    dept_kisaadi = raw_dept.strip().upper() if raw_dept else None
-    if dept_kisaadi and any(c.isdigit() for c in dept_kisaadi):
-        dept_kisaadi = None
+    dept_kisaadi = _resolve_dept_for_course(session, item.get("department"), course_code)
     section = normalize_section(item.get("section"))
     timestamp = item.get("timestamp") or ""
 
