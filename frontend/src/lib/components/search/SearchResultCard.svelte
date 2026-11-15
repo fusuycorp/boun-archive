@@ -36,6 +36,11 @@
             .{course.section}
           </span>
         {/if}
+        {#if course.has_syllabus}
+          <span class="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-800 dark:bg-emerald-400/10 dark:text-emerald-300 border border-emerald-600/20 rounded text-[10px] font-mono font-semibold">
+            Syllabus
+          </span>
+        {/if}
       </div>
       <h3 class="font-serif text-sm font-bold text-[#161e2e] dark:text-slate-100 mt-1 leading-snug">
         {course.title || "Untitled Course"}

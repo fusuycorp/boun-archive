@@ -19,3 +19,6 @@
 - `bountools.com` is the live public domain for the platform (`https://bountools.com`). Keep `bountools.com` as canonical in public environment variable templates and routing examples.
 - Public documentation hygiene: Never leak private infrastructure node names (`tanri`, `worky`), internal orchestration IDs (`FnoW3VW_TLpX8sXKPL60v`), or local user paths (`/home/devhax/...`, `fusuyfusuy`) in public-facing markdown documents.
 
+
+## KNOWN DEBT (open only — one line per item, delete when done)
+# Deliberate gaps get ledger lines: - accepted <what> <- <why> -> <trigger>

@@ -1,8 +1,7 @@
 import sys
-import json
 from pathlib import Path
 from unittest.mock import MagicMock
-import pytest
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -11,22 +10,20 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app import models
+
 from scripts.sync_from_scraper import (
     ScraperClient,
-    ensure_term,
-    ensure_department,
+    _apply_delta_event,
+    _fetch_term_courses,
+    backfill_term,
     ensure_instructor,
     ensure_room,
-    _upsert_course,
-    _apply_delta_event,
-    sync_quota_feed,
+    ensure_term,
     sync_deltas_feed,
-    backfill_term,
-    sync_terms_and_new_offerings,
-    _fetch_term_courses,
     sync_meili_documents,
+    sync_quota_feed,
+    sync_terms_and_new_offerings,
 )
-
 
 # ==============================================================================
 # TIER 1 - FEATURE 1: Course Search & Fallback (5 tests)

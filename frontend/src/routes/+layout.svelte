@@ -2,10 +2,10 @@
   let { children } = $props();
   import "./layout.css";
   import { page } from "$app/state";
+  import { onNavigate } from "$app/navigation";
   import { onMount } from "svelte";
   import { 
     Search, 
-    History, 
     LayoutGrid, 
     User, 
     CalendarDays, 
@@ -23,6 +23,7 @@
 
   let isDark = $state(false);
   let isMobileDrawerOpen = $state(false);
+  let mobileNavDialog = $state<HTMLDialogElement | null>(null);
   let systemStatus = $state<SystemStatus | null>(null);
 
   const navItems = [
@@ -111,9 +112,28 @@
     }
   });
 
-  async function fetchSystemStatus() {
+  function syncThemeFromEnvironment() {
+    let saved: string | null = null;
     try {
-      const res = await fetch(`${API_BASE}/v1/system/status`);
+      saved = localStorage.getItem("theme");
+    } catch {
+      saved = null;
+    }
+    const osDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const effectiveDark = saved === "dark" || (saved !== "light" && osDark);
+    isDark = effectiveDark;
+    document.documentElement.classList.toggle("dark", effectiveDark);
+    const scheme = saved === "dark" || saved === "light" ? saved : "light dark";
+    document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", scheme);
+  }
+
+  async function fetchSystemStatus() {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    try {
+      const res = await fetch(`${API_BASE}/v1/system/status`, {
+        priority: "low",
+        signal: AbortSignal.timeout(5000),
+      } as RequestInit);
       if (res.ok) {
         systemStatus = await res.json();
       }
@@ -122,34 +142,73 @@
     }
   }
 
+  onNavigate((navigation) => {
+    closeMobileDrawer();
+    if (
+      typeof document === "undefined" ||
+      !("startViewTransition" in document) ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      navigation.from?.url.href === navigation.to?.url.href
+    ) {
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      document.startViewTransition(async () => {
+        resolve();
+        await navigation.complete;
+      });
+    });
+  });
+
+  $effect(() => {
+    if (!mobileNavDialog) return;
+    if (isMobileDrawerOpen) {
+      if (!mobileNavDialog.open) mobileNavDialog.showModal();
+    } else if (mobileNavDialog.open) {
+      mobileNavDialog.close();
+    }
+  });
+
   onMount(() => {
+    syncThemeFromEnvironment();
     fetchSystemStatus();
     const statusInterval = setInterval(fetchSystemStatus, 60000);
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") fetchSystemStatus();
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "theme" || e.key === null) syncThemeFromEnvironment();
+    };
 
-    const savedTheme = localStorage.getItem("theme");
-    const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    
-    if (savedTheme === "dark" || (!savedTheme && systemPrefersDark)) {
-      isDark = true;
-      document.documentElement.classList.add("dark");
-    } else {
-      isDark = false;
-      document.documentElement.classList.remove("dark");
-    }
+    mql.addEventListener("change", syncThemeFromEnvironment);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("storage", onStorage);
 
     return () => {
       clearInterval(statusInterval);
+      mql.removeEventListener("change", syncThemeFromEnvironment);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("storage", onStorage);
     };
   });
 
   function toggleTheme() {
-    isDark = !isDark;
-    if (isDark) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
+    const nextDark = !isDark;
+    isDark = nextDark;
+    document.documentElement.classList.toggle("dark", nextDark);
+    const osDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    try {
+      if (nextDark === osDark) {
+        localStorage.removeItem("theme");
+        document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", "light dark");
+      } else {
+        const mode = nextDark ? "dark" : "light";
+        localStorage.setItem("theme", mode);
+        document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", mode);
+      }
+    } catch {
+      // Ignore restricted storage contexts
     }
   }
 
@@ -172,6 +231,9 @@
         <img 
           src="/logo.png" 
           alt="Boğaziçi University Crest" 
+          width="36"
+          height="36"
+          decoding="async"
           class="h-9 w-9 rounded-lg shadow-2xs border border-[#e5e0d8] dark:border-[#1e293b] object-cover shrink-0 group-hover:scale-105 transition-transform duration-200" 
         />
         <div class="flex flex-col">
@@ -255,9 +317,11 @@
 
         <!-- Mobile Menu Trigger -->
         <button 
+          type="button"
           onclick={() => isMobileDrawerOpen = !isMobileDrawerOpen}
           class="lg:hidden p-2 text-[#525f7f] hover:text-[#002d72] hover:bg-[#002d72]/5 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60 rounded-lg transition-colors cursor-pointer"
           aria-label="Open mobile navigation menu"
+          aria-expanded={isMobileDrawerOpen}
         >
           {#if isMobileDrawerOpen}
             <X size={19} />
@@ -269,88 +333,84 @@
     </div>
   </header>
 
-  <!-- Mobile Off-Canvas Drawer Backdrop -->
-  {#if isMobileDrawerOpen}
-    <div 
-      role="button"
-      tabindex="0"
-      aria-label="Close navigation overlay"
-      onclick={closeMobileDrawer}
-      onkeydown={(e) => (e.key === 'Escape' || e.key === 'Enter') && closeMobileDrawer()}
-      class="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-xs transition-opacity duration-300 cursor-pointer"
-    ></div>
-  {/if}
-
-  <!-- Mobile Off-Canvas Drawer -->
-  <aside 
-    class="lg:hidden fixed inset-y-0 left-0 z-50 w-72 bg-[#ffffff] dark:bg-[#121827] border-r border-[#e5e0d8] dark:border-[#1e293b] shadow-2xl flex flex-col transition-transform duration-300 ease-in-out transform {isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}"
+  <!-- Native Mobile Off-Canvas Navigation Dialog -->
+  <dialog
+    bind:this={mobileNavDialog}
     aria-label="Mobile Navigation Drawer"
+    onclose={closeMobileDrawer}
+    onclick={(e) => {
+      if (e.target === e.currentTarget) e.currentTarget.close();
+    }}
+    class="lg:hidden open:flex flex-col m-0 p-0 h-dvh max-h-none w-72 max-w-[85vw] bg-[#ffffff] dark:bg-[#121827] border-r border-[#e5e0d8] dark:border-[#1e293b] shadow-2xl text-inherit backdrop:bg-black/60 backdrop:backdrop-blur-xs"
   >
-    <div class="p-5 flex items-center justify-between border-b border-[#e5e0d8] dark:border-[#1e293b] shrink-0">
-      <div class="flex items-center space-x-3">
-        <img src="/logo.png" alt="BOUN Logo" class="h-9 w-9 rounded-lg shadow-2xs border border-[#e5e0d8] dark:border-[#1e293b] object-cover shrink-0" />
-        <div>
-          <h2 class="font-serif text-base font-bold text-[#002d72] tracking-tight leading-none dark:text-slate-50">BOUN Archive</h2>
-          <div class="flex items-center gap-1.5 mt-1">
-            <p class="font-sans text-[9px] text-[#525f7f] uppercase tracking-widest font-semibold dark:text-slate-400">Academic Analytics</p>
-            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-mono text-[8px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 shadow-2xs">
-              <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-              Beta
-            </span>
+    <div class="flex flex-col h-full w-full overflow-hidden">
+      <div class="p-5 flex items-center justify-between border-b border-[#e5e0d8] dark:border-[#1e293b] shrink-0">
+        <div class="flex items-center space-x-3">
+          <img src="/logo.png" alt="BOUN Logo" width="36" height="36" decoding="async" class="h-9 w-9 rounded-lg shadow-2xs border border-[#e5e0d8] dark:border-[#1e293b] object-cover shrink-0" />
+          <div>
+            <h2 class="font-serif text-base font-bold text-[#002d72] tracking-tight leading-none dark:text-slate-50">BOUN Archive</h2>
+            <div class="flex items-center gap-1.5 mt-1">
+              <p class="font-sans text-[9px] text-[#525f7f] uppercase tracking-widest font-semibold dark:text-slate-400">Academic Analytics</p>
+              <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-mono text-[8px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 shadow-2xs">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                Beta
+              </span>
+            </div>
           </div>
         </div>
-      </div>
-      <button 
-        onclick={closeMobileDrawer}
-        class="p-2 text-[#525f7f] hover:text-[#002d72] dark:hover:text-slate-200 rounded-lg cursor-pointer"
-        aria-label="Close menu"
-      >
-        <X size={19} />
-      </button>
-    </div>
-
-    <!-- Scrape status banner in mobile drawer -->
-    <div class="px-4 py-3 bg-[#f3efe6] dark:bg-[#0a0e1a] border-b border-[#e5e0d8] dark:border-[#1e293b] flex items-center justify-between text-xs font-medium">
-      <span class="text-[#525f7f] dark:text-slate-400">Portal Sync Status</span>
-      <div class="flex items-center gap-1.5 font-mono text-[11px] font-semibold {
-        scrapeFreshness.statusClass === 'emerald'
-          ? 'text-emerald-800 dark:text-emerald-400'
-          : scrapeFreshness.statusClass === 'amber'
-          ? 'text-amber-900 dark:text-amber-300'
-          : 'text-rose-800 dark:text-rose-400'
-      }">
-        <span class="inline-block w-1.5 h-1.5 rounded-full shrink-0 animate-pulse {
-          scrapeFreshness.statusClass === 'emerald'
-            ? 'bg-emerald-600 dark:bg-emerald-500'
-            : scrapeFreshness.statusClass === 'amber'
-            ? 'bg-amber-600 dark:bg-amber-500'
-            : 'bg-rose-600 dark:bg-rose-500'
-        }"></span>
-        <span>{scrapeFreshness.text}</span>
-      </div>
-    </div>
-
-    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto custom-scrollbar">
-      {#each navItems as item}
-        {@const isActive = page.url.pathname === item.href}
-        <a 
-          href={item.href} 
+        <button 
+          type="button"
           onclick={closeMobileDrawer}
-          class="flex items-center space-x-3 px-4 py-3 rounded-xl font-semibold text-sm transition-colors
-          {isActive 
-            ? 'bg-[#002d72]/10 text-[#002d72] shadow-2xs dark:bg-[#8cc8ea]/15 dark:text-[#8cc8ea]' 
-            : 'text-[#525f7f] hover:bg-[#002d72]/5 hover:text-[#002d72] dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-200'}"
+          class="p-2 text-[#525f7f] hover:text-[#002d72] dark:hover:text-slate-200 rounded-lg cursor-pointer"
+          aria-label="Close menu"
         >
-          <item.icon size={17} class="shrink-0 {isActive ? 'text-[#002d72] dark:text-[#8cc8ea]' : 'text-[#8a94a6] dark:text-slate-500'}" />
-          <span>{item.label}</span>
-        </a>
-      {/each}
-    </nav>
+          <X size={19} />
+        </button>
+      </div>
 
-    <div class="p-4 border-t border-[#e5e0d8] text-[10px] text-[#525f7f] text-center dark:border-[#1e293b] dark:text-slate-400 shrink-0">
-      Boğaziçi University Academic Catalog • 50 Years
+      <!-- Scrape status banner in mobile drawer -->
+      <div class="px-4 py-3 bg-[#f3efe6] dark:bg-[#0a0e1a] border-b border-[#e5e0d8] dark:border-[#1e293b] flex items-center justify-between text-xs font-medium shrink-0">
+        <span class="text-[#525f7f] dark:text-slate-400">Portal Sync Status</span>
+        <div class="flex items-center gap-1.5 font-mono text-[11px] font-semibold {
+          scrapeFreshness.statusClass === 'emerald'
+            ? 'text-emerald-800 dark:text-emerald-400'
+            : scrapeFreshness.statusClass === 'amber'
+            ? 'text-amber-900 dark:text-amber-300'
+            : 'text-rose-800 dark:text-rose-400'
+        }">
+          <span class="inline-block w-1.5 h-1.5 rounded-full shrink-0 animate-pulse {
+            scrapeFreshness.statusClass === 'emerald'
+              ? 'bg-emerald-600 dark:bg-emerald-500'
+              : scrapeFreshness.statusClass === 'amber'
+              ? 'bg-amber-600 dark:bg-amber-500'
+              : 'bg-rose-600 dark:bg-rose-500'
+          }"></span>
+          <span>{scrapeFreshness.text}</span>
+        </div>
+      </div>
+
+      <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto custom-scrollbar" aria-label="Mobile Navigation">
+        {#each navItems as item}
+          {@const isActive = page.url.pathname === item.href}
+          <a 
+            href={item.href} 
+            onclick={closeMobileDrawer}
+            class="flex items-center space-x-3 px-4 py-3 rounded-xl font-semibold text-sm transition-colors
+            {isActive 
+              ? 'bg-[#002d72]/10 text-[#002d72] shadow-2xs dark:bg-[#8cc8ea]/15 dark:text-[#8cc8ea]' 
+              : 'text-[#525f7f] hover:bg-[#002d72]/5 hover:text-[#002d72] dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-200'}"
+          >
+            <item.icon size={17} class="shrink-0 {isActive ? 'text-[#002d72] dark:text-[#8cc8ea]' : 'text-[#8a94a6] dark:text-slate-500'}" />
+            <span>{item.label}</span>
+          </a>
+        {/each}
+      </nav>
+
+      <div class="p-4 border-t border-[#e5e0d8] text-[10px] text-[#525f7f] text-center dark:border-[#1e293b] dark:text-slate-400 shrink-0">
+        Boğaziçi University Academic Catalog • 50 Years
+      </div>
     </div>
-  </aside>
+  </dialog>
 
   <!-- Main Content Container -->
   <main class="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 transition-colors duration-200">

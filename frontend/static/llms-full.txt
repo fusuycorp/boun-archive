@@ -3,8 +3,8 @@
 ## Introduction
 BOUN Archive is the canonical open data platform for Boğaziçi University's academic catalog. It exposes structured APIs, semantic Linked Data (JSON-LD), full-text search indexes, and schedule analytics spanning multiple decades of curriculum data.
 
-Base Web URL: https://archive.bogazici.app
-API Base URL: https://archive.bogazici.app/api or /v1
+Base Web URL: https://bountools.com
+API Base URL: https://bountools.com/api or /v1
 
 ---
 

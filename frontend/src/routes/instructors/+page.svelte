@@ -57,7 +57,7 @@
   <meta property="og:title" content="Faculty Instructors Archive • BOUN Archive" />
   <meta property="og:description" content="Explore historical teaching profiles and faculty records for Boğaziçi University." />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://archive.bogazici.app/instructors" />
+  <meta property="og:url" content="https://bountools.com/instructors" />
 </svelte:head>
 
 <div class="space-y-6 sm:space-y-8 max-w-4xl mx-auto">

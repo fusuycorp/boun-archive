@@ -1,9 +1,7 @@
 import sys
-import json
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
 from unittest.mock import MagicMock
-import pytest
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -13,21 +11,17 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app import models
+
 from scripts.sync_from_scraper import (
     ScraperClient,
-    ensure_term,
-    ensure_department,
+    backfill_term,
     ensure_instructor,
     ensure_room,
-    _upsert_course,
-    _apply_delta_event,
-    sync_quota_feed,
+    ensure_term,
     sync_deltas_feed,
-    backfill_term,
+    sync_quota_feed,
     sync_upstream_run_metadata,
-    sync_meili_documents,
 )
-
 
 # ==============================================================================
 # TIER 3 - Cross-Feature Combinations (10 comprehensive tests)
@@ -256,8 +250,8 @@ def test_cross_05_backfill_to_department_analytics(client: TestClient, db_sessio
 def test_cross_06_backfill_to_instructor_dna_legacy(client: TestClient, db_session: Session):
     """6. Backfill Term Ingestion -> Instructor Discovery -> Instructor Legacy DNA API."""
     # Seed Alan Turing teaching across multiple terms and slots
-    t1 = ensure_term(db_session, "2022-2023-1")
-    t2 = ensure_term(db_session, "2023-2024-1")
+    ensure_term(db_session, "2022-2023-1")
+    ensure_term(db_session, "2023-2024-1")
     inst_id = ensure_instructor(db_session, "Alan Turing", {})
     r_id = ensure_room(db_session, "TuringHall", {})
 
@@ -302,8 +296,8 @@ def test_cross_06_backfill_to_instructor_dna_legacy(client: TestClient, db_sessi
 
 def test_cross_07_multi_term_backfill_to_ghost_schedule(client: TestClient, db_session: Session):
     """7. Multi-term Backfill -> Ghost Schedule Reconstruction across terms."""
-    term_a = ensure_term(db_session, "2021-2022-1")
-    term_b = ensure_term(db_session, "2021-2022-2")
+    ensure_term(db_session, "2021-2022-1")
+    ensure_term(db_session, "2021-2022-2")
     room_id = ensure_room(db_session, "Auditorium-A", {})
 
     cA = models.Course(
@@ -346,8 +340,8 @@ def test_cross_07_multi_term_backfill_to_ghost_schedule(client: TestClient, db_s
 def test_cross_08_multi_term_to_scheduling_heatmap(client: TestClient, db_session: Session):
     """8. Multi-term Backfill -> Macro Scheduling Heatmap across decades."""
     # Seed courses in 2010s vs 2020s
-    t_2015 = ensure_term(db_session, "2015-2016-1")
-    t_2025 = ensure_term(db_session, "2025-2026-1")
+    ensure_term(db_session, "2015-2016-1")
+    ensure_term(db_session, "2025-2026-1")
     r_id = ensure_room(db_session, "KB200", {})
 
     c1 = models.Course(id=7081, term_id="2015-2016-1", course_code="HIST 101", title="History")
@@ -373,7 +367,7 @@ def test_cross_08_multi_term_to_scheduling_heatmap(client: TestClient, db_sessio
 
 def test_cross_09_scraper_sync_to_system_status_and_health(client: TestClient, db_session: Session):
     """9. Scraper Delta Ingestion -> System Status Cursor Update -> Healthcheck/Staleness."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_str = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     client_mock = MagicMock(spec=ScraperClient)
 
     client_mock.get.return_value = [

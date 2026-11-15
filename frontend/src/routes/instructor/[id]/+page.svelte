@@ -127,7 +127,7 @@
   <meta property="og:title" content="{legacyData?.instructor_name || 'Instructor'} • BOUN Archive" />
   <meta property="og:description" content="Explore historical courses and teaching footprint for {legacyData?.instructor_name || 'Faculty'} at Boğaziçi University." />
   <meta property="og:type" content="profile" />
-  <meta property="og:url" content="https://archive.bogazici.app/instructor/{instructorId}" />
+  <meta property="og:url" content="https://bountools.com/instructor/{instructorId}" />
   {#if legacyData}
     {@html `<script type="application/ld+json">${serializeJsonLd(generateInstructorJsonLd(instructorId || '', legacyData.instructor_name, legacyData.history))}<\/script>`}
   {/if}

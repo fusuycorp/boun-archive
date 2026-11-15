@@ -1,10 +1,11 @@
-import pytest
 from unittest.mock import MagicMock
+
+from app.database import Base
+from app.models import Course, SyncState, Term
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.database import Base
-from app.models import Term, Course, Department, Instructor, Room, CourseSlot, SyncState
-from scripts.sync_from_scraper import sync_terms_and_new_offerings, backfill_term, ScraperClient, _fetch_upstream_term_runs
+
+from scripts.sync_from_scraper import ScraperClient, _fetch_upstream_term_runs, sync_terms_and_new_offerings
 
 
 def test_sync_2026_term_ingestion():

@@ -7,9 +7,11 @@
     currentFacets: FacetDistribution;
     selectedTerms: string[];
     selectedDepts: string[];
+    onlyWithSyllabus: boolean;
     deptSearch: string;
     onToggleTerm: (term: string) => void;
     onToggleDept: (dept: string) => void;
+    onToggleOnlyWithSyllabus: () => void;
     onDeptSearchChange: (val: string) => void;
   }
 
@@ -18,9 +20,11 @@
     currentFacets,
     selectedTerms,
     selectedDepts,
+    onlyWithSyllabus,
     deptSearch,
     onToggleTerm,
     onToggleDept,
+    onToggleOnlyWithSyllabus,
     onDeptSearchChange
   }: Props = $props();
 
@@ -44,6 +48,39 @@
 </script>
 
 <div class="space-y-6">
+  <!-- Syllabus Filter -->
+  <div class="space-y-2.5">
+    <div class="font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">
+      <span>Course Materials</span>
+    </div>
+    <button
+      type="button"
+      onclick={onToggleOnlyWithSyllabus}
+      aria-pressed={onlyWithSyllabus}
+      class="w-full flex items-center justify-between p-2 rounded-lg text-xs transition-colors cursor-pointer
+      {onlyWithSyllabus
+        ? 'bg-[#002d72]/10 text-[#002d72] font-semibold dark:bg-[#8cc8ea]/15 dark:text-[#8cc8ea]'
+        : 'text-[#161e2e] dark:text-slate-300 hover:bg-[#f3efe6] dark:hover:bg-slate-800/60'}"
+    >
+      <div class="flex items-center space-x-2">
+        <div
+          class="w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors
+          {onlyWithSyllabus
+            ? 'bg-[#002d72] border-[#002d72] dark:bg-[#8cc8ea] dark:border-[#8cc8ea]'
+            : 'bg-white border-[#e5e0d8] dark:bg-[#121827] dark:border-slate-700'}"
+        >
+          {#if onlyWithSyllabus}
+            <Check size={10} class="text-white dark:text-[#0a0e1a] stroke-[3]" />
+          {/if}
+        </div>
+        <span>Has Syllabus Only</span>
+      </div>
+      <span class="text-[10px] opacity-60 font-mono text-[#525f7f] dark:text-slate-400">
+        {currentFacets?.has_syllabus ? (currentFacets.has_syllabus["true"] ?? 0) : (globalFacets?.has_syllabus?.["true"] ?? 0)}
+      </span>
+    </button>
+  </div>
+
   <!-- Term Filter -->
   <div class="space-y-2.5">
     <div class="font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider flex items-center justify-between">

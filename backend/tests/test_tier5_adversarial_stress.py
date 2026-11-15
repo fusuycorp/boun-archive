@@ -12,39 +12,32 @@ Coverage Areas:
 """
 
 import sys
-import json
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, func
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app import models, schemas
-from app.main import app, escape_meili_filter, escape_sql_wildcards, _search_courses_from_db, _get_global_facets_from_db
+from app import models
 from app.analytics import MacroEngine
 from app.database import Base, get_db
+from app.main import _get_global_facets_from_db, _search_courses_from_db, app, escape_meili_filter, escape_sql_wildcards
+
 from scripts.sync_from_scraper import (
     ScraperClient,
-    clean_int,
-    normalize_code,
-    normalize_section,
-    ensure_term,
-    ensure_department,
-    ensure_instructor,
-    ensure_room,
     _upsert_course,
-    _apply_delta_event,
-    _sync_course_slots,
-    sync_quota_feed,
-    sync_deltas_feed,
     backfill_term,
-    sync_meili_documents,
+    ensure_department,
+    ensure_term,
+    sync_deltas_feed,
+    sync_quota_feed,
 )
 
 
@@ -330,7 +323,7 @@ class TestScraperTermParsing:
         assert t1_cached is t1
 
         set_cache = set()
-        t2 = ensure_term(isolated_db, "2028-2029-1", term_cache=set_cache)
+        ensure_term(isolated_db, "2028-2029-1", term_cache=set_cache)
         assert "2028-2029-1" in set_cache
         t2_cached = ensure_term(isolated_db, "2028-2029-1", term_cache=set_cache)
         assert t2_cached.id == "2028-2029-1"

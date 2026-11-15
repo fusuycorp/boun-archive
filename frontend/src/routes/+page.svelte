@@ -1,11 +1,30 @@
 <script lang="ts">
   import { TrendingUp, LayoutGrid, Award, BookOpen, Calendar, RotateCcw, AlertTriangle } from "lucide-svelte";
   import { invalidateAll } from "$app/navigation";
-  import { Chart, registerables } from 'chart.js';
+  import {
+    Chart,
+    LineController,
+    LineElement,
+    PointElement,
+    LinearScale,
+    CategoryScale,
+    Filler,
+    Tooltip,
+    Legend
+  } from 'chart.js';
   import { Line } from 'svelte-chartjs';
   import type { PageData } from './$types';
 
-  Chart.register(...registerables);
+  Chart.register(
+    LineController,
+    LineElement,
+    PointElement,
+    LinearScale,
+    CategoryScale,
+    Filler,
+    Tooltip,
+    Legend
+  );
 
   let { data }: { data: PageData } = $props();
 

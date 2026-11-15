@@ -1,5 +1,5 @@
-import pytest
 from fastapi.testclient import TestClient
+
 
 def test_instructor_json_ld_content_negotiation(client: TestClient):
     """GET /v1/instructors/1 with Accept: application/ld+json returns Schema.org Person"""
@@ -144,6 +144,7 @@ def test_schedule_optimizer_csp_endpoint(client: TestClient):
 def test_mcp_server_tools_execution(client: TestClient):
     """Verify MCP tools list and execution directly"""
     from app.mcp_server import TOOLS_DEFINITIONS, execute_tool
+
     from tests.conftest import TestingSessionLocal
     
     assert len(TOOLS_DEFINITIONS) >= 4

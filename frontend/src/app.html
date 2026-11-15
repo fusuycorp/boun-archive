@@ -4,6 +4,17 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
+		<meta name="color-scheme" content="light dark" />
+		<script>
+			try {
+				const t = localStorage.getItem("theme");
+				const dark = t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+				document.documentElement.classList.toggle("dark", dark);
+				if (t === "dark" || t === "light") {
+					document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", t);
+				}
+			} catch {}
+		</script>
 		<link rel="icon" href="%sveltekit.assets%/favicon.png" />
 
 		<title>BOUN Archive</title>

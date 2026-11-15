@@ -1,13 +1,20 @@
 import type { CourseHistoryItem, Department, InstructorHistoryItem } from "./types";
 
-export const BOUN_ORG = {
-  "@type": "CollegeOrUniversity",
-  "@id": "https://archive.bogazici.app/#organization",
-  "name": "Boğaziçi University",
-  "alternateName": "Bogazici Universitesi",
-  "url": "https://bogazici.edu.tr",
-  "sameAs": "https://www.wikidata.org/wiki/Q853512"
-};
+export const DEFAULT_BASE_URL = "https://bountools.com";
+
+function buildBounOrg(baseUrl = DEFAULT_BASE_URL) {
+  const cleanBase = baseUrl.replace(/\/$/, "");
+  return {
+    "@type": "CollegeOrUniversity",
+    "@id": `${cleanBase}/#organization`,
+    "name": "Boğaziçi University",
+    "alternateName": "Bogazici Universitesi",
+    "url": "https://bogazici.edu.tr",
+    "sameAs": "https://www.wikidata.org/wiki/Q853512"
+  };
+}
+
+export const BOUN_ORG = buildBounOrg();
 
 export const DAY_SCHEMA_MAP: Record<string, string> = {
   M: "https://schema.org/Monday",
@@ -19,23 +26,25 @@ export const DAY_SCHEMA_MAP: Record<string, string> = {
   Su: "https://schema.org/Sunday"
 };
 
-export function generateWebSiteJsonLd(baseUrl = "https://archive.bogazici.app") {
+export function generateWebSiteJsonLd(baseUrl = DEFAULT_BASE_URL) {
+  const cleanBase = baseUrl.replace(/\/$/, "");
+  const org = buildBounOrg(cleanBase);
   return {
     "@context": "https://schema.org",
     "@graph": [
-      BOUN_ORG,
+      org,
       {
         "@type": "WebSite",
-        "@id": `${baseUrl}/#website`,
-        "url": baseUrl,
+        "@id": `${cleanBase}/#website`,
+        "url": cleanBase,
         "name": "BOUN Archive",
         "description": "Historical academic catalog, course planner, and quota intelligence archive for Boğaziçi University.",
-        "publisher": { "@id": "https://archive.bogazici.app/#organization" },
+        "publisher": { "@id": org["@id"] },
         "potentialAction": {
           "@type": "SearchAction",
           "target": {
             "@type": "EntryPoint",
-            "urlTemplate": `${baseUrl}/search?q={search_term_string}`
+            "urlTemplate": `${cleanBase}/search?q={search_term_string}`
           },
           "query-input": "required name=search_term_string"
         }
@@ -46,8 +55,9 @@ export function generateWebSiteJsonLd(baseUrl = "https://archive.bogazici.app") 
 
 export function generateBreadcrumbJsonLd(
   crumbs: Array<{ name: string; url?: string }>,
-  baseUrl = "https://archive.bogazici.app"
+  baseUrl = DEFAULT_BASE_URL
 ) {
+  const cleanBase = baseUrl.replace(/\/$/, "");
   return {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
@@ -55,7 +65,7 @@ export function generateBreadcrumbJsonLd(
       "@type": "ListItem",
       "position": index + 1,
       "name": crumb.name,
-      ...(crumb.url ? { "item": crumb.url.startsWith("http") ? crumb.url : `${baseUrl}${crumb.url}` } : {})
+      ...(crumb.url ? { "item": crumb.url.startsWith("http") ? crumb.url : `${cleanBase}${crumb.url}` } : {})
     }))
   };
 }
@@ -64,8 +74,10 @@ export function generateCourseJsonLd(
   courseCode = "",
   history: CourseHistoryItem[] = [],
   latestInfo?: CourseHistoryItem | null,
-  baseUrl = "https://archive.bogazici.app"
+  baseUrl = DEFAULT_BASE_URL
 ) {
+  const cleanBase = baseUrl.replace(/\/$/, "");
+  const org = buildBounOrg(cleanBase);
   const code = courseCode || "Course";
   const primaryTitle = latestInfo?.title || history[0]?.title || code;
   const deptCode = code.split(" ")[0] || "";
@@ -77,7 +89,7 @@ export function generateCourseJsonLd(
     const sec = item.section ? `.${item.section}` : "";
     return {
       "@type": "CourseInstance",
-      "@id": `${baseUrl}/course/${encodeURIComponent(code)}?term=${encodeURIComponent(item.term_id)}${item.section ? `&sec=${item.section}` : ""}#instance`,
+      "@id": `${cleanBase}/course/${encodeURIComponent(code)}?term=${encodeURIComponent(item.term_id)}${item.section ? `&sec=${item.section}` : ""}#instance`,
       "name": `${code}${sec} - ${item.title || primaryTitle}`,
       "courseMode": item.delivery_method?.toLowerCase().includes("online") ? "online" : "onsite",
       "startDate": `${termYear}-09-01`,
@@ -109,20 +121,20 @@ export function generateCourseJsonLd(
   return {
     "@context": "https://schema.org",
     "@graph": [
-      BOUN_ORG,
+      org,
       {
         "@type": "Course",
-        "@id": `${baseUrl}/course/${encodeURIComponent(code)}#course`,
+        "@id": `${cleanBase}/course/${encodeURIComponent(code)}#course`,
         "courseCode": code,
         "name": primaryTitle,
-        "provider": { "@id": "https://archive.bogazici.app/#organization" },
+        "provider": { "@id": org["@id"] },
         ...(credits ? { "numberOfCredits": credits } : {}),
         ...(ects ? { "educationalCredentialAwarded": `ECTS ${ects}` } : {}),
         ...(deptCode ? {
           "department": {
             "@type": "EducationalOrganization",
             "name": deptCode,
-            "url": `${baseUrl}/departments`
+            "url": `${cleanBase}/departments`
           }
         } : {}),
         "hasCourseInstance": instances
@@ -132,7 +144,7 @@ export function generateCourseJsonLd(
         { name: "Departments", url: "/departments" },
         ...(deptCode ? [{ name: deptCode, url: `/departments` }] : []),
         { name: code, url: `/course/${encodeURIComponent(code)}` }
-      ], baseUrl)
+      ], cleanBase)
     ]
   };
 }
@@ -141,47 +153,51 @@ export function generateInstructorJsonLd(
   instructorId: string | number = "",
   instructorName = "",
   history: InstructorHistoryItem[] = [],
-  baseUrl = "https://archive.bogazici.app"
+  baseUrl = DEFAULT_BASE_URL
 ) {
+  const cleanBase = baseUrl.replace(/\/$/, "");
+  const org = buildBounOrg(cleanBase);
   const idStr = String(instructorId);
   const taughtCourses = Array.from(new Set(history.map(h => h.course_code))).map(code => ({
     "@type": "Course",
     "courseCode": code,
-    "url": `${baseUrl}/course/${encodeURIComponent(code)}`
+    "url": `${cleanBase}/course/${encodeURIComponent(code)}`
   }));
 
   return {
     "@context": "https://schema.org",
     "@graph": [
-      BOUN_ORG,
+      org,
       {
         "@type": "Person",
-        "@id": `${baseUrl}/instructor/${idStr}#person`,
+        "@id": `${cleanBase}/instructor/${idStr}#person`,
         "name": instructorName,
         "jobTitle": "Faculty Instructor",
-        "worksFor": { "@id": "https://archive.bogazici.app/#organization" },
+        "worksFor": { "@id": org["@id"] },
         ...(taughtCourses.length > 0 ? { "hasCourse": taughtCourses } : {})
       },
       generateBreadcrumbJsonLd([
         { name: "Home", url: "/" },
         { name: "Instructors", url: "/instructors" },
         { name: instructorName, url: `/instructor/${idStr}` }
-      ], baseUrl)
+      ], cleanBase)
     ]
   };
 }
 
 export function generateDepartmentsJsonLd(
   departments: Department[],
-  baseUrl = "https://archive.bogazici.app"
+  baseUrl = DEFAULT_BASE_URL
 ) {
+  const cleanBase = baseUrl.replace(/\/$/, "");
+  const org = buildBounOrg(cleanBase);
   return {
     "@context": "https://schema.org",
     "@graph": [
-      BOUN_ORG,
+      org,
       {
         "@type": "ItemList",
-        "@id": `${baseUrl}/departments#list`,
+        "@id": `${cleanBase}/departments#list`,
         "name": "Academic Departments at Boğaziçi University",
         "itemListElement": departments.map((dept, idx) => ({
           "@type": "ListItem",
@@ -190,8 +206,8 @@ export function generateDepartmentsJsonLd(
             "@type": "EducationalOrganization",
             "name": dept.bolum,
             "alternateName": dept.kisaadi,
-            "parentOrganization": { "@id": "https://archive.bogazici.app/#organization" },
-            "url": `${baseUrl}/departments`
+            "parentOrganization": { "@id": org["@id"] },
+            "url": `${cleanBase}/departments`
           }
         }))
       }

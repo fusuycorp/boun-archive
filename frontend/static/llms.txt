@@ -40,4 +40,4 @@ Entities can be requested in JSON-LD format by passing `Accept: application/ld+j
 - `GET /v1/departments` with `Accept: application/ld+json` returns Schema.org `EducationalOrganization` list.
 
 ## Full LLM Index
-For the complete schemas, parameter definitions, and semantic graph specifications, see [llms-full.txt](https://archive.bogazici.app/llms-full.txt).
+For the complete schemas, parameter definitions, and semantic graph specifications, see [llms-full.txt](https://bountools.com/llms-full.txt).

@@ -1,5 +1,7 @@
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from typing import List, Optional, Dict, Any
+
 
 class TermBase(BaseModel):
     id: str
@@ -25,24 +27,24 @@ class Instructor(InstructorBase):
 
 class RoomBase(BaseModel):
     name: str
-    building: Optional[str] = None
-    capacity: Optional[int] = None
+    building: str | None = None
+    capacity: int | None = None
 
 class Room(RoomBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
 
 class CourseSlotBase(BaseModel):
-    day_code: Optional[str] = None
-    slot_hour: Optional[int] = None
-    slot_title: Optional[str] = None
-    room_id: Optional[int] = None
+    day_code: str | None = None
+    slot_hour: int | None = None
+    slot_title: str | None = None
+    room_id: int | None = None
 
 class CourseSlot(CourseSlotBase):
     id: int
-    course_id: Optional[int] = None
-    room_name: Optional[str] = None
-    room: Optional[Room] = None
+    course_id: int | None = None
+    room_name: str | None = None
+    room: Room | None = None
     model_config = ConfigDict(from_attributes=True)
 
     @model_validator(mode="after")
@@ -55,18 +57,21 @@ class CourseBase(BaseModel):
     term_id: str
     dept_kisaadi: str
     course_code: str
-    section: Optional[str] = None
-    title: Optional[str] = None
-    instructor_id: Optional[int] = None
-    credits: Optional[int] = None
-    ects: Optional[int] = None
-    delivery_method: Optional[str] = None
+    section: str | None = None
+    title: str | None = None
+    instructor_id: int | None = None
+    credits: int | None = None
+    ects: int | None = None
+    delivery_method: str | None = None
+    desc_url: str | None = None
+    syllabus_url: str | None = None
+    has_syllabus: bool = False
 
 class Course(CourseBase):
     id: int
-    slots: List[CourseSlot] = []
-    instructor_name: Optional[str] = None
-    instructor: Optional[Instructor] = None
+    slots: list[CourseSlot] = []
+    instructor_name: str | None = None
+    instructor: Instructor | None = None
     model_config = ConfigDict(from_attributes=True)
 
     @model_validator(mode="after")
@@ -78,16 +83,16 @@ class Course(CourseBase):
 class QuotaSnapshotBase(BaseModel):
     term_id: str
     course_code: str
-    section: Optional[str] = None
-    department: Optional[str] = None
-    status: Optional[str] = None
-    quota: Optional[str] = None
-    current: Optional[str] = None
-    quota_numeric: Optional[int] = None
-    current_numeric: Optional[int] = None
+    section: str | None = None
+    department: str | None = None
+    status: str | None = None
+    quota: str | None = None
+    current: str | None = None
+    quota_numeric: int | None = None
+    current_numeric: int | None = None
     is_consent: bool = False
     is_unlimited: bool = False
-    available: Optional[int] = None
+    available: int | None = None
     captured_at: str
 
 class QuotaSnapshot(QuotaSnapshotBase):
@@ -97,13 +102,13 @@ class QuotaSnapshot(QuotaSnapshotBase):
 class CourseChangeBase(BaseModel):
     change_type: str
     term_id: str
-    dept_kisaadi: Optional[str] = None
+    dept_kisaadi: str | None = None
     course_code: str
-    section: Optional[str] = None
+    section: str | None = None
     timestamp: str
-    old_value: Optional[str] = None
-    new_value: Optional[str] = None
-    details: Optional[str] = None
+    old_value: str | None = None
+    new_value: str | None = None
+    details: str | None = None
 
 class CourseChange(CourseChangeBase):
     id: int
@@ -111,67 +116,90 @@ class CourseChange(CourseChangeBase):
 
 class SyncStateBase(BaseModel):
     feed_name: str
-    last_cursor: Optional[str] = None
+    last_cursor: str | None = None
 
 class SyncState(SyncStateBase):
     model_config = ConfigDict(from_attributes=True)
 
 class FeedState(BaseModel):
-    last_cursor: Optional[str] = None
-    updated_at: Optional[str] = None
+    last_cursor: str | None = None
+    updated_at: str | None = None
 
 class UpstreamRunInfo(BaseModel):
-    run_id: Optional[str] = None
-    term: Optional[str] = None
-    status: Optional[str] = None
-    total_courses: Optional[int] = None
-    changes_detected: Optional[int] = None
-    completed_at: Optional[str] = None
-    started_at: Optional[str] = None
+    run_id: str | None = None
+    term: str | None = None
+    status: str | None = None
+    total_courses: int | None = None
+    changes_detected: int | None = None
+    completed_at: str | None = None
+    started_at: str | None = None
 
 class SystemStatusResponse(BaseModel):
     status: str = "healthy"
-    last_scraped_at: Optional[str] = None
-    last_sync_at: Optional[str] = None
-    latest_scrape_time: Optional[str] = None
-    upstream_scrape_time: Optional[str] = None
-    last_sync_time: Optional[str] = None
+    last_scraped_at: str | None = None
+    last_sync_at: str | None = None
+    latest_scrape_time: str | None = None
+    upstream_scrape_time: str | None = None
+    last_sync_time: str | None = None
     is_stale: bool = False
-    upstream_run: Optional[UpstreamRunInfo] = None
-    feeds: Dict[str, FeedState] = {}
+    upstream_run: UpstreamRunInfo | None = None
+    feeds: dict[str, FeedState] = {}
 
 class ScheduleOptimizationRequest(BaseModel):
     term_id: str
-    target_courses: List[str] = Field(default=[], max_length=20)
-    candidate_electives: List[str] = Field(default=[], max_length=30)
+    target_courses: list[str] = Field(default=[], max_length=20)
+    candidate_electives: list[str] = Field(default=[], max_length=30)
     num_electives_needed: int = Field(default=0, ge=0, le=10)
-    avoid_days: List[str] = Field(default=[], max_length=7)
+    avoid_days: list[str] = Field(default=[], max_length=7)
     min_hour: int = Field(default=1, ge=1, le=14)
     max_hour: int = Field(default=14, ge=1, le=14)
-    max_campus_days: Optional[int] = Field(default=None, ge=1, le=7)
+    max_campus_days: int | None = Field(default=None, ge=1, le=7)
     max_results: int = Field(default=5, ge=1, le=50)
 
 class TimetableSection(BaseModel):
     course_code: str
     section: str
-    title: Optional[str] = None
-    instructor: Optional[str] = None
-    credits: Optional[int] = None
-    ects: Optional[int] = None
-    slots: List[Dict[str, Any]] = []
+    title: str | None = None
+    instructor: str | None = None
+    credits: int | None = None
+    ects: int | None = None
+    slots: list[dict[str, Any]] = []
 
 class TimetableCombination(BaseModel):
     score: float
     total_credits: int
     total_ects: int
-    campus_days: List[str]
+    campus_days: list[str]
     total_gap_hours: int
-    sections: List[TimetableSection]
+    sections: list[TimetableSection]
 
 class ScheduleOptimizationResponse(BaseModel):
     term_id: str
     success: bool
     total_combinations_found: int
-    combinations: List[TimetableCombination]
-    message: Optional[str] = None
+    combinations: list[TimetableCombination]
+    message: str | None = None
+
+
+class CourseCatalogResponse(BaseModel):
+    course_code: str
+    found: bool = False
+    title: str | None = None
+    en_url: str | None = None
+    tr_url: str | None = None
+    en_text: str | None = None
+    tr_text: str | None = None
+    canonical_text: str | None = None
+    updated_at: str | None = None
+
+
+class CourseSyllabusResponse(BaseModel):
+    course_id: int
+    term_id: str
+    course_code: str
+    section: str | None = None
+    has_syllabus: bool = False
+    syllabus_url: str | None = None
+    desc_url: str | None = None
+    syllabus_text: str = ""
 

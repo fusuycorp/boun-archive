@@ -1,6 +1,6 @@
 import type { PageLoad } from './$types';
 import { API_BASE } from '$lib/config';
-import type { CourseHistoryItem, QuotaSnapshot } from '$lib/types';
+import type { CourseCatalogInfo, CourseHistoryItem, QuotaSnapshot } from '$lib/types';
 
 export const load: PageLoad = async ({ params, fetch }) => {
   const code = params.code || '';
@@ -8,12 +8,14 @@ export const load: PageLoad = async ({ params, fetch }) => {
 
   let history: CourseHistoryItem[] = [];
   let quotas: QuotaSnapshot[] = [];
+  let catalog: CourseCatalogInfo | null = null;
   let loadError: string | null = null;
 
   try {
-    const [histRes, quotaRes] = await Promise.allSettled([
+    const [histRes, quotaRes, catalogRes] = await Promise.allSettled([
       fetch(`${API_BASE}/v1/courses/history/${encodedCode}`),
-      fetch(`${API_BASE}/v1/courses/${encodedCode}/quota`)
+      fetch(`${API_BASE}/v1/courses/${encodedCode}/quota`),
+      fetch(`${API_BASE}/v1/courses/catalog/${encodedCode}`)
     ]);
 
     if (histRes.status === 'fulfilled' && histRes.value.ok) {
@@ -27,6 +29,10 @@ export const load: PageLoad = async ({ params, fetch }) => {
     if (quotaRes.status === 'fulfilled' && quotaRes.value.ok) {
       quotas = await quotaRes.value.json();
     }
+
+    if (catalogRes.status === 'fulfilled' && catalogRes.value.ok) {
+      catalog = await catalogRes.value.json();
+    }
   } catch (e) {
     loadError = e instanceof Error ? e.message : 'Failed to fetch course data';
   }
@@ -35,6 +41,7 @@ export const load: PageLoad = async ({ params, fetch }) => {
     courseCode: code,
     history,
     quotas,
+    catalog,
     error: loadError
   };
 };

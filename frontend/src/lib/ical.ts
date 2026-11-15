@@ -191,7 +191,7 @@ export function generateICS(
 
       const dtStart = `${dateStr}T${startHour.toString().padStart(2, "0")}0000`;
       const dtEnd = `${dateStr}T${endHour.toString().padStart(2, "0")}0000`;
-      const uid = `${code}${sec}-${dayCode}-${slotHour}-${slotIdx}@archive.bogazici.app`;
+      const uid = `${code}${sec}-${dayCode}-${slotHour}-${slotIdx}@bountools.com`;
 
       const location = slot.room_name || slot.room || "TBA";
       const summaryEscaped = escapeIcalText(`${code}${sec} - ${title}`);

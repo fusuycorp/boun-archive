@@ -1,16 +1,15 @@
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+from app import models
+from app.database import Base, get_db
+from app.main import app
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from fastapi.testclient import TestClient
-from fastapi_cache import FastAPICache
-from fastapi_cache.backends.inmemory import InMemoryBackend
 
-from app.main import app
-from app.database import Base, get_db
-from app import models
-from scripts.sync_from_scraper import _upsert_course, _apply_delta_event, sync_quota_feed, ScraperClient
+from scripts.sync_from_scraper import ScraperClient, _apply_delta_event, _upsert_course, sync_quota_feed
 
 
 @pytest.fixture
@@ -299,7 +298,7 @@ def test_sync_quota_feed_normalizes_department(isolated_boundary_env):
         }
     ]
 
-    synced = sync_quota_feed(db_session, mock_client, limit=10)
+    sync_quota_feed(db_session, mock_client, limit=10)
     db_session.commit()
 
     quota = db_session.query(models.QuotaSnapshot).filter(

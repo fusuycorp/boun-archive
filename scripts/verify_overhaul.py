@@ -1,19 +1,22 @@
-import sys
-import os
 import asyncio
+import os
+import sys
+
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.inmemory import InMemoryBackend
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from fastapi_cache import FastAPICache
-from fastapi_cache.backends.inmemory import InMemoryBackend
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _pathutil import add_import_paths, ROOT_DIR
+from _pathutil import add_import_paths
+
 add_import_paths()
 
-from app.main import app, get_department_unique_courses
-from app.analytics import MacroEngine
 from app import models
+from app.analytics import MacroEngine
+from app.main import app, get_department_unique_courses
+
 
 def test_route_registry():
     routes = {getattr(r, "path", None) for r in app.routes if getattr(r, "path", None)}

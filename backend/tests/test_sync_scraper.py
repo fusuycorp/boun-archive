@@ -1,7 +1,7 @@
-import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -11,13 +11,10 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app.models import Base, Term, Course, Department, Instructor, Room, CourseSlot
-from scripts.sync_from_scraper import (
-    ensure_term,
-    _upsert_course,
-    sync_terms_and_new_offerings,
-    _fetch_term_courses
-)
+from app.models import Base, Course, Term
+
+from scripts.sync_from_scraper import _fetch_term_courses, _upsert_course, ensure_term, sync_terms_and_new_offerings
+
 
 @pytest.fixture
 def sync_db():

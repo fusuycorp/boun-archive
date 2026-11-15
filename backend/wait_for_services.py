@@ -1,8 +1,9 @@
 import os
 import time
 import urllib.parse
-import psycopg2
+
 import meilisearch
+import psycopg2
 import redis
 from dotenv import load_dotenv
 

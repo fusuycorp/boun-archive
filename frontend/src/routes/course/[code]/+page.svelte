@@ -1,26 +1,91 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { Calendar, User, Clock, MapPin, Hash, BookOpen, Info, Users, Activity, Download } from "lucide-svelte";
+  import {
+    Calendar,
+    User,
+    Clock,
+    MapPin,
+    Hash,
+    BookOpen,
+    Info,
+    Users,
+    Activity,
+    Download,
+    FileText,
+    ExternalLink,
+    X,
+    Globe
+  } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { formatSlotTime } from "$lib/utils";
   import { generateCourseJsonLd, serializeJsonLd } from "$lib/semantic";
   import { generateICS, downloadICS } from "$lib/ical";
-  import type { QuotaSnapshot, CourseHistoryItem } from "$lib/types";
+  import type { QuotaSnapshot, CourseHistoryItem, CourseCatalogInfo, CourseSyllabusDetail } from "$lib/types";
   import type { PageData } from "./$types";
+
+  type SyllabusModalState =
+    | { status: "closed" }
+    | { status: "loading"; label: string }
+    | { status: "ready"; label: string; data: CourseSyllabusDetail }
+    | { status: "error"; label: string; message: string };
 
   let { data }: { data: PageData } = $props();
 
   let courseCode = $derived(data.courseCode || page.params.code || "");
   let history = $state<CourseHistoryItem[]>([]);
   let quotas = $state<QuotaSnapshot[]>([]);
+  let catalog = $state<CourseCatalogInfo | null>(null);
+  let catalogLang = $state<"en" | "tr">("en");
+  let syllabusModal = $state<SyllabusModalState>({ status: "closed" });
+  let syllabusDialog = $state<HTMLDialogElement | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
 
   $effect(() => {
     history = data.history ?? [];
     quotas = data.quotas ?? [];
+    catalog = data.catalog ?? null;
+    catalogLang = data.catalog?.en_text ? "en" : data.catalog?.tr_text ? "tr" : "en";
     error = data.error ?? null;
   });
+
+  $effect(() => {
+    if (!syllabusDialog) return;
+    if (syllabusModal.status !== "closed") {
+      if (!syllabusDialog.open) syllabusDialog.showModal();
+    } else if (syllabusDialog.open) {
+      syllabusDialog.close();
+    }
+  });
+
+  function safeHttpUrl(raw?: string | null): string | null {
+    if (!raw) return null;
+    try {
+      const parsed = new URL(raw);
+      return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function openSyllabusModal(section: CourseHistoryItem) {
+    const label = `${courseCode}.${section.section || "01"} (${section.term_id})`;
+    syllabusModal = { status: "loading", label };
+    try {
+      const res = await fetch(`${API_BASE}/v1/courses/${section.id}/syllabus-text`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const detail: CourseSyllabusDetail = await res.json();
+      syllabusModal = { status: "ready", label, data: detail };
+    } catch (e) {
+      syllabusModal = {
+        status: "error",
+        label,
+        message: e instanceof Error ? e.message : "Failed to load syllabus text"
+      };
+    }
+  }
 
   async function fetchCourseData(targetCode?: string) {
     const code = targetCode || courseCode;
@@ -31,9 +96,10 @@
     try {
       const encodedCode = encodeURIComponent(code.trim());
       
-      const [histRes, quotaRes] = await Promise.allSettled([
+      const [histRes, quotaRes, catalogRes] = await Promise.allSettled([
         fetch(`${API_BASE}/v1/courses/history/${encodedCode}`),
-        fetch(`${API_BASE}/v1/courses/${encodedCode}/quota`)
+        fetch(`${API_BASE}/v1/courses/${encodedCode}/quota`),
+        fetch(`${API_BASE}/v1/courses/catalog/${encodedCode}`)
       ]);
 
       if (histRes.status === "fulfilled" && histRes.value.ok) {
@@ -48,6 +114,12 @@
         quotas = await quotaRes.value.json();
       } else {
         quotas = [];
+      }
+
+      if (catalogRes.status === "fulfilled" && catalogRes.value.ok) {
+        catalog = await catalogRes.value.json();
+      } else {
+        catalog = null;
       }
 
     } catch (e) {
@@ -67,6 +139,17 @@
   );
 
   const latestInfo = $derived(history.length > 0 ? history[0] : null);
+  const hasCatalogContent = $derived(
+    Boolean(catalog?.found && (catalog.en_text || catalog.tr_text || catalog.canonical_text))
+  );
+  const activeCatalogText = $derived(
+    catalogLang === "tr"
+      ? (catalog?.tr_text || catalog?.en_text || catalog?.canonical_text || "")
+      : (catalog?.en_text || catalog?.tr_text || catalog?.canonical_text || "")
+  );
+  const activeCatalogUrl = $derived(
+    safeHttpUrl(catalogLang === "tr" ? (catalog?.tr_url || catalog?.en_url) : (catalog?.en_url || catalog?.tr_url))
+  );
 
   function exportScheduleICS() {
     if (!history || history.length === 0) return;
@@ -82,11 +165,11 @@
   <meta name="description" content="Academic offering history, instructors, credits, timetable slots, and quota records for {courseCode} ({latestInfo?.title || ''}) at Boğaziçi University." />
   <meta property="og:title" content="{courseCode}: {latestInfo?.title || 'Course Details'} • BOUN Archive" />
   <meta property="og:description" content="Explore course offerings, syllabus credits, instructors, and quota history for {courseCode} at Boğaziçi University." />
-  <meta property="og:url" content="https://archive.bogazici.app/course/{encodeURIComponent(courseCode || '')}" />
+  <meta property="og:url" content="https://bountools.com/course/{encodeURIComponent(courseCode || '')}" />
   <meta property="og:type" content="article" />
   <meta name="DC.title" content="{courseCode}: {latestInfo?.title || ''}" />
   <meta name="DC.creator" content="Boğaziçi University" />
-  <meta name="DC.identifier" content="https://archive.bogazici.app/course/{encodeURIComponent(courseCode || '')}" />
+  <meta name="DC.identifier" content="https://bountools.com/course/{encodeURIComponent(courseCode || '')}" />
   <meta name="DC.type" content="Course" />
   {@html `<script type="application/ld+json">${serializeJsonLd(generateCourseJsonLd(courseCode || '', history, latestInfo))}<\/script>`}
 </svelte:head>
@@ -149,6 +232,66 @@
         {/if}
       </div>
     </header>
+
+    <!-- Official Bilingual Catalog Description -->
+    {#if hasCatalogContent}
+      <section class="bg-white dark:bg-[#121827] rounded-xl border border-[#e5e0d8] dark:border-[#1e293b] p-5 sm:p-6 shadow-2xs space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center space-x-2.5">
+            <span class="p-2 bg-[#faf8f5] dark:bg-slate-800 text-[#002d72] dark:text-[#8cc8ea] border border-[#e5e0d8] dark:border-slate-700 rounded-lg shrink-0">
+              <Globe size={16} />
+            </span>
+            <div>
+              <h2 class="font-serif text-base sm:text-lg font-bold text-[#002d72] dark:text-slate-100 tracking-tight">Official Catalog Description</h2>
+              {#if catalog?.updated_at}
+                <p class="font-mono text-[10px] text-[#525f7f] dark:text-slate-400">Updated {catalog.updated_at}</p>
+              {/if}
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            {#if catalog?.en_text || catalog?.tr_text}
+              <div class="inline-flex rounded-lg border border-[#e5e0d8] dark:border-[#1e293b] bg-[#faf8f5] dark:bg-[#0a0e1a] p-0.5 font-mono text-[11px] font-bold">
+                <button
+                  type="button"
+                  disabled={!catalog?.en_text}
+                  onclick={() => (catalogLang = "en")}
+                  class="px-2.5 py-1 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed
+                  {catalogLang === 'en' ? 'bg-[#002d72] text-white dark:bg-[#8cc8ea] dark:text-[#0a0e1a]' : 'text-[#525f7f] dark:text-slate-400 hover:text-[#161e2e] dark:hover:text-slate-200'}"
+                >
+                  EN
+                </button>
+                <button
+                  type="button"
+                  disabled={!catalog?.tr_text}
+                  onclick={() => (catalogLang = "tr")}
+                  class="px-2.5 py-1 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed
+                  {catalogLang === 'tr' ? 'bg-[#002d72] text-white dark:bg-[#8cc8ea] dark:text-[#0a0e1a]' : 'text-[#525f7f] dark:text-slate-400 hover:text-[#161e2e] dark:hover:text-slate-200'}"
+                >
+                  TR
+                </button>
+              </div>
+            {/if}
+
+            {#if activeCatalogUrl}
+              <a
+                href={activeCatalogUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg border border-[#e5e0d8] dark:border-[#1e293b] text-xs font-mono font-semibold text-[#002d72] dark:text-[#8cc8ea] hover:bg-[#f3efe6] dark:hover:bg-slate-800 transition-colors"
+              >
+                <span>Catalog Page</span>
+                <ExternalLink size={12} />
+              </a>
+            {/if}
+          </div>
+        </div>
+
+        <p class="text-xs sm:text-sm text-[#161e2e] dark:text-slate-300 leading-relaxed whitespace-pre-line">
+          {activeCatalogText}
+        </p>
+      </section>
+    {/if}
 
     <!-- Live Quota Section (if available) -->
     {#if quotas.length > 0}
@@ -275,6 +418,45 @@
                     </div>
                   </div>
                 </div>
+
+                {#if section.has_syllabus || safeHttpUrl(section.syllabus_url) || safeHttpUrl(section.desc_url)}
+                  {@const extSyllabusUrl = safeHttpUrl(section.syllabus_url)}
+                  {@const extDescUrl = safeHttpUrl(section.desc_url)}
+                  <div class="pt-3 border-t border-[#e5e0d8] dark:border-[#1e293b] flex flex-wrap items-center gap-2">
+                    {#if section.has_syllabus}
+                      <button
+                        type="button"
+                        onclick={() => openSyllabusModal(section)}
+                        class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-[#002d72]/10 text-[#002d72] dark:bg-[#8cc8ea]/15 dark:text-[#8cc8ea] text-[11px] font-mono font-semibold hover:bg-[#002d72]/20 dark:hover:bg-[#8cc8ea]/25 transition-colors cursor-pointer"
+                      >
+                        <FileText size={12} />
+                        <span>Read Syllabus</span>
+                      </button>
+                    {/if}
+                    {#if extSyllabusUrl}
+                      <a
+                        href={extSyllabusUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="inline-flex items-center space-x-1 px-2 py-1 rounded-md border border-[#e5e0d8] dark:border-[#1e293b] text-[11px] font-mono text-[#525f7f] dark:text-slate-300 hover:text-[#002d72] dark:hover:text-[#8cc8ea] transition-colors"
+                      >
+                        <span>Syllabus Link</span>
+                        <ExternalLink size={10} />
+                      </a>
+                    {/if}
+                    {#if extDescUrl}
+                      <a
+                        href={extDescUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="inline-flex items-center space-x-1 px-2 py-1 rounded-md border border-[#e5e0d8] dark:border-[#1e293b] text-[11px] font-mono text-[#525f7f] dark:text-slate-300 hover:text-[#002d72] dark:hover:text-[#8cc8ea] transition-colors"
+                      >
+                        <span>OBIKAS</span>
+                        <ExternalLink size={10} />
+                      </a>
+                    {/if}
+                  </div>
+                {/if}
               </article>
             {/each}
           </div>
@@ -282,4 +464,72 @@
       {/each}
     </div>
   {/if}
+
+  <dialog
+    bind:this={syllabusDialog}
+    onclose={() => (syllabusModal = { status: "closed" })}
+    aria-labelledby="syllabus-dialog-title"
+    class="open:flex flex-col m-auto p-0 w-[min(92vw,48rem)] max-h-[85dvh] rounded-2xl bg-white dark:bg-[#121827] border border-[#e5e0d8] dark:border-[#1e293b] shadow-2xl text-inherit backdrop:bg-black/60 backdrop:backdrop-blur-xs"
+  >
+    <div class="p-4 sm:p-5 border-b border-[#e5e0d8] dark:border-[#1e293b] bg-[#f3efe6]/60 dark:bg-[#0a0e1a] flex items-center justify-between gap-3 shrink-0">
+      <div class="flex items-center space-x-2 min-w-0">
+        <FileText size={16} class="text-[#002d72] dark:text-[#8cc8ea] shrink-0" />
+        <h2 id="syllabus-dialog-title" class="font-mono text-xs sm:text-sm font-bold text-[#002d72] dark:text-slate-100 truncate">
+          {syllabusModal.status === "closed" ? "Course Syllabus" : syllabusModal.label}
+        </h2>
+      </div>
+      <button
+        type="button"
+        onclick={() => (syllabusModal = { status: "closed" })}
+        class="p-1.5 text-[#525f7f] hover:text-[#002d72] dark:hover:text-slate-200 rounded-lg cursor-pointer"
+        aria-label="Close syllabus dialog"
+      >
+        <X size={18} />
+      </button>
+    </div>
+
+    <div class="p-4 sm:p-6 overflow-y-auto flex-1 custom-scrollbar">
+      {#if syllabusModal.status === "loading"}
+        <div class="py-12 flex flex-col items-center justify-center space-y-3">
+          <div class="animate-spin rounded-full h-7 w-7 border-3 border-[#e5e0d8] border-t-[#002d72] dark:border-slate-800 dark:border-t-[#8cc8ea]"></div>
+          <p class="text-xs font-mono text-[#525f7f] dark:text-slate-400">Loading syllabus content...</p>
+        </div>
+      {:else if syllabusModal.status === "error"}
+        <p class="text-xs sm:text-sm text-rose-700 dark:text-rose-400 font-medium">{syllabusModal.message}</p>
+      {:else if syllabusModal.status === "ready"}
+        {@const modalSyllabusUrl = safeHttpUrl(syllabusModal.data.syllabus_url)}
+        {@const modalDescUrl = safeHttpUrl(syllabusModal.data.desc_url)}
+        <div class="space-y-4">
+          {#if modalSyllabusUrl || modalDescUrl}
+            <div class="flex flex-wrap gap-2">
+              {#if modalSyllabusUrl}
+                <a
+                  href={modalSyllabusUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-[#faf8f5] dark:bg-[#0a0e1a] border border-[#e5e0d8] dark:border-[#1e293b] text-xs font-mono font-semibold text-[#002d72] dark:text-[#8cc8ea] hover:bg-[#f3efe6] dark:hover:bg-slate-800"
+                >
+                  <span>Open Original Syllabus</span>
+                  <ExternalLink size={12} />
+                </a>
+              {/if}
+              {#if modalDescUrl}
+                <a
+                  href={modalDescUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-[#faf8f5] dark:bg-[#0a0e1a] border border-[#e5e0d8] dark:border-[#1e293b] text-xs font-mono font-semibold text-[#002d72] dark:text-[#8cc8ea] hover:bg-[#f3efe6] dark:hover:bg-slate-800"
+                >
+                  <span>OBIKAS Description</span>
+                  <ExternalLink size={12} />
+                </a>
+              {/if}
+            </div>
+          {/if}
+
+          <pre class="whitespace-pre-wrap font-sans text-xs sm:text-sm text-[#161e2e] dark:text-slate-300 leading-relaxed">{syllabusModal.data.syllabus_text || "No extracted syllabus text is stored for this offering yet."}</pre>
+        </div>
+      {/if}
+    </div>
+  </dialog>
 </div>

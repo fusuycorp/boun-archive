@@ -107,73 +107,70 @@ export const ROOM_LOCATION_REGISTRY: Record<string, LocationInfo> = {
   YYD: { building: "Sarıtepe YADYOK", campus: "Kilyos" }
 };
 
-export function resolveRoomLocation(roomName?: string | null, explicitBuilding?: string | null): LocationInfo {
-  if (!roomName || !roomName.trim()) {
-    return { building: explicitBuilding?.trim() || "Unassigned", campus: "Other" };
-  }
+const PLACEHOLDER_MARKERS = new Set(["N/A", "TBA", "UNKNOWN", "UNASSIGNED", "NONE", "NULL"]);
+const VIRTUAL_KEYWORDS = ["ONLINE", "UZAKTAN", "VIRTUAL", "WEB", "ZOOM"];
 
-  const clean = roomName.trim();
+const EXPLICIT_BUILDING_CAMPUS_RULES: ReadonlyArray<{ campus: string; keywords: readonly string[] }> = [
+  { campus: "Kuzey", keywords: ["NEW HALL", "KARE", "EDUCATION", "EĞİTİM", "KUZEY", "COMPUTER", "ETA", "YERLICI", "BİM"] },
+  { campus: "Güney", keywords: ["FREELY", "JOHN", "ANDERSON", "WASHBURN", "ENGINEERING", "NATUK", "HAMLIN", "GÜNEY", "SOUTH"] },
+  { campus: "Hisar", keywords: ["HISAR", "HİSAR"] },
+  { campus: "Uçaksavar", keywords: ["UÇAKSAVAR", "GARANTI", "ŞAHENK"] },
+  { campus: "Kandilli", keywords: ["KANDİLLİ", "KANDILLI"] },
+  { campus: "Kilyos", keywords: ["KİLYOS", "KILYOS", "SARITEPE"] }
+];
+
+const PREFIX_CAMPUS_RULES: ReadonlyArray<{
+  campus: string;
+  labelPrefix: string;
+  prefixes: readonly string[];
+  excluded?: readonly string[];
+}> = [
+  { campus: "Güney", labelPrefix: "Hamlin Hall", prefixes: ["HH", "HAML", "HÜL", "HUL"] },
+  { campus: "Hisar", labelPrefix: "Hisar Building", prefixes: ["HK", "HB", "HC", "HA", "HD", "HİS", "HIS"] },
+  { campus: "Kuzey", labelPrefix: "Kuzey Building", prefixes: ["EF", "NH", "BM", "ETA", "VY", "K"], excluded: ["KAND", "KİL", "KIL"] },
+  { campus: "Güney", labelPrefix: "Güney Building", prefixes: ["M", "T", "JF", "İB", "IB", "NB"] }
+];
+
+function inferCampusFromBuildingName(buildingClean: string): string {
+  const bUpper = buildingClean.toUpperCase();
+  const matched = EXPLICIT_BUILDING_CAMPUS_RULES.find((rule) =>
+    rule.keywords.some((kw) => bUpper.includes(kw))
+  );
+  return matched ? matched.campus : "Other";
+}
+
+function inferCampusByPrefix(upper: string, clean: string): LocationInfo | null {
+  for (const rule of PREFIX_CAMPUS_RULES) {
+    if (rule.excluded?.some((ex) => upper.startsWith(ex))) continue;
+    if (rule.prefixes.some((p) => upper.startsWith(p))) {
+      return { building: `${rule.labelPrefix} (${clean})`, campus: rule.campus };
+    }
+  }
+  return null;
+}
+
+export function resolveRoomLocation(roomName?: string | null, explicitBuilding?: string | null): LocationInfo {
+  const bClean = explicitBuilding?.trim() || "";
+  const clean = roomName?.trim() || "";
   const upper = clean.toUpperCase();
 
-  // Guard against unassigned / placeholder markers
-  if (["N/A", "TBA", "UNKNOWN", "UNASSIGNED", "NONE", "NULL"].includes(upper)) {
-    return { building: explicitBuilding?.trim() || "Unassigned", campus: "Other" };
+  if (!clean || PLACEHOLDER_MARKERS.has(upper)) {
+    return { building: bClean || "Unassigned", campus: "Other" };
   }
-
-  if (upper.includes("ONLINE") || upper.includes("UZAKTAN") || upper.includes("VIRTUAL") || upper.includes("WEB") || upper.includes("ZOOM")) {
+  if (VIRTUAL_KEYWORDS.some((kw) => upper.includes(kw))) {
     return { building: "Online / Remote", campus: "Virtual" };
   }
 
   const match = clean.match(/^([A-Za-zÇĞİÖŞÜçğıöşü]+)/);
-  if (match) {
-    const prefix = match[1].toUpperCase();
-    if (ROOM_LOCATION_REGISTRY[prefix]) {
-      const reg = ROOM_LOCATION_REGISTRY[prefix];
-      return {
-        building: explicitBuilding?.trim() || reg.building,
-        campus: reg.campus
-      };
-    }
+  const reg = match ? ROOM_LOCATION_REGISTRY[match[1].toUpperCase()] : undefined;
+  if (reg) {
+    return { building: bClean || reg.building, campus: reg.campus };
+  }
+  if (bClean) {
+    return { building: bClean, campus: inferCampusFromBuildingName(bClean) };
   }
 
-  if (explicitBuilding && explicitBuilding.trim()) {
-    const bClean = explicitBuilding.trim();
-    const bUpper = bClean.toUpperCase();
-    if (["NEW HALL", "KARE", "EDUCATION", "EĞİTİM", "KUZEY", "COMPUTER", "ETA", "YERLICI", "BİM"].some(w => bUpper.includes(w))) {
-      return { building: bClean, campus: "Kuzey" };
-    }
-    if (["FREELY", "JOHN", "ANDERSON", "WASHBURN", "ENGINEERING", "NATUK", "HAMLIN", "GÜNEY", "SOUTH"].some(w => bUpper.includes(w))) {
-      return { building: bClean, campus: "Güney" };
-    }
-    if (bUpper.includes("HISAR") || bUpper.includes("HİSAR")) return { building: bClean, campus: "Hisar" };
-    if (bUpper.includes("UÇAKSAVAR") || bUpper.includes("GARANTI") || bUpper.includes("ŞAHENK")) return { building: bClean, campus: "Uçaksavar" };
-    if (bUpper.includes("KANDİLLİ") || bUpper.includes("KANDILLI")) return { building: bClean, campus: "Kandilli" };
-    if (bUpper.includes("KİLYOS") || bUpper.includes("KILYOS") || bUpper.includes("SARITEPE")) return { building: bClean, campus: "Kilyos" };
-    return { building: bClean, campus: "Other" };
-  }
-
-  // Specific campus prefix rules
-  if (upper.startsWith("HH") || upper.startsWith("HAML") || upper.startsWith("HÜL") || upper.startsWith("HUL")) {
-    return { building: `Hamlin Hall (${clean})`, campus: "Güney" };
-  }
-  if (upper.startsWith("HK") || upper.startsWith("HB") || upper.startsWith("HC") || upper.startsWith("HA") || upper.startsWith("HD") || upper.startsWith("HİS") || upper.startsWith("HIS")) {
-    return { building: `Hisar Building (${clean})`, campus: "Hisar" };
-  }
-  if (
-    (upper.startsWith("K") && !upper.startsWith("KAND") && !upper.startsWith("KİL") && !upper.startsWith("KIL")) ||
-    upper.startsWith("EF") ||
-    upper.startsWith("NH") ||
-    upper.startsWith("BM") ||
-    upper.startsWith("ETA") ||
-    upper.startsWith("VY")
-  ) {
-    return { building: `Kuzey Building (${clean})`, campus: "Kuzey" };
-  }
-  if (upper.startsWith("M") || upper.startsWith("T") || upper.startsWith("JF") || upper.startsWith("İB") || upper.startsWith("IB") || upper.startsWith("NB")) {
-    return { building: `Güney Building (${clean})`, campus: "Güney" };
-  }
-
-  return {
+  return inferCampusByPrefix(upper, clean) ?? {
     building: match ? `Building ${match[1].toUpperCase()}` : "Unassigned / Other",
     campus: "Other"
   };

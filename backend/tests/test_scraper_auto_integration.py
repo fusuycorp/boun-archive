@@ -1,17 +1,17 @@
-import hmac
 import hashlib
+import hmac
 import json
-import os
+
 import pytest
+from app import models
+from app.database import Base, get_db
+from app.main import app
+from app.sync import verify_webhook_signature
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.database import Base, get_db
-from app.main import app
-from app import models
-from app.sync import verify_webhook_signature
 
 @pytest.fixture
 def test_db():

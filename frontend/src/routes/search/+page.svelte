@@ -27,10 +27,22 @@
   // Filters
   let selectedTerms = $state<string[]>([]);
   let selectedDepts = $state<string[]>([]);
+  let onlyWithSyllabus = $state(false);
+  let activeFilterCount = $derived(selectedTerms.length + selectedDepts.length + (onlyWithSyllabus ? 1 : 0));
   let deptSearch = $state("");
   let isFilterDrawerOpen = $state(false);
+  let filterDialog = $state<HTMLDialogElement | null>(null);
 
   let searchAbortController: AbortController | null = null;
+
+  $effect(() => {
+    if (!filterDialog) return;
+    if (isFilterDrawerOpen) {
+      if (!filterDialog.open) filterDialog.showModal();
+    } else if (filterDialog.open) {
+      filterDialog.close();
+    }
+  });
 
   async function fetchGlobalFacets() {
     try {
@@ -54,6 +66,7 @@
     }
     selectedTerms.forEach(t => params.append("term", t));
     selectedDepts.forEach(d => params.append("dept", d));
+    if (onlyWithSyllabus) params.set("has_syllabus", "1");
     
     const newUrl = `${window.location.pathname}?${params.toString()}`;
     goto(newUrl, { replaceState: true, keepFocus: true, noScroll: true });
@@ -83,6 +96,7 @@
       
       selectedTerms.forEach(t => params.append("term", t));
       selectedDepts.forEach(d => params.append("dept", d));
+      if (onlyWithSyllabus) params.append("has_syllabus", "true");
 
       const response = await fetch(`${API_BASE}/v1/search?${params.toString()}`, {
         signal: searchAbortController.signal
@@ -92,7 +106,8 @@
         results = data.hits || [];
         currentFacets = data.facetDistribution || {};
         totalHits = data.totalHits ?? data.estimatedTotalHits ?? 0;
-        const isUnfiltered = selectedTerms.length === 0 && selectedDepts.length === 0 && !query.trim();
+        const isUnfiltered =
+          selectedTerms.length === 0 && selectedDepts.length === 0 && !onlyWithSyllabus && !query.trim();
         if (isUnfiltered && (!globalFacets?.term || Object.keys(globalFacets.term).length === 0) && data.facetDistribution) {
           globalFacets = data.facetDistribution;
         }
@@ -110,7 +125,8 @@
   function handlePageChange(newOffset: number) {
     offset = newOffset;
     performSearch(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    window.scrollTo({ top: 0, behavior });
   }
 
   function handleLimitChange(newLimit: number) {
@@ -146,9 +162,15 @@
     performSearch(true);
   }
 
+  function toggleOnlyWithSyllabus() {
+    onlyWithSyllabus = !onlyWithSyllabus;
+    performSearch(true);
+  }
+
   function clearFilters() {
     selectedTerms = [];
     selectedDepts = [];
+    onlyWithSyllabus = false;
     query = "";
     sortColumn = "";
     sortDirection = "asc";
@@ -191,6 +213,8 @@
     sortDirection = (urlParams.get("sort_order") as "asc" | "desc") || "asc";
     selectedTerms = urlParams.getAll("term");
     selectedDepts = urlParams.getAll("dept");
+    const rawHasSyllabus = urlParams.get("has_syllabus");
+    onlyWithSyllabus = rawHasSyllabus === "1" || rawHasSyllabus === "true";
 
     performSearch(false);
   });
@@ -202,34 +226,41 @@
   <meta property="og:title" content="Course Search & Archive • BOUN Archive" />
   <meta property="og:description" content="Search Boğaziçi University courses by code, title, instructor, and department." />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://archive.bogazici.app/search" />
+  <meta property="og:url" content="https://bountools.com/search" />
 </svelte:head>
 
 <div class="space-y-6">
-  <!-- Mobile Filter Modal / Drawer -->
-  {#if isFilterDrawerOpen}
-    <div 
-      role="button"
-      tabindex="0"
-      aria-label="Close filter drawer"
-      onclick={() => isFilterDrawerOpen = false}
-      onkeydown={(e) => (e.key === 'Escape' || e.key === 'Enter') && (isFilterDrawerOpen = false)}
-      class="lg:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-xs transition-opacity cursor-pointer"
-    ></div>
+  <!-- Live Polite Search/Sort Announcement -->
+  <div class="sr-only" role="status" aria-live="polite">
+    {#if !loading}
+      {totalHits.toLocaleString()} results{sortColumn ? `, sorted by ${sortColumn} ${sortDirection}` : ""}
+    {/if}
+  </div>
 
-    <div class="lg:hidden fixed inset-y-0 right-0 z-50 w-80 max-w-[85vw] bg-white dark:bg-[#121827] border-l border-[#e5e0d8] dark:border-[#1e293b] shadow-2xl flex flex-col">
-      <div class="p-4 border-b border-[#e5e0d8] dark:border-[#1e293b] flex items-center justify-between bg-[#f3efe6]/60 dark:bg-[#0a0e1a]">
+  <!-- Native Mobile Filter Dialog -->
+  <dialog
+    bind:this={filterDialog}
+    aria-label="Search Filters"
+    onclose={() => (isFilterDrawerOpen = false)}
+    onclick={(e) => {
+      if (e.target === e.currentTarget) e.currentTarget.close();
+    }}
+    class="lg:hidden open:flex flex-col ml-auto mr-0 my-0 p-0 h-dvh max-h-none w-80 max-w-[85vw] bg-white dark:bg-[#121827] border-l border-[#e5e0d8] dark:border-[#1e293b] shadow-2xl text-inherit backdrop:bg-black/60 backdrop:backdrop-blur-xs"
+  >
+    <div class="flex flex-col h-full w-full overflow-hidden">
+      <div class="p-4 border-b border-[#e5e0d8] dark:border-[#1e293b] flex items-center justify-between bg-[#f3efe6]/60 dark:bg-[#0a0e1a] shrink-0">
         <div class="flex items-center space-x-2 text-[#161e2e] dark:text-slate-200 font-semibold text-sm">
           <Filter size={16} class="text-[#0080c9] dark:text-[#8cc8ea]" />
           <span>Filters</span>
-          {#if selectedTerms.length + selectedDepts.length > 0}
+          {#if activeFilterCount > 0}
             <span class="px-2 py-0.5 bg-[#002d72] text-white dark:bg-[#8cc8ea] dark:text-[#0a0e1a] rounded-full font-mono text-xs font-bold">
-              {selectedTerms.length + selectedDepts.length}
+              {activeFilterCount}
             </span>
           {/if}
         </div>
         <button 
-          onclick={() => isFilterDrawerOpen = false}
+          type="button"
+          onclick={() => (isFilterDrawerOpen = false)}
           class="p-1.5 text-[#525f7f] hover:text-[#002d72] dark:hover:text-slate-200 rounded-lg cursor-pointer"
           aria-label="Close filters"
         >
@@ -243,29 +274,33 @@
           {currentFacets}
           {selectedTerms}
           {selectedDepts}
+          {onlyWithSyllabus}
           {deptSearch}
           onToggleTerm={toggleTerm}
           onToggleDept={toggleDept}
+          onToggleOnlyWithSyllabus={toggleOnlyWithSyllabus}
           onDeptSearchChange={(val) => deptSearch = val}
         />
       </div>
 
-      <div class="p-4 border-t border-[#e5e0d8] dark:border-[#1e293b] bg-[#f3efe6]/60 dark:bg-[#0a0e1a] flex space-x-2">
+      <div class="p-4 border-t border-[#e5e0d8] dark:border-[#1e293b] bg-[#f3efe6]/60 dark:bg-[#0a0e1a] flex space-x-2 shrink-0">
         <button 
+          type="button"
           onclick={clearFilters}
           class="flex-1 py-2.5 bg-[#e5e0d8] dark:bg-slate-800 text-[#161e2e] dark:text-slate-300 text-xs font-semibold rounded-lg hover:bg-[#d8d2c7] dark:hover:bg-slate-700 transition-colors cursor-pointer"
         >
           Clear
         </button>
         <button 
-          onclick={() => isFilterDrawerOpen = false}
+          type="button"
+          onclick={() => (isFilterDrawerOpen = false)}
           class="flex-1 py-2.5 bg-[#002d72] text-white text-xs font-semibold rounded-lg hover:bg-[#001b44] transition-colors shadow-2xs cursor-pointer"
         >
           Apply Filters
         </button>
       </div>
     </div>
-  {/if}
+  </dialog>
 
   <!-- Header & Actions -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -277,19 +312,21 @@
     <div class="flex flex-wrap items-center gap-2 sm:gap-3">
        <!-- Mobile Filter Toggle Button -->
        <button 
-         onclick={() => isFilterDrawerOpen = true}
+         type="button"
+         onclick={() => (isFilterDrawerOpen = true)}
+         aria-expanded={isFilterDrawerOpen}
          class="lg:hidden flex items-center space-x-1.5 bg-white dark:bg-[#121827] border border-[#e5e0d8] dark:border-[#1e293b] text-[#161e2e] dark:text-slate-300 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-2xs hover:border-[#c5a059] transition-colors cursor-pointer"
        >
          <Filter size={14} class="text-[#0080c9] dark:text-[#8cc8ea]" />
          <span>Filters</span>
-         {#if selectedTerms.length + selectedDepts.length > 0}
+         {#if activeFilterCount > 0}
            <span class="px-1.5 py-0.2 bg-[#002d72] text-white dark:bg-[#8cc8ea] dark:text-[#0a0e1a] rounded-full font-mono text-[10px] font-bold leading-none">
-             {selectedTerms.length + selectedDepts.length}
+             {activeFilterCount}
            </span>
          {/if}
        </button>
 
-       {#if selectedTerms.length > 0 || selectedDepts.length > 0 || query || sortColumn}
+       {#if activeFilterCount > 0 || query || sortColumn}
           <button 
             onclick={clearFilters}
             class="text-xs font-semibold text-[#525f7f] dark:text-slate-300 hover:text-[#002d72] dark:hover:text-white flex items-center space-x-1 bg-[#e5e0d8] dark:bg-slate-800 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
@@ -346,9 +383,11 @@
             {currentFacets}
             {selectedTerms}
             {selectedDepts}
+            {onlyWithSyllabus}
             {deptSearch}
             onToggleTerm={toggleTerm}
             onToggleDept={toggleDept}
+            onToggleOnlyWithSyllabus={toggleOnlyWithSyllabus}
             onDeptSearchChange={(val) => deptSearch = val}
           />
         </div>
@@ -363,7 +402,7 @@
           type="text"
           bind:value={query}
           oninput={handleInput}
-          placeholder="Search courses by code, title, or keyword..."
+          placeholder="Search courses, instructors, or syllabus topics..."
           class="w-full pl-11 pr-4 py-3.5 bg-white border border-[#e5e0d8] rounded-xl shadow-2xs outline-none focus:ring-2 focus:ring-[#002d72]/20 focus:border-[#002d72] text-sm sm:text-base transition-all dark:bg-[#121827] dark:border-[#1e293b] dark:text-white dark:focus:border-[#8cc8ea] dark:focus:ring-[#8cc8ea]/20"
         />
       </div>

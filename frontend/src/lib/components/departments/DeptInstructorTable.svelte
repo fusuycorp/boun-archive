@@ -48,35 +48,60 @@
 </div>
 
 <!-- Desktop Instructor Table (>= sm) -->
-<div class="hidden sm:block overflow-x-auto">
+<div class="hidden sm:block overflow-x-auto" role="region" aria-labelledby="dept-instructors-caption">
   <table class="w-full text-left border-collapse">
+    <caption id="dept-instructors-caption" class="sr-only">Department instructors roster</caption>
     <thead>
       <tr class="bg-[#f3efe6]/60 dark:bg-[#0a0e1a] border-b border-[#e5e0d8] dark:border-[#1e293b]">
-        <th class="p-4">
-          <button onclick={() => onSort('full_name')} class="flex items-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
+        <th
+          scope="col"
+          aria-sort={sortColumn === 'full_name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : undefined}
+          class="p-0"
+        >
+          <button type="button" onclick={() => onSort('full_name')} class="w-full p-4 flex items-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
             <span>Instructor Name</span>
-            {#if sortColumn === 'full_name'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            <span aria-hidden="true">
+              {#if sortColumn === 'full_name'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            </span>
           </button>
         </th>
-        <th class="p-4">
-          <button onclick={() => onSort('last_term')} class="flex items-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
+        <th
+          scope="col"
+          aria-sort={sortColumn === 'last_term' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : undefined}
+          class="p-0"
+        >
+          <button type="button" onclick={() => onSort('last_term')} class="w-full p-4 flex items-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
             <span>Last Term in Dept</span>
-            {#if sortColumn === 'last_term'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            <span aria-hidden="true">
+              {#if sortColumn === 'last_term'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            </span>
           </button>
         </th>
-        <th class="p-4 text-center">
-          <button onclick={() => onSort('course_count')} class="flex items-center justify-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
+        <th
+          scope="col"
+          aria-sort={sortColumn === 'course_count' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : undefined}
+          class="p-0 text-center"
+        >
+          <button type="button" onclick={() => onSort('course_count')} class="w-full p-4 flex items-center justify-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
             <span>Classes</span>
-            {#if sortColumn === 'course_count'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            <span aria-hidden="true">
+              {#if sortColumn === 'course_count'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            </span>
           </button>
         </th>
-        <th class="p-4 text-center">
-          <button onclick={() => onSort('total_semesters')} class="flex items-center justify-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
+        <th
+          scope="col"
+          aria-sort={sortColumn === 'total_semesters' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : undefined}
+          class="p-0 text-center"
+        >
+          <button type="button" onclick={() => onSort('total_semesters')} class="w-full p-4 flex items-center justify-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
             <span>Semesters</span>
-            {#if sortColumn === 'total_semesters'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            <span aria-hidden="true">
+              {#if sortColumn === 'total_semesters'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            </span>
           </button>
         </th>
-        <th class="p-4"></th>
+        <th scope="col" class="p-4"><span class="sr-only">Profile</span></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-[#e5e0d8] dark:divide-[#1e293b]">

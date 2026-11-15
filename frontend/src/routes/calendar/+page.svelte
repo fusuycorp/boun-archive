@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Search, Calendar, Plus, Trash2, AlertTriangle, Check, MapPin, BookOpen, Clock, RotateCcw, Download } from "lucide-svelte";
+  import { Search, Calendar, Plus, Trash2, AlertTriangle, Check, MapPin, BookOpen, Clock, RotateCcw, Download, Sparkles, Undo2 } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { generateICS, downloadICS } from "$lib/ical";
   import { safeParsePlannerCourses, type CoursePlannerItem } from "$lib/schemas/planner";
   import { resolveRoomLocation, isInterCampusCommute } from "$lib/campus";
-  import type { Term, SearchCourseHit } from "$lib/types";
+  import ScheduleOptimizerDialog from "$lib/components/calendar/ScheduleOptimizerDialog.svelte";
+  import type { Term, SearchCourseHit, TimetableSection } from "$lib/types";
 
   type ScheduledSlotItem = CoursePlannerItem & {
     slot_type: string;
@@ -22,8 +23,19 @@
   let myCourses = $state<CoursePlannerItem[]>([]);
   let loading = $state(false);
   let mobileTab = $state<"schedule" | "courses">("schedule");
+  let isOptimizerOpen = $state(false);
+  let clearDialog = $state<HTMLDialogElement | null>(null);
+  let previousScheduleSnapshot = $state<CoursePlannerItem[] | null>(null);
+  let undoTerm = $state("");
+  let tabSchedule = $state<HTMLButtonElement | null>(null);
+  let tabCourses = $state<HTMLButtonElement | null>(null);
+  let searchAbortController: AbortController | null = null;
   let days = ["M", "T", "W", "Th", "F", "St", "Su"];
   let hours = Array.from({ length: 14 }, (_, i) => i + 1);
+
+  const initialOptimizerCourses = $derived(
+    Array.from(new Set(myCourses.map((c) => c.course_code.trim().toUpperCase()).filter(Boolean)))
+  );
 
   function loadCoursesForTerm(term: string) {
     if (!term) {
@@ -72,9 +84,14 @@
   }
 
   function handleTermSelect(newTerm: string) {
+    if (searchAbortController) searchAbortController.abort();
     selectedTerm = newTerm;
     searchQuery = "";
     searchResults = [];
+    if (undoTerm !== newTerm) {
+      previousScheduleSnapshot = null;
+      undoTerm = "";
+    }
     loadCoursesForTerm(newTerm);
     sessionStorage.setItem("planner_selected_term", newTerm);
   }
@@ -97,19 +114,27 @@
   }
 
   async function performSearch() {
+    if (searchAbortController) searchAbortController.abort();
     if (searchQuery.trim().length < 2) {
       searchResults = [];
+      loading = false;
       return;
     }
+
+    const controller = new AbortController();
+    searchAbortController = controller;
     loading = true;
+
     try {
       const params = new URLSearchParams({
         q: searchQuery.trim(),
         term: selectedTerm,
         limit: "100"
       });
-      const res = await fetch(`${API_BASE}/v1/search?${params.toString()}`);
-      if (res.ok) {
+      const res = await fetch(`${API_BASE}/v1/search?${params.toString()}`, {
+        signal: controller.signal
+      });
+      if (res.ok && !controller.signal.aborted) {
         const data = await res.json();
         const rawHits: SearchCourseHit[] = data.hits || [];
         const seen = new Set<string>();
@@ -122,9 +147,12 @@
         });
       }
     } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
       console.error("Search failed", e);
     } finally {
-      loading = false;
+      if (searchAbortController === controller && !controller.signal.aborted) {
+        loading = false;
+      }
     }
   }
 
@@ -263,9 +291,67 @@
   }
 
   function clearAllCourses() {
-    if (confirm("Clear all enrolled courses from this semester's planner?")) {
+    if (clearDialog && !clearDialog.open) {
+      clearDialog.showModal();
+    }
+  }
+
+  function handleClearDialogClose() {
+    if (clearDialog?.returnValue === "confirm") {
       myCourses = [];
       saveCoursesForTerm(selectedTerm, []);
+    }
+  }
+
+  function applyOptimizedSchedule(sections: TimetableSection[]) {
+    previousScheduleSnapshot = myCourses.map((c) => ({ ...c, slots: [...(c.slots || [])] }));
+    undoTerm = selectedTerm;
+    const mapped: CoursePlannerItem[] = sections.map((sec) => ({
+      id: null,
+      course_code: sec.course_code,
+      title: sec.title ?? sec.course_code,
+      section: sec.section,
+      term: selectedTerm,
+      term_id: selectedTerm,
+      instructor_name: sec.instructor ?? undefined,
+      instructor: sec.instructor ?? undefined,
+      credits: sec.credits ?? undefined,
+      ects: sec.ects ?? undefined,
+      slots: (sec.slots || [])
+        .filter((sl) => sl && sl.day_code && sl.slot_hour != null)
+        .map((sl) => ({
+          day_code: String(sl.day_code),
+          slot_hour: Number(sl.slot_hour),
+          slot_title: sl.slot_title ?? null,
+          room_name: sl.room_name ?? null,
+          disabled: false
+        }))
+    }));
+    myCourses = mapped;
+    saveCoursesForTerm(selectedTerm, mapped);
+  }
+
+  function undoOptimizedSchedule() {
+    if (!previousScheduleSnapshot || undoTerm !== selectedTerm) return;
+    myCourses = previousScheduleSnapshot;
+    saveCoursesForTerm(selectedTerm, previousScheduleSnapshot);
+    previousScheduleSnapshot = null;
+    undoTerm = "";
+  }
+
+  function handleMobileTabKeydown(e: KeyboardEvent, current: "schedule" | "courses") {
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      const next =
+        e.key === "Home"
+          ? "schedule"
+          : e.key === "End"
+          ? "courses"
+          : current === "schedule"
+          ? "courses"
+          : "schedule";
+      mobileTab = next;
+      (next === "schedule" ? tabSchedule : tabCourses)?.focus();
     }
   }
 
@@ -384,7 +470,7 @@
   let timeout: ReturnType<typeof setTimeout> | undefined;
   function handleInput() {
     clearTimeout(timeout);
-    timeout = setTimeout(performSearch, 300);
+    timeout = setTimeout(performSearch, 250);
   }
   function exportScheduleICS() {
     if (myCourses.length === 0) return;
@@ -399,18 +485,64 @@
   <meta property="og:title" content="Weekly Schedule Planner • BOUN Archive" />
   <meta property="og:description" content="Personalize semester timetable and export iCal (.ics) schedules for Boğaziçi University." />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://archive.bogazici.app/calendar" />
+  <meta property="og:url" content="https://bountools.com/calendar" />
 </svelte:head>
 
 <div class="space-y-4 sm:space-y-6 h-full flex flex-col">
+  <!-- Native Clear Confirmation Dialog -->
+  <dialog
+    bind:this={clearDialog}
+    aria-labelledby="clear-planner-title"
+    onclose={handleClearDialogClose}
+    onclick={(e) => {
+      if (e.target === e.currentTarget) e.currentTarget.close("cancel");
+    }}
+    class="open:flex flex-col m-auto p-0 w-[calc(100vw-2rem)] max-w-md rounded-2xl bg-white dark:bg-[#121827] border border-[#e5e0d8] dark:border-[#1e293b] shadow-2xl text-inherit backdrop:bg-black/60 backdrop:backdrop-blur-xs"
+  >
+    <form method="dialog" class="p-5 space-y-4 w-full">
+      <div class="space-y-1.5">
+        <h2 id="clear-planner-title" class="font-serif text-lg font-bold text-[#002d72] dark:text-slate-100">
+          Clear Semester Planner?
+        </h2>
+        <p class="text-xs text-[#525f7f] dark:text-slate-400">
+          Remove all {myCourses.length} enrolled courses from {selectedTerm}? This clears saved local state for this term.
+        </p>
+      </div>
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button
+          value="cancel"
+          type="submit"
+          class="px-4 py-2 rounded-lg border border-[#e5e0d8] dark:border-[#1e293b] text-xs font-semibold text-[#525f7f] dark:text-slate-300 hover:bg-[#faf8f5] dark:hover:bg-slate-800 cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          value="confirm"
+          type="submit"
+          class="px-4 py-2 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700 cursor-pointer"
+        >
+          Clear Courses
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <ScheduleOptimizerDialog
+    open={isOptimizerOpen}
+    {selectedTerm}
+    initialTargetCourses={initialOptimizerCourses}
+    onClose={() => (isOptimizerOpen = false)}
+    onApplySchedule={applyOptimizedSchedule}
+  />
+
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
     <div>
       <h1 class="font-serif text-2xl sm:text-3xl font-bold text-[#002d72] dark:text-slate-50 tracking-tight">Weekly Planner</h1>
-      <p class="font-sans text-xs sm:text-sm text-[#525f7f] mt-1 dark:text-slate-400">Personalize semester schedules and identify timetable conflicts.</p>
+      <p class="font-sans text-xs sm:text-sm text-[#525f7f] mt-1 dark:text-slate-400">Personalize semester schedules, run auto-scheduling, and identify timetable conflicts.</p>
     </div>
     
-    <div class="flex items-center space-x-3">
+    <div class="flex flex-wrap items-end gap-2 sm:gap-3">
       <div class="flex flex-col space-y-1 w-full sm:w-auto">
         <label for="semester-select" class="font-mono text-[9px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider px-1">Selected Semester</label>
         <select 
@@ -425,41 +557,82 @@
         </select>
       </div>
 
+      <button
+        type="button"
+        onclick={() => (isOptimizerOpen = true)}
+        disabled={!selectedTerm}
+        class="flex items-center space-x-1.5 px-3 py-2 bg-[#002d72] text-white rounded-lg text-xs font-semibold hover:bg-[#001b44] disabled:opacity-40 transition-colors shadow-2xs cursor-pointer h-[38px]"
+        title="Run CSP Auto-Scheduler"
+      >
+        <Sparkles size={14} />
+        <span>Auto-Optimize</span>
+      </button>
+
+      {#if previousScheduleSnapshot !== null && undoTerm === selectedTerm}
+        <button
+          type="button"
+          onclick={undoOptimizedSchedule}
+          class="flex items-center space-x-1.5 px-3 py-2 bg-amber-500/15 border border-amber-500/40 text-amber-900 dark:text-amber-200 rounded-lg text-xs font-semibold hover:bg-amber-500/25 transition-colors shadow-2xs cursor-pointer h-[38px]"
+        >
+          <Undo2 size={14} />
+          <span>Undo Auto-Optimize</span>
+        </button>
+      {/if}
+
       {#if myCourses.length > 0}
-        <div class="flex flex-col space-y-1 self-end">
-          <button
-            onclick={exportScheduleICS}
-            class="flex items-center space-x-1.5 p-2 bg-white border border-[#e5e0d8] rounded-lg text-xs font-semibold text-[#002d72] hover:bg-[#f3efe6] dark:bg-[#121827] dark:border-[#1e293b] dark:text-[#8cc8ea] dark:hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer h-[38px]"
-            title="Export timetable to iCalendar (.ics)"
-          >
-            <Download size={14} />
-            <span class="hidden sm:inline">Export .ics</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onclick={exportScheduleICS}
+          class="flex items-center space-x-1.5 p-2 bg-white border border-[#e5e0d8] rounded-lg text-xs font-semibold text-[#002d72] hover:bg-[#f3efe6] dark:bg-[#121827] dark:border-[#1e293b] dark:text-[#8cc8ea] dark:hover:bg-slate-800 transition-colors shadow-2xs cursor-pointer h-[38px]"
+          title="Export timetable to iCalendar (.ics)"
+        >
+          <Download size={14} />
+          <span class="hidden sm:inline">Export .ics</span>
+        </button>
       {/if}
     </div>
   </div>
 
   <!-- Mobile Segmented View Switcher (lg:hidden) -->
-  <div class="lg:hidden flex bg-[#e5e0d8] dark:bg-slate-800 p-1 rounded-xl shrink-0 font-sans">
+  <div
+    role="tablist"
+    aria-label="Planner views"
+    class="lg:hidden flex bg-[#e5e0d8] dark:bg-slate-800 p-1 rounded-xl shrink-0 font-sans"
+  >
     <button 
-      onclick={() => mobileTab = "schedule"}
-      class="flex-1 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2 cursor-pointer
+      bind:this={tabSchedule}
+      id="planner-tab-schedule"
+      type="button"
+      role="tab"
+      aria-selected={mobileTab === 'schedule'}
+      aria-controls="planner-panel-schedule"
+      tabindex={mobileTab === 'schedule' ? 0 : -1}
+      onclick={() => (mobileTab = "schedule")}
+      onkeydown={(e) => handleMobileTabKeydown(e, "schedule")}
+      class="flex-1 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2 cursor-pointer border-b-2
       {mobileTab === 'schedule' 
-        ? 'bg-white text-[#002d72] shadow-2xs dark:bg-[#121827] dark:text-white font-bold' 
-        : 'text-[#525f7f] dark:text-slate-400'}"
+        ? 'bg-white text-[#002d72] border-[#002d72] shadow-2xs dark:bg-[#121827] dark:text-white dark:border-[#8cc8ea] font-bold' 
+        : 'border-transparent text-[#525f7f] dark:text-slate-400'}"
     >
-      <Clock size={14} />
+      <Clock size={14} aria-hidden="true" />
       <span>Timetable Matrix</span>
     </button>
     <button 
-      onclick={() => mobileTab = "courses"}
-      class="flex-1 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2 cursor-pointer
+      bind:this={tabCourses}
+      id="planner-tab-courses"
+      type="button"
+      role="tab"
+      aria-selected={mobileTab === 'courses'}
+      aria-controls="planner-panel-courses"
+      tabindex={mobileTab === 'courses' ? 0 : -1}
+      onclick={() => (mobileTab = "courses")}
+      onkeydown={(e) => handleMobileTabKeydown(e, "courses")}
+      class="flex-1 py-2 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center space-x-2 cursor-pointer border-b-2
       {mobileTab === 'courses' 
-        ? 'bg-white text-[#002d72] shadow-2xs dark:bg-[#121827] dark:text-white font-bold' 
-        : 'text-[#525f7f] dark:text-slate-400'}"
+        ? 'bg-white text-[#002d72] border-[#002d72] shadow-2xs dark:bg-[#121827] dark:text-white dark:border-[#8cc8ea] font-bold' 
+        : 'border-transparent text-[#525f7f] dark:text-slate-400'}"
     >
-      <BookOpen size={14} />
+      <BookOpen size={14} aria-hidden="true" />
       <span>Courses ({myCourses.length})</span>
     </button>
   </div>
@@ -467,7 +640,7 @@
   <!-- Content Body -->
   <div class="flex-1 flex flex-col lg:flex-row gap-4 sm:gap-6 min-h-0 overflow-hidden">
     <!-- Left Sidebar: Search & List -->
-    <aside class="w-full lg:w-96 xl:w-[420px] flex flex-col space-y-4 shrink-0 min-h-0 {mobileTab === 'courses' ? 'flex' : 'hidden lg:flex'}">
+    <aside id="planner-panel-courses" aria-labelledby="planner-tab-courses" class="w-full lg:w-96 xl:w-[420px] flex flex-col space-y-4 shrink-0 min-h-0 {mobileTab === 'courses' ? 'flex' : 'hidden lg:flex'}">
       <!-- Search Box -->
       <div class="bg-white p-4 rounded-xl border border-[#e5e0d8] shadow-2xs space-y-3 shrink-0 dark:bg-[#121827] dark:border-[#1e293b]">
         <div class="relative">
@@ -598,7 +771,7 @@
     </aside>
 
     <!-- Main Calendar Grid -->
-    <div class="flex-1 bg-white rounded-xl border border-[#e5e0d8] shadow-2xs overflow-hidden flex flex-col min-w-0 dark:bg-[#121827] dark:border-[#1e293b] {mobileTab === 'schedule' ? 'flex' : 'hidden lg:flex'}">
+    <div id="planner-panel-schedule" aria-labelledby="planner-tab-schedule" class="flex-1 bg-white rounded-xl border border-[#e5e0d8] shadow-2xs overflow-hidden flex flex-col min-w-0 dark:bg-[#121827] dark:border-[#1e293b] {mobileTab === 'schedule' ? 'flex' : 'hidden lg:flex'}">
       {#if commuteRisks.length > 0}
         <!-- Dash of Death Inter-Campus Commute Alert Banner -->
         <div class="p-3 bg-amber-500/10 border-b border-amber-500/30 flex items-start space-x-2.5 dark:bg-amber-950/40 dark:border-amber-500/30">

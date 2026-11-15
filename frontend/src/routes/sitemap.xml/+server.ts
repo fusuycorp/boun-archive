@@ -2,7 +2,7 @@ import type { RequestHandler } from "./$types";
 import { API_BASE } from "$lib/config";
 
 export const GET: RequestHandler = async ({ fetch }) => {
-  const baseUrl = "https://archive.bogazici.app";
+  const baseUrl = "https://bountools.com";
   const today = new Date().toISOString().split("T")[0];
 
   const staticUrls = [

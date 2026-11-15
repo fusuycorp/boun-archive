@@ -171,8 +171,9 @@ def test_scheduling_heatmap_contract(client: TestClient):
 
 def test_course_quota_latest_deduplication(client: TestClient):
     """Verify get_course_quota with history=False only returns the latest snapshot per section/department."""
-    from tests.conftest import TestingSessionLocal
     from app import models
+
+    from tests.conftest import TestingSessionLocal
 
     # Insert an older snapshot for the same section & department
     with TestingSessionLocal() as db:
@@ -211,6 +212,7 @@ def test_course_quota_latest_deduplication(client: TestClient):
 def test_search_zero_hits_meili_returns_empty_directly(client: TestClient):
     """Verify that when Meilisearch returns 0 hits, the endpoint returns hits: [] directly without fallback."""
     from unittest.mock import MagicMock, patch
+
     import app.main as main_module
 
     mock_index = MagicMock()
@@ -236,6 +238,7 @@ def test_search_zero_hits_meili_returns_empty_directly(client: TestClient):
 def test_search_exception_meili_falls_back_to_db(client: TestClient):
     """Verify that when Meilisearch raises an exception, the endpoint falls back to DB search."""
     from unittest.mock import MagicMock, patch
+
     import app.main as main_module
 
     mock_index = MagicMock()

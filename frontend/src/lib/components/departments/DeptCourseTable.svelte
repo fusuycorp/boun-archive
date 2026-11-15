@@ -45,30 +45,49 @@
 </div>
 
 <!-- Desktop Course Table (>= sm) -->
-<div class="hidden sm:block overflow-x-auto">
+<div class="hidden sm:block overflow-x-auto" role="region" aria-labelledby="dept-courses-caption">
   <table class="w-full text-left border-collapse">
+    <caption id="dept-courses-caption" class="sr-only">Department course offerings history</caption>
     <thead>
       <tr class="bg-[#f3efe6]/60 dark:bg-[#0a0e1a] border-b border-[#e5e0d8] dark:border-[#1e293b]">
-        <th class="p-4">
-          <button onclick={() => onSort('course_code')} class="flex items-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
+        <th
+          scope="col"
+          aria-sort={sortColumn === 'course_code' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : undefined}
+          class="p-0"
+        >
+          <button type="button" onclick={() => onSort('course_code')} class="w-full p-4 flex items-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
             <span>Code</span>
-            {#if sortColumn === 'course_code'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            <span aria-hidden="true">
+              {#if sortColumn === 'course_code'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            </span>
           </button>
         </th>
-        <th class="p-4">
-          <button onclick={() => onSort('title')} class="flex items-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
+        <th
+          scope="col"
+          aria-sort={sortColumn === 'title' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : undefined}
+          class="p-0"
+        >
+          <button type="button" onclick={() => onSort('title')} class="w-full p-4 flex items-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
             <span>Title</span>
-            {#if sortColumn === 'title'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            <span aria-hidden="true">
+              {#if sortColumn === 'title'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            </span>
           </button>
         </th>
-        <th class="p-4">
-          <button onclick={() => onSort('latest_term')} class="flex items-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
+        <th
+          scope="col"
+          aria-sort={sortColumn === 'latest_term' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : undefined}
+          class="p-0"
+        >
+          <button type="button" onclick={() => onSort('latest_term')} class="w-full p-4 flex items-center space-x-1 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider hover:text-[#002d72] dark:hover:text-slate-200 transition-colors cursor-pointer">
             <span>Latest Term</span>
-            {#if sortColumn === 'latest_term'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            <span aria-hidden="true">
+              {#if sortColumn === 'latest_term'}{sortDirection === 'asc' ? '↑' : '↓'}{:else}<ArrowUpDown size={10} />{/if}
+            </span>
           </button>
         </th>
-        <th class="p-4 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">Active Semesters</th>
-        <th class="p-4"></th>
+        <th scope="col" class="p-4 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">Active Semesters</th>
+        <th scope="col" class="p-4"><span class="sr-only">History</span></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-[#e5e0d8] dark:divide-[#1e293b]">

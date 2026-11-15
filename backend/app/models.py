@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey, func, Index, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import relationship
+
 from .database import Base
+
 
 class Term(Base):
     __tablename__ = "terms"
@@ -46,6 +48,11 @@ class Course(Base):
     credits = Column(Integer)
     ects = Column(Integer)
     delivery_method = Column(String(50))
+    desc_url = Column(Text, nullable=True)
+    syllabus_url = Column(Text, nullable=True)
+    syllabus_hash = Column(String(64), nullable=True)
+    syllabus_text = Column(Text, nullable=True)
+    has_syllabus = Column(Boolean, default=False, server_default="false", nullable=False)
 
     term = relationship("Term", back_populates="courses")
     department = relationship("Department", back_populates="courses")
@@ -99,7 +106,7 @@ class CourseChange(Base):
         Index("idx_changes_code_timestamp", "course_code", "timestamp"),
     )
     id = Column(Integer, primary_key=True, index=True)
-    change_type = Column(String(20), nullable=False, index=True)
+    change_type = Column(String(32), nullable=False, index=True)
     term_id = Column(String(15), nullable=False, index=True)
     dept_kisaadi = Column(String(10), index=True)
     course_code = Column(String(20), nullable=False, index=True)
@@ -107,7 +114,22 @@ class CourseChange(Base):
     timestamp = Column(String(50), nullable=False, index=True)
     old_value = Column(Text, nullable=True)
     new_value = Column(Text, nullable=True)
-    details = Column(String(255), nullable=True)
+    details = Column(Text, nullable=True)
+
+
+class CourseCatalog(Base):
+    """Canonical EN/TR university catalog descriptions keyed by normalized course code."""
+
+    __tablename__ = "course_catalog"
+    course_code = Column(String(20), primary_key=True, index=True)
+    title = Column(String(255), nullable=True)
+    en_url = Column(Text, nullable=True)
+    tr_url = Column(Text, nullable=True)
+    en_text = Column(Text, nullable=True)
+    tr_text = Column(Text, nullable=True)
+    canonical_text = Column(Text, nullable=True)
+    content_hash = Column(String(64), nullable=True)
+    updated_at = Column(String(50), nullable=True)
 
 class SyncState(Base):
     __tablename__ = "sync_state"

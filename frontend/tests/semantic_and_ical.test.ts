@@ -128,8 +128,8 @@ describe("RFC 5545 iCalendar (.ics) Generation", () => {
     expect(ics.includes("BEGIN:VEVENT\r\n")).toBe(true);
     expect(ics.includes("SUMMARY:CMPE 150.01 - Introduction to Computing\r\n")).toBe(true);
     expect(ics.includes("LOCATION:BMB 217\r\n")).toBe(true);
-    expect(ics.includes("RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=20270125T235959Z\r\n")).toBe(true);
-    expect(ics.includes("RRULE:FREQ=WEEKLY;BYDAY=WE;UNTIL=20270125T235959Z\r\n")).toBe(true);
+    expect(ics.includes("RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=20261211T235959Z\r\n")).toBe(true);
+    expect(ics.includes("RRULE:FREQ=WEEKLY;BYDAY=WE;UNTIL=20261211T235959Z\r\n")).toBe(true);
     expect(ics.endsWith("END:VCALENDAR\r\n")).toBe(true);
   });
 

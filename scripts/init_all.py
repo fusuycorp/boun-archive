@@ -6,9 +6,11 @@ from _pathutil import add_import_paths
 
 add_import_paths()
 
-from wait_for_services import wait_for_postgres, wait_for_meilisearch, wait_for_redis
+from wait_for_services import wait_for_meilisearch, wait_for_postgres, wait_for_redis
+
 from scripts.migrate_to_pg import migrate
 from scripts.sync_meilisearch import sync_meilisearch
+
 
 def main():
     print("=== BOUN Archive Initialization Job Starting ===")

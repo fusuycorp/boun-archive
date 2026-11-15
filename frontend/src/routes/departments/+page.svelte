@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { BookOpen, Search, ChevronRight, Hash, ArrowUpDown, User, Download } from "lucide-svelte";
+  import { goto } from "$app/navigation";
+  import { page } from "$app/state";
+  import { BookOpen, Search, ChevronRight, User, Download, AlertTriangle, RotateCcw } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import { exportToCSV } from "$lib/utils";
   import { generateDepartmentsJsonLd, serializeJsonLd } from "$lib/semantic";
@@ -16,8 +18,12 @@
   let uniqueCourses = $state<DepartmentUniqueCourse[]>([]);
   let deptInstructors = $state<DepartmentInstructor[]>([]);
   let loading = $state(false);
+  let fetchError = $state<string | null>(null);
   let deptSearch = $state("");
   let viewMode = $state<"courses" | "instructors">("courses");
+  let tabCourses = $state<HTMLButtonElement | null>(null);
+  let tabInstructors = $state<HTMLButtonElement | null>(null);
+  let activeFetchController: AbortController | null = null;
 
   // Sorting - Courses
   let courseSortColumn = $state<keyof DepartmentUniqueCourse | "latest_term">("latest_term");
@@ -27,40 +33,121 @@
   let instructorSortColumn = $state<keyof DepartmentInstructor>("last_term");
   let instructorSortDirection = $state<"asc" | "desc">("desc");
 
-  function restoreSessionState() {
-    // Restore state if available
+  function syncDeptUrl(dept: string | null, mode: "courses" | "instructors") {
+    const params = new URLSearchParams(page.url.searchParams);
+    if (dept) params.set("dept", dept);
+    else params.delete("dept");
+    params.set("view", mode);
+    goto(`${page.url.pathname}?${params.toString()}`, {
+      replaceState: true,
+      noScroll: true,
+      keepFocus: true
+    });
+  }
+
+  function loadCachedDeptData(deptCode: string): { hasCourses: boolean; hasInstructors: boolean } {
+    let hasCourses = false;
+    let hasInstructors = false;
     try {
+      const savedCourses = sessionStorage.getItem(`dept_courses_${deptCode}`);
+      if (savedCourses) {
+        uniqueCourses = JSON.parse(savedCourses);
+        hasCourses = true;
+      }
+    } catch {
+      sessionStorage.removeItem(`dept_courses_${deptCode}`);
+    }
+    try {
+      const savedInstructors = sessionStorage.getItem(`dept_instructors_${deptCode}`);
+      if (savedInstructors) {
+        deptInstructors = JSON.parse(savedInstructors);
+        hasInstructors = true;
+      }
+    } catch {
+      sessionStorage.removeItem(`dept_instructors_${deptCode}`);
+    }
+    return { hasCourses, hasInstructors };
+  }
+
+  async function fetchDepartmentPayload(deptCode: string, needCourses = true, needInstructors = true) {
+    if (activeFetchController) activeFetchController.abort();
+    const controller = new AbortController();
+    activeFetchController = controller;
+    const timeoutId = setTimeout(() => controller.abort(new DOMException("Request timed out", "TimeoutError")), 8000);
+    fetchError = null;
+    loading = true;
+
+    try {
+      const encoded = encodeURIComponent(deptCode);
+      const tasks: Promise<void>[] = [];
+
+      if (needCourses) {
+        tasks.push((async () => {
+          const res = await fetch(`${API_BASE}/v1/departments/${encoded}/unique-courses`, {
+            signal: controller.signal
+          });
+          if (!res.ok) throw new Error(`Courses request failed (HTTP ${res.status})`);
+          const payload: DepartmentUniqueCourse[] = await res.json();
+          if (controller.signal.aborted) return;
+          uniqueCourses = payload.map((c) => ({ ...c, latest_term: c.terms[0] || "" }));
+          try {
+            sessionStorage.setItem(`dept_courses_${deptCode}`, JSON.stringify(uniqueCourses));
+          } catch {}
+        })());
+      }
+
+      if (needInstructors) {
+        tasks.push((async () => {
+          const res = await fetch(`${API_BASE}/v1/departments/${encoded}/instructors`, {
+            signal: controller.signal
+          });
+          if (!res.ok) throw new Error(`Instructors request failed (HTTP ${res.status})`);
+          const payload: DepartmentInstructor[] = await res.json();
+          if (controller.signal.aborted) return;
+          deptInstructors = payload;
+          try {
+            sessionStorage.setItem(`dept_instructors_${deptCode}`, JSON.stringify(deptInstructors));
+          } catch {}
+        })());
+      }
+
+      await Promise.all(tasks);
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError" && activeFetchController !== controller) {
+        return;
+      }
+      fetchError = e instanceof Error ? e.message : "Failed to load department archive.";
+    } finally {
+      clearTimeout(timeoutId);
+      if (activeFetchController === controller) {
+        loading = false;
+      }
+    }
+  }
+
+  function restoreSessionState() {
+    try {
+      const urlDept = page.url.searchParams.get("dept")?.trim().toUpperCase() || null;
+      const urlView = page.url.searchParams.get("view");
       const savedDept = sessionStorage.getItem("dept_selected");
-      const savedView = sessionStorage.getItem("dept_view_mode") as "courses" | "instructors" | null;
-      
-      if (savedView === "courses" || savedView === "instructors") viewMode = savedView;
+      const savedView = sessionStorage.getItem("dept_view_mode");
 
-      if (savedDept) {
-        selectedDept = savedDept;
-        const savedCourses = sessionStorage.getItem(`dept_courses_${savedDept}`);
-        if (savedCourses) {
-          try {
-            uniqueCourses = JSON.parse(savedCourses);
-          } catch (e) {
-            console.error("Failed to parse saved department courses from session storage", e);
-            sessionStorage.removeItem(`dept_courses_${savedDept}`);
-            fetchUniqueCourses(savedDept);
-          }
-        } else {
-          fetchUniqueCourses(savedDept);
+      if (urlView === "courses" || urlView === "instructors") {
+        viewMode = urlView;
+      } else if (savedView === "courses" || savedView === "instructors") {
+        viewMode = savedView;
+      }
+
+      const initialDept = urlDept || savedDept;
+      if (initialDept) {
+        selectedDept = initialDept;
+        sessionStorage.setItem("dept_selected", initialDept);
+        const { hasCourses, hasInstructors } = loadCachedDeptData(initialDept);
+        if (!hasCourses || !hasInstructors) {
+          fetchDepartmentPayload(initialDept, !hasCourses, !hasInstructors);
         }
-
-        const savedInstructors = sessionStorage.getItem(`dept_instructors_${savedDept}`);
-        if (savedInstructors) {
-          try {
-            deptInstructors = JSON.parse(savedInstructors);
-          } catch (e) {
-            console.error("Failed to parse saved department instructors from session storage", e);
-            sessionStorage.removeItem(`dept_instructors_${savedDept}`);
-            fetchDeptInstructors(savedDept);
-          }
-        } else {
-          fetchDeptInstructors(savedDept);
+        if (!urlDept || !urlView) {
+          syncDeptUrl(initialDept, viewMode);
         }
       }
     } catch (e) {
@@ -68,42 +155,16 @@
     }
   }
 
-  async function fetchUniqueCourses(deptCode: string) {
-    try {
-      const res = await fetch(`${API_BASE}/v1/departments/${deptCode}/unique-courses`);
-      const data: DepartmentUniqueCourse[] = await res.json();
-      uniqueCourses = data.map((c: DepartmentUniqueCourse) => ({
-        ...c,
-        latest_term: c.terms[0] || ""
-      }));
-      sessionStorage.setItem(`dept_courses_${deptCode}`, JSON.stringify(uniqueCourses));
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  async function fetchDeptInstructors(deptCode: string) {
-    try {
-      const res = await fetch(`${API_BASE}/v1/departments/${deptCode}/instructors`);
-      const data: DepartmentInstructor[] = await res.json();
-      deptInstructors = data;
-      sessionStorage.setItem(`dept_instructors_${deptCode}`, JSON.stringify(deptInstructors));
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
   async function handleDeptSelect(deptCode: string) {
-    loading = true;
+    if (!deptCode) return;
     selectedDept = deptCode;
-    sessionStorage.setItem("dept_selected", deptCode);
-    
-    await Promise.all([
-      fetchUniqueCourses(deptCode),
-      fetchDeptInstructors(deptCode)
-    ]);
-    
-    loading = false;
+    uniqueCourses = [];
+    deptInstructors = [];
+    try {
+      sessionStorage.setItem("dept_selected", deptCode);
+    } catch {}
+    syncDeptUrl(deptCode, viewMode);
+    await fetchDepartmentPayload(deptCode, true, true);
   }
 
   function handleCourseSort(column: keyof DepartmentUniqueCourse | "latest_term") {
@@ -126,7 +187,26 @@
 
   function setViewMode(mode: "courses" | "instructors") {
     viewMode = mode;
-    sessionStorage.setItem("dept_view_mode", mode);
+    try {
+      sessionStorage.setItem("dept_view_mode", mode);
+    } catch {}
+    syncDeptUrl(selectedDept, mode);
+  }
+
+  function handleViewTabKeydown(e: KeyboardEvent, current: "courses" | "instructors") {
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft" || e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      const next =
+        e.key === "Home"
+          ? "courses"
+          : e.key === "End"
+          ? "instructors"
+          : current === "courses"
+          ? "instructors"
+          : "courses";
+      setViewMode(next);
+      (next === "courses" ? tabCourses : tabInstructors)?.focus();
+    }
   }
 
   function handleExport() {
@@ -187,7 +267,7 @@
   <meta property="og:title" content="Departments Directory • BOUN Archive" />
   <meta property="og:description" content="Explore Boğaziçi University academic departments, historical curriculum records, unique course offerings, and faculty instructors." />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://archive.bogazici.app/departments" />
+  <meta property="og:url" content="https://bountools.com/departments" />
   {#if departments.length > 0}
     {@html `<script type="application/ld+json">${serializeJsonLd(generateDepartmentsJsonLd(departments))}<\/script>`}
   {/if}
@@ -259,10 +339,30 @@
 
     <!-- Main Content -->
     <main class="lg:col-span-3 space-y-6">
+      <div class="sr-only" role="status" aria-live="polite">
+        {#if !loading && selectedDept && !fetchError}
+          {selectedDept}: showing {viewMode === 'courses' ? `${uniqueCourses.length} courses` : `${deptInstructors.length} instructors`}
+        {/if}
+      </div>
+
       {#if loading}
         <div class="bg-white rounded-xl border border-[#e5e0d8] p-20 flex flex-col items-center justify-center space-y-3 dark:bg-[#121827] dark:border-[#1e293b]">
           <div class="animate-spin rounded-full h-8 w-8 border-3 border-[#e5e0d8] border-t-[#002d72] dark:border-slate-800 dark:border-t-[#8cc8ea]"></div>
           <p class="text-[#525f7f] dark:text-slate-400 font-medium text-xs">Retrieving department archive...</p>
+        </div>
+      {:else if fetchError && selectedDept}
+        <div role="alert" class="bg-white rounded-xl border border-rose-300 dark:border-rose-800 p-10 flex flex-col items-center justify-center text-center space-y-3 dark:bg-[#121827]">
+          <AlertTriangle size={24} class="text-rose-600 dark:text-rose-400" />
+          <h3 class="font-serif text-lg font-bold text-[#161e2e] dark:text-slate-100">Unable to load {selectedDept} archive</h3>
+          <p class="text-xs text-[#525f7f] dark:text-slate-400 max-w-md">{fetchError}</p>
+          <button
+            type="button"
+            onclick={() => fetchDepartmentPayload(selectedDept!, true, true)}
+            class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#002d72] text-white text-xs font-semibold hover:bg-[#001b44] transition-colors cursor-pointer"
+          >
+            <RotateCcw size={13} />
+            <span>Retry</span>
+          </button>
         </div>
       {:else if selectedDept}
         <div class="bg-white rounded-xl border border-[#e5e0d8] shadow-2xs overflow-hidden dark:bg-[#121827] dark:border-[#1e293b]">
@@ -285,18 +385,35 @@
 
             <div class="flex flex-wrap items-center gap-2 sm:gap-3">
               <!-- Tab Switcher -->
-              <div class="flex bg-[#e5e0d8] dark:bg-slate-800 p-1 rounded-lg">
+              <div role="tablist" aria-label="Department archive view" class="flex bg-[#e5e0d8] dark:bg-slate-800 p-1 rounded-lg">
                  <button 
+                  bind:this={tabCourses}
+                  id="dept-tab-courses"
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === 'courses'}
+                  aria-controls="dept-panel-courses"
+                  tabindex={viewMode === 'courses' ? 0 : -1}
                   onclick={() => setViewMode('courses')}
-                  class="px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer {viewMode === 'courses' ? 'bg-[#002d72] text-white shadow-2xs dark:bg-[#8cc8ea] dark:text-[#0a0e1a]' : 'text-[#525f7f] hover:text-[#002d72] dark:text-slate-400'}"
+                  onkeydown={(e) => handleViewTabKeydown(e, 'courses')}
+                  class="px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer border-b-2 {viewMode === 'courses' ? 'bg-[#002d72] text-white border-[#c5a059] shadow-2xs dark:bg-[#8cc8ea] dark:text-[#0a0e1a] dark:border-[#002d72]' : 'border-transparent text-[#525f7f] hover:text-[#002d72] dark:text-slate-400'}"
                  >Courses</button>
                  <button 
+                  bind:this={tabInstructors}
+                  id="dept-tab-instructors"
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === 'instructors'}
+                  aria-controls="dept-panel-instructors"
+                  tabindex={viewMode === 'instructors' ? 0 : -1}
                   onclick={() => setViewMode('instructors')}
-                  class="px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer {viewMode === 'instructors' ? 'bg-[#002d72] text-white shadow-2xs dark:bg-[#8cc8ea] dark:text-[#0a0e1a]' : 'text-[#525f7f] hover:text-[#002d72] dark:text-slate-400'}"
+                  onkeydown={(e) => handleViewTabKeydown(e, 'instructors')}
+                  class="px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer border-b-2 {viewMode === 'instructors' ? 'bg-[#002d72] text-white border-[#c5a059] shadow-2xs dark:bg-[#8cc8ea] dark:text-[#0a0e1a] dark:border-[#002d72]' : 'border-transparent text-[#525f7f] hover:text-[#002d72] dark:text-slate-400'}"
                  >Instructors</button>
               </div>
 
               <button 
+                  type="button"
                   onclick={handleExport}
                   class="flex items-center space-x-1.5 bg-white border border-[#e5e0d8] text-[#161e2e] px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-[#f3efe6] transition-colors shadow-2xs dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700 cursor-pointer"
               >
@@ -307,19 +424,23 @@
           </div>
           
           {#if viewMode === 'courses'}
-            <DeptCourseTable 
-              courses={sortedCourses}
-              sortColumn={courseSortColumn}
-              sortDirection={courseSortDirection}
-              onSort={handleCourseSort}
-            />
+            <div id="dept-panel-courses" role="tabpanel" aria-labelledby="dept-tab-courses">
+              <DeptCourseTable 
+                courses={sortedCourses}
+                sortColumn={courseSortColumn}
+                sortDirection={courseSortDirection}
+                onSort={handleCourseSort}
+              />
+            </div>
           {:else}
-            <DeptInstructorTable 
-              instructors={sortedInstructors}
-              sortColumn={instructorSortColumn}
-              sortDirection={instructorSortDirection}
-              onSort={handleInstructorSort}
-            />
+            <div id="dept-panel-instructors" role="tabpanel" aria-labelledby="dept-tab-instructors">
+              <DeptInstructorTable 
+                instructors={sortedInstructors}
+                sortColumn={instructorSortColumn}
+                sortDirection={instructorSortDirection}
+                onSort={handleInstructorSort}
+              />
+            </div>
           {/if}
         </div>
       {:else}

@@ -1,8 +1,8 @@
-import sys
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock
-import pytest
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -11,19 +11,17 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app import models
+
 from scripts.sync_from_scraper import (
     ScraperClient,
-    ensure_term,
     ensure_department,
     ensure_instructor,
     ensure_room,
-    _upsert_course,
-    sync_quota_feed,
+    ensure_term,
     sync_deltas_feed,
-    backfill_term,
+    sync_quota_feed,
     sync_terms_and_new_offerings,
 )
-
 
 # ==============================================================================
 # TIER 4 - Real-World Application Workload Scenarios (5 scenarios)
@@ -195,7 +193,7 @@ def test_scenario_3_department_schedule_shift_and_ghost_room_analysis(client: Te
     ensure_term(db_session, term_id)
     ensure_department(db_session, "IE", "Industrial Engineering")
     r_old = ensure_room(db_session, "OB101", {})
-    r_new = ensure_room(db_session, "ENG201", {})
+    ensure_room(db_session, "ENG201", {})
 
     c_ie = models.Course(
         id=9031,
@@ -346,8 +344,8 @@ def test_scenario_5_complex_multi_filter_search_and_injection_stress(client: Tes
     - Meilisearch quote escaping
     """
     # Seed multiple courses
-    t1 = ensure_term(db_session, "2024-2025-1")
-    t2 = ensure_term(db_session, "2023-2024-2")
+    ensure_term(db_session, "2024-2025-1")
+    ensure_term(db_session, "2023-2024-2")
     inst = ensure_instructor(db_session, "Donald Knuth", {})
 
     c1 = models.Course(

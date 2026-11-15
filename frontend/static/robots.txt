@@ -3,7 +3,7 @@ User-agent: *
 Allow: /
 
 # Standard Sitemap
-Sitemap: https://archive.bogazici.app/sitemap.xml
+Sitemap: https://bountools.com/sitemap.xml
 
 # LLM Discovery
 # See /llms.txt and /llms-full.txt for machine-readable API and ontology definitions

@@ -68,6 +68,7 @@ export interface SearchCourseHit {
   credits?: number | null;
   ects?: number | null;
   delivery_method?: string | null;
+  has_syllabus?: boolean;
   slots?: SearchCourseSlot[];
 }
 
@@ -198,6 +199,9 @@ export interface CourseHistoryItem {
   credits?: number;
   ects?: number;
   delivery_method?: string;
+  has_syllabus?: boolean;
+  syllabus_url?: string | null;
+  desc_url?: string | null;
   slots: CourseHistorySlot[];
 }
 
@@ -226,6 +230,68 @@ export interface SystemStatus {
   is_stale?: boolean;
   upstream_run?: UpstreamRunInfo | null;
   feeds?: Record<string, FeedState>;
+}
+
+export interface ScheduleOptimizationRequest {
+  term_id: string;
+  target_courses: string[];
+  candidate_electives?: string[];
+  num_electives_needed?: number;
+  avoid_days?: string[];
+  min_hour?: number;
+  max_hour?: number;
+  max_campus_days?: number | null;
+  max_results?: number;
+}
+
+export interface TimetableSection {
+  course_code: string;
+  section: string;
+  title?: string | null;
+  instructor?: string | null;
+  credits?: number | null;
+  ects?: number | null;
+  slots: SearchCourseSlot[];
+}
+
+export interface TimetableCombination {
+  score: number;
+  total_credits: number;
+  total_ects: number;
+  campus_days: string[];
+  total_gap_hours: number;
+  sections: TimetableSection[];
+}
+
+export interface ScheduleOptimizationResponse {
+  term_id: string;
+  success: boolean;
+  total_combinations_found: number;
+  combinations: TimetableCombination[];
+  message?: string | null;
+}
+
+export interface CourseCatalogInfo {
+  course_code: string;
+  found: boolean;
+  title?: string | null;
+  en_url?: string | null;
+  tr_url?: string | null;
+  en_text?: string | null;
+  tr_text?: string | null;
+  canonical_text?: string | null;
+  updated_at?: string | null;
+}
+
+export interface CourseSyllabusDetail {
+  course_id: number;
+  term_id: string;
+  course_code: string;
+  section?: string | null;
+  has_syllabus: boolean;
+  syllabus_url?: string | null;
+  desc_url?: string | null;
+  syllabus_text: string;
 }
 
 

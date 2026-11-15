@@ -1,26 +1,80 @@
+import argparse
+import json
+import logging
 import os
 import sys
-import json
 import time
-import argparse
-import urllib.request
-import urllib.parse
 import urllib.error
-import logging
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List, Set, Union
-from sqlalchemy import create_engine, func, text
-from sqlalchemy.orm import sessionmaker, joinedload, selectinload
+import urllib.parse
+import urllib.request
+from datetime import UTC, datetime
+from typing import Any
+
 from dotenv import load_dotenv
+from sqlalchemy import create_engine, func, text
+from sqlalchemy.orm import joinedload, selectinload, sessionmaker
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _pathutil import add_import_paths, ROOT_DIR, SCRIPT_DIR
+from _pathutil import add_import_paths
 
 add_import_paths()
 
 import meilisearch
-from app.database import Base
-from app.models import Term, Department, Instructor, Room, Course, CourseSlot, QuotaSnapshot, CourseChange, SyncState
+from app.models import Course, CourseSlot, Department, Instructor, QuotaSnapshot, Room, SyncState, Term
+from app.sync import (
+    SUBJECT_PREFIX_TO_DEPT,
+    VALID_DAYS,
+    _resolve_dept_for_course,
+    _sanitize_shifted_payload,
+    _sync_course_slots,
+    _upsert_course,
+    clean_int,
+    ensure_department,
+    ensure_instructor,
+    ensure_room,
+    ensure_schema_columns,
+    ensure_term,
+    normalize_code,
+    normalize_section,
+    sync_meili_documents,
+    upsert_course_catalog,
+)
+from app.sync import (
+    apply_delta_event as _apply_delta_event,
+)
+
+__all__ = [
+    "DEFAULT_SCRAPER_API_URL",
+    "SUBJECT_PREFIX_TO_DEPT",
+    "VALID_DAYS",
+    "StrictRedirectHandler",
+    "ScraperClient",
+    "clean_int",
+    "normalize_code",
+    "normalize_section",
+    "ensure_term",
+    "ensure_department",
+    "ensure_instructor",
+    "ensure_room",
+    "ensure_schema_columns",
+    "_sanitize_shifted_payload",
+    "_sync_course_slots",
+    "_upsert_course",
+    "_resolve_dept_for_course",
+    "_apply_delta_event",
+    "_fetch_term_courses",
+    "_fetch_upstream_term_runs",
+    "upsert_course_catalog",
+    "sync_meili_documents",
+    "sync_quota_feed",
+    "sync_deltas_feed",
+    "backfill_term",
+    "sync_terms_and_new_offerings",
+    "sync_upstream_run_metadata",
+    "refresh_all_data",
+    "run_sync_cycle",
+    "invalidate_redis_cache",
+]
 
 load_dotenv()
 
@@ -31,33 +85,6 @@ logging.basicConfig(
 logger = logging.getLogger("sync_from_scraper")
 
 DEFAULT_SCRAPER_API_URL = "https://scraper.bountools.com/api/v1"
-
-
-def clean_int(val: Any) -> Optional[int]:
-    if val is None:
-        return None
-    try:
-        if isinstance(val, (int, float)):
-            return int(val)
-        val_str = str(val).strip()
-        if not val_str:
-            return None
-        return int(float(val_str))
-    except (ValueError, TypeError):
-        return None
-
-
-def normalize_code(code: Optional[str]) -> Optional[str]:
-    if not code:
-        return None
-    return " ".join(str(code).split()).strip().upper()
-
-
-def normalize_section(section: Any) -> Optional[str]:
-    if section is None:
-        return None
-    sec_str = str(section).strip()
-    return sec_str if sec_str else None
 
 
 class StrictRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -74,20 +101,31 @@ class StrictRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+_RATE_LIMIT_BACKOFF_SECONDS: tuple[int, ...] = (5, 15, 35, 62)
+
+
 class ScraperClient:
-    def __init__(self, base_url: Optional[str] = None, token: Optional[str] = None):
+    def __init__(self, base_url: str | None = None, token: str | None = None, min_interval: float = 0.0):
         self.base_url = (base_url or os.getenv("SCRAPER_API_URL") or DEFAULT_SCRAPER_API_URL).rstrip("/")
         self.token = token or os.getenv("SCRAPER_FEED_TOKEN")
+        self.min_interval = min_interval
+        self._last_req_mono = 0.0
         self.opener = urllib.request.build_opener(StrictRedirectHandler())
 
-    def get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+    def _throttle(self) -> None:
+        if self.min_interval <= 0:
+            return
+        elapsed = time.monotonic() - self._last_req_mono
+        if self._last_req_mono > 0 and elapsed < self.min_interval:
+            time.sleep(self.min_interval - elapsed)
+        self._last_req_mono = time.monotonic()
+
+    def _build_request(self, path: str, params: dict[str, Any] | None) -> tuple[str, urllib.request.Request]:
         url = f"{self.base_url}/{path.lstrip('/')}"
         if params:
             clean_params = {k: v for k, v in params.items() if v is not None}
             if clean_params:
-                query_string = urllib.parse.urlencode(clean_params)
-                url = f"{url}?{query_string}"
-
+                url = f"{url}?{urllib.parse.urlencode(clean_params)}"
         headers = {
             "User-Agent": "boun-archive-sync/1.0",
             "Accept": "application/json",
@@ -95,19 +133,33 @@ class ScraperClient:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
             headers["X-Feed-Token"] = self.token
+        return url, urllib.request.Request(url, headers=headers)
 
-        req = urllib.request.Request(url, headers=headers)
-        for attempt in range(3):
+    def _sleep_for_http_error(self, err: urllib.error.HTTPError, attempt: int, url: str) -> bool:
+        if err.code == 429 and attempt < 3:
+            raw_after = err.headers.get("Retry-After") if getattr(err, "headers", None) else None
+            retry_after = clean_int(raw_after)
+            delay = max(0, retry_after) if retry_after is not None else _RATE_LIMIT_BACKOFF_SECONDS[attempt]
+            logger.warning("Rate limited (429) requesting %s; retrying in %ss...", url, delay)
+            time.sleep(delay)
+            return True
+        if err.code in (502, 503, 504) and attempt < 2:
+            time.sleep(2 ** attempt)
+            return True
+        return False
+
+    def get(self, path: str, params: dict[str, Any] | None = None) -> Any | None:
+        url, req = self._build_request(path, params)
+        for attempt in range(4):
+            self._throttle()
             try:
                 with self.opener.open(req, timeout=30) as resp:
-                    content = resp.read().decode("utf-8")
-                    return json.loads(content)
+                    return json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as e:
                 if e.code == 404:
                     logger.debug("Endpoint not found (404): %s", url)
                     return None
-                if e.code in (502, 503, 504, 429) and attempt < 2:
-                    time.sleep(2 ** attempt)
+                if self._sleep_for_http_error(e, attempt, url):
                     continue
                 logger.error("HTTP error %s requesting %s: %s", e.code, url, e.reason)
                 raise
@@ -117,278 +169,117 @@ class ScraperClient:
                     continue
                 logger.error("Network error requesting %s: %s", url, e)
                 raise
+        return None
 
 
-def ensure_term(session, term_id: str, term_cache: Optional[Union[Set[str], Dict[str, Any]]] = None) -> Term:
-    if term_cache is not None:
-        if isinstance(term_cache, dict) and term_id in term_cache:
-            cached = term_cache[term_id]
-            if isinstance(cached, Term):
-                return cached
-        elif isinstance(term_cache, set) and term_id in term_cache:
-            term_in_session = session.get(Term, term_id) if hasattr(session, "get") else None
-            if term_in_session:
-                return term_in_session
-            return session.query(Term).filter(Term.id == term_id).first()
-
-    term = session.query(Term).filter(Term.id == term_id).first()
-    if not term:
-        year = term_id
-        sem = 1
-        if "-" in term_id:
-            parts = term_id.rsplit("-", 1)
-            year = parts[0]
-            sem = clean_int(parts[1]) or 1
-        elif "/" in term_id:
-            parts = term_id.rsplit("/", 1)
-            year = parts[0]
-            sem = clean_int(parts[1]) or 1
-        term = Term(id=term_id, academic_year=year, semester_num=sem)
-        session.add(term)
-        session.flush()
-
-    if term_cache is not None:
-        if isinstance(term_cache, set):
-            term_cache.add(term_id)
-        elif isinstance(term_cache, dict):
-            term_cache[term_id] = term
-    return term
-
-
-def ensure_department(
+def _advance_sync_cursor(
     session,
-    dept_kisaadi: str,
-    bolum: Optional[str] = None,
-    dept_cache: Optional[Union[Dict[str, str], Dict[str, Department]]] = None
-) -> Optional[Department]:
-    if not dept_kisaadi:
+    feed_name: str,
+    last_cursor: str | None,
+    state: SyncState | None,
+    dry_run: bool,
+) -> tuple[SyncState | None, str | None]:
+    """Persist updated polling cursor for incremental scraper feeds."""
+    if dry_run:
+        return state, state.last_cursor if state else None
+    next_cursor = last_cursor or datetime.now(UTC).isoformat()
+    if not state:
+        state = SyncState(feed_name=feed_name, last_cursor=next_cursor)
+        session.add(state)
+    else:
+        state.last_cursor = next_cursor
+    session.commit()
+    return state, next_cursor
+
+
+def _parse_quota_item_fields(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize raw quota snapshot JSON into column-ready dict, or None if invalid."""
+    term_id = item.get("term")
+    course_code = normalize_code(item.get("course_code"))
+    if not term_id or not course_code:
         return None
-    dept_kisaadi = str(dept_kisaadi)[:10].strip().upper()
-    if any(c.isdigit() for c in dept_kisaadi):
-        return None
-
-    if dept_cache is not None and dept_kisaadi in dept_cache:
-        cached = dept_cache[dept_kisaadi]
-        if isinstance(cached, Department):
-            if bolum and cached.bolum == dept_kisaadi and bolum != cached.bolum:
-                cached.bolum = bolum
-                session.flush()
-            return cached
-        elif isinstance(cached, str):
-            dept_bolum = cached
-            if bolum and dept_bolum == dept_kisaadi and bolum != dept_bolum:
-                dept = session.query(Department).filter(Department.kisaadi == dept_kisaadi).first()
-                if dept:
-                    dept.bolum = bolum
-                    dept_cache[dept_kisaadi] = bolum
-                    session.flush()
-                    return dept
-            dept_in_session = session.get(Department, dept_kisaadi) if hasattr(session, "get") else None
-            if dept_in_session:
-                return dept_in_session
-            dept = session.query(Department).filter(Department.kisaadi == dept_kisaadi).first()
-            if dept:
-                return dept
-
-    dept = session.query(Department).filter(Department.kisaadi == dept_kisaadi).first()
-    if not dept:
-        dept = Department(kisaadi=dept_kisaadi, bolum=bolum or dept_kisaadi)
-        session.add(dept)
-        session.flush()
-    elif bolum and dept.bolum == dept.kisaadi and bolum != dept.bolum:
-        dept.bolum = bolum
-        session.flush()
-
-    if dept_cache is not None:
-        dept_cache[dept_kisaadi] = dept
-    return dept
+    dept_raw = item.get("department")
+    if not dept_raw and course_code:
+        parts = course_code.strip().split()
+        if parts:
+            dept_raw = parts[0]
+    quota_num = clean_int(item.get("quota_numeric")) if item.get("quota_numeric") is not None else clean_int(item.get("quota"))
+    current_num = clean_int(item.get("current_numeric")) if item.get("current_numeric") is not None else clean_int(item.get("current"))
+    avail = clean_int(item.get("available"))
+    if avail is None and quota_num is not None and current_num is not None:
+        avail = max(0, quota_num - current_num)
+    return {
+        "term_id": term_id,
+        "course_code": course_code,
+        "section": normalize_section(item.get("section")),
+        "department": dept_raw.strip().upper() if dept_raw else None,
+        "captured_at": item.get("captured_at") or item.get("timestamp") or datetime.now(UTC).isoformat(),
+        "status": item.get("status"),
+        "quota": str(item.get("quota")) if item.get("quota") is not None else None,
+        "current": str(item.get("current")) if item.get("current") is not None else None,
+        "quota_numeric": quota_num,
+        "current_numeric": current_num,
+        "is_consent": bool(item.get("is_consent", False)),
+        "is_unlimited": bool(item.get("is_unlimited", False)),
+        "available": avail,
+    }
 
 
-def ensure_instructor(session, full_name: Optional[str], inst_cache: Dict[str, int]) -> Optional[int]:
-    if not full_name or not full_name.strip() or full_name.strip().upper() in ("STAFF", "TBA", "OFFERED", "NONE"):
-        return None
-    name = full_name.strip()
-    if name in inst_cache:
-        return inst_cache[name]
-
-    inst = session.query(Instructor).filter(Instructor.full_name == name).first()
-    if not inst:
-        inst = Instructor(full_name=name)
-        session.add(inst)
-        session.flush()
-    inst_cache[name] = inst.id
-    return inst.id
-
-
-def ensure_room(session, room_name: Optional[str], room_cache: Dict[str, int]) -> Optional[int]:
-    if not room_name or not room_name.strip() or room_name.strip().upper() in ("TBA", "N/A", "NONE"):
-        return None
-    name = room_name.strip()
-    if name in room_cache:
-        return room_cache[name]
-
-    room = session.query(Room).filter(Room.name == name).first()
-    if not room:
-        room = Room(name=name)
-        session.add(room)
-        session.flush()
-    room_cache[name] = room.id
-    return room.id
-
-
-def sync_meili_documents(meili_index, courses: List[Course], chunk_size: int = 1000):
-    if not meili_index or not courses:
-        return
-    documents = []
-    for c in courses:
-        slots_data = []
-        for s in c.slots:
-            r_name = s.room.name if s.room else None
-            slots_data.append({
-                "day_code": s.day_code,
-                "slot_hour": s.slot_hour,
-                "slot_title": s.slot_title,
-                "room": r_name,
-                "room_name": r_name
-            })
-        doc = {
-            "id": c.id,
-            "course_code": c.course_code,
-            "title": c.title,
-            "section": c.section,
-            "term": c.term_id,
-            "department": c.department.bolum if c.department else None,
-            "dept_code": (c.dept_kisaadi.upper() if c.dept_kisaadi else (c.course_code.split()[0].upper() if c.course_code else None)),
-            "instructor": c.instructor.full_name if c.instructor else "TBA",
-            "instructor_id": c.instructor_id,
-            "credits": c.credits,
-            "ects": c.ects,
-            "delivery_method": c.delivery_method,
-            "slots": slots_data
-        }
-        documents.append(doc)
-        if len(documents) >= chunk_size:
-            meili_index.add_documents(documents)
-            logger.info("Pushed %d document(s) to Meilisearch index", len(documents))
-            documents = []
-
-    if documents:
-        meili_index.add_documents(documents)
-        logger.info("Pushed %d document(s) to Meilisearch index", len(documents))
+def _upsert_quota_snapshot(session, fields: dict[str, Any], term_cache: dict[str, Term], dry_run: bool) -> str:
+    """Insert or update a deduplicated QuotaSnapshot row and return its timestamp."""
+    ensure_term(session, fields["term_id"], term_cache)
+    existing = session.query(QuotaSnapshot).filter(
+        QuotaSnapshot.term_id == fields["term_id"],
+        QuotaSnapshot.course_code == fields["course_code"],
+        QuotaSnapshot.section == fields["section"],
+        QuotaSnapshot.department == fields["department"],
+        QuotaSnapshot.captured_at == fields["captured_at"],
+    ).first()
+    if not existing:
+        if not dry_run:
+            session.add(QuotaSnapshot(**fields))
+        return fields["captured_at"]
+    for attr in ("status", "quota", "current", "quota_numeric", "current_numeric", "available"):
+        if fields[attr] is not None:
+            setattr(existing, attr, fields[attr])
+    existing.is_consent = fields["is_consent"]
+    existing.is_unlimited = fields["is_unlimited"]
+    return fields["captured_at"]
 
 
 def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: bool = False) -> int:
     state = session.query(SyncState).filter(SyncState.feed_name == "quota_snapshots").first()
     cursor = state.last_cursor if state else None
-
-    term_cache: Dict[str, Term] = {t.id: t for t in session.query(Term).all()}
+    term_cache: dict[str, Term] = {t.id: t for t in session.query(Term).all()}
     total_synced = 0
 
     while True:
         logger.info("Polling /feeds/quota-snapshots (cursor: %s, limit: %d)...", cursor, limit)
-        params = {"limit": limit}
-        if cursor:
-            params["after_timestamp"] = cursor
-
+        params = {"limit": limit, "after_timestamp": cursor} if cursor else {"limit": limit}
         try:
             data = client.get("feeds/quota-snapshots", params=params)
         except Exception as e:
             logger.error("Error fetching quota snapshots: %s", e)
             break
-
         if not data or not isinstance(data, list):
             logger.info("No new quota snapshot records available.")
             break
 
         last_captured_at = cursor
         for item in data:
+            fields = _parse_quota_item_fields(item)
+            if fields is None:
+                continue
             try:
                 with session.begin_nested():
-                    term_id = item.get("term")
-                    course_code = normalize_code(item.get("course_code"))
-                    section = normalize_section(item.get("section"))
-                    if not term_id or not course_code:
-                        continue
-
-                    ensure_term(session, term_id, term_cache)
-
-                    captured = item.get("captured_at") or item.get("timestamp") or datetime.now(timezone.utc).isoformat()
-                    dept_raw = item.get("department")
-                    if not dept_raw and course_code:
-                        parts = course_code.strip().split()
-                        if parts:
-                            dept_raw = parts[0]
-                    dept = dept_raw.strip().upper() if dept_raw else None
-                    status = item.get("status")
-                    quota_raw = str(item.get("quota")) if item.get("quota") is not None else None
-                    current_raw = str(item.get("current")) if item.get("current") is not None else None
-                    quota_num = clean_int(item.get("quota_numeric")) if item.get("quota_numeric") is not None else clean_int(item.get("quota"))
-                    current_num = clean_int(item.get("current_numeric")) if item.get("current_numeric") is not None else clean_int(item.get("current"))
-                    avail = clean_int(item.get("available"))
-                    if avail is None and quota_num is not None and current_num is not None:
-                        avail = max(0, quota_num - current_num)
-
-                    # Deduplication & idempotent upsert
-                    existing = session.query(QuotaSnapshot).filter(
-                        QuotaSnapshot.term_id == term_id,
-                        QuotaSnapshot.course_code == course_code,
-                        QuotaSnapshot.section == section,
-                        QuotaSnapshot.department == dept,
-                        QuotaSnapshot.captured_at == captured
-                    ).first()
-
-                    if not existing:
-                        snapshot = QuotaSnapshot(
-                            term_id=term_id,
-                            course_code=course_code,
-                            section=section,
-                            department=dept,
-                            status=status,
-                            quota=quota_raw,
-                            current=current_raw,
-                            quota_numeric=quota_num,
-                            current_numeric=current_num,
-                            is_consent=bool(item.get("is_consent", False)),
-                            is_unlimited=bool(item.get("is_unlimited", False)),
-                            available=avail,
-                            captured_at=captured
-                        )
-                        if not dry_run:
-                            session.add(snapshot)
-                    else:
-                        if status is not None:
-                            existing.status = status
-                        if quota_raw is not None:
-                            existing.quota = quota_raw
-                        if current_raw is not None:
-                            existing.current = current_raw
-                        if quota_num is not None:
-                            existing.quota_numeric = quota_num
-                        if current_num is not None:
-                            existing.current_numeric = current_num
-                        existing.is_consent = bool(item.get("is_consent", existing.is_consent))
-                        existing.is_unlimited = bool(item.get("is_unlimited", existing.is_unlimited))
-                        if avail is not None:
-                            existing.available = avail
-
-                    if captured:
-                        if last_captured_at is None or captured > last_captured_at:
-                            last_captured_at = captured
-                    total_synced += 1
+                    captured = _upsert_quota_snapshot(session, fields, term_cache, dry_run)
+                if captured and (last_captured_at is None or captured > last_captured_at):
+                    last_captured_at = captured
+                total_synced += 1
             except Exception as e:
                 logger.warning("Skipping anomalous quota snapshot item %s: %s", item.get("course_code"), e)
 
-        if not dry_run:
-            if not last_captured_at:
-                last_captured_at = datetime.now(timezone.utc).isoformat()
-            if not state:
-                state = SyncState(feed_name="quota_snapshots", last_cursor=last_captured_at)
-                session.add(state)
-            else:
-                state.last_cursor = last_captured_at
-            session.commit()
-            cursor = last_captured_at
-
+        state, cursor = _advance_sync_cursor(session, "quota_snapshots", last_captured_at, state, dry_run)
         if len(data) < limit:
             break
 
@@ -396,365 +287,128 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
     return total_synced
 
 
-VALID_DAYS = {"M", "T", "W", "Th", "F", "St", "Su"}
-
-
-def _sanitize_shifted_payload(val_payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Self-healing normalizer for upstream scraper table parsing shifts.
-    Detects when table columns were shifted (e.g. instructor='Info', slots broken into character array).
-    Reconstructs instructor name, slot hours, and rooms without failing ingestion.
-    """
-    if not isinstance(val_payload, dict):
-        return val_payload
-
-    raw_inst = (val_payload.get("instructor") or "").strip()
-    raw_delivery = str(val_payload.get("delivery_method") or "").strip()
-    raw_exam_date = (val_payload.get("exam_date") or "").strip()
-    slots = val_payload.get("slots") or val_payload.get("course_slots") or []
-
-    is_shifted = (
-        raw_inst.lower() in ("info", "detay", "details") and
-        len(slots) > 0 and
-        all(len(s.get("day", s.get("day_code", ""))) == 1 for s in slots)
-    )
-
-    if not is_shifted:
-        return val_payload
-
-    p = dict(val_payload)
-    # 1. Reconstruct instructor from slots day characters
-    reconstructed_inst = "".join(s.get("day", s.get("day_code", "")) for s in slots if s.get("day") or s.get("day_code")).strip()
-    p["instructor"] = reconstructed_inst if reconstructed_inst else "TBA"
-
-    # 2. Reconstruct hours from delivery_method if it is purely numeric digits
-    hours = []
-    if raw_delivery.isdigit():
-        hours = [int(ch) for ch in raw_delivery if ch.isdigit() and 1 <= int(ch) <= 14]
-        p["delivery_method"] = ""
-
-    # 3. Reconstruct rooms/days from exam_date
-    rooms = [r.strip() for r in raw_exam_date.split("|") if r.strip()]
-    new_slots = []
-    if hours:
-        for idx, hr in enumerate(hours):
-            room_str = rooms[idx] if idx < len(rooms) else (rooms[0] if rooms else "")
-            parts = room_str.split(None, 1)
-            if parts and parts[0] in VALID_DAYS:
-                day_code = parts[0]
-                room_val = parts[1] if len(parts) > 1 else ""
-            else:
-                day_code = "M"
-                room_val = room_str
-            new_slots.append({
-                "day": day_code,
-                "hour": hr,
-                "room": room_val,
-                "slot_title": p.get("course_name") or p.get("title"),
-                "instructor": reconstructed_inst
-            })
-    p["slots"] = new_slots
-    return p
-
-
-def _sync_course_slots(
-    session,
-    course_id: int,
-    slots_payload: Optional[List[Dict[str, Any]]],
-    room_cache: Dict[str, int],
-    dry_run: bool = False
-) -> None:
-    if slots_payload is None or dry_run:
+def _sync_touched_meili_courses(session, meili_index: Any, touched_course_ids: set[int], dry_run: bool) -> None:
+    if dry_run or not meili_index or not touched_course_ids:
         return
-    session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete(synchronize_session="fetch")
-
-    # Sort slots by (day, hour) for deterministic contiguous processing
-    parsed_slots = []
-    for s in slots_payload:
-        slot_hour = clean_int(s.get("hour") or s.get("slot_hour"))
-        if slot_hour is None or slot_hour < 1 or slot_hour > 14:
-            continue
-        day_raw = (s.get("day") or s.get("day_code") or "").strip()
-        if not day_raw:
-            continue
-        day_code = day_raw if day_raw in VALID_DAYS else (day_raw.capitalize() if day_raw.capitalize() in VALID_DAYS else "M")
-        room_name = (s.get("room") or s.get("room_name") or "").strip()
-        parsed_slots.append({
-            "day_code": day_code,
-            "slot_hour": slot_hour,
-            "slot_title": s.get("slot_title"),
-            "room_name": room_name if room_name and room_name != "N/A" else None
-        })
-
-    # Group by day and forward-fill contiguous hours within the same session
-    day_groups: Dict[str, List[Dict[str, Any]]] = {}
-    for ps in parsed_slots:
-        day_groups.setdefault(ps["day_code"], []).append(ps)
-
-    for day_code, day_slots in day_groups.items():
-        day_slots.sort(key=lambda x: x["slot_hour"])
-        curr_room = None
-        curr_hour = None
-        for ps in day_slots:
-            hr = ps["slot_hour"]
-            r_name = ps["room_name"]
-            if not r_name and curr_room and curr_hour is not None and hr == curr_hour + 1:
-                r_name = curr_room
-                ps["room_name"] = curr_room
-            elif r_name:
-                curr_room = r_name
-            else:
-                curr_room = None
-            curr_hour = hr
-
-            room_id = ensure_room(session, ps["room_name"], room_cache) if ps["room_name"] else None
-            slot = CourseSlot(
-                course_id=course_id,
-                day_code=ps["day_code"],
-                slot_hour=ps["slot_hour"],
-                slot_title=ps["slot_title"],
-                room_id=room_id
+    ids = sorted(touched_course_ids)
+    logger.info("Syncing %d delta-touched course(s) to Meilisearch...", len(ids))
+    for i in range(0, len(ids), 500):
+        batch_ids = ids[i : i + 500]
+        courses = (
+            session.query(Course)
+            .options(
+                joinedload(Course.term),
+                joinedload(Course.department),
+                joinedload(Course.instructor),
+                selectinload(Course.slots).joinedload(CourseSlot.room),
             )
-            session.add(slot)
+            .filter(Course.id.in_(batch_ids))
+            .all()
+        )
+        sync_meili_documents(meili_index, courses)
 
-    session.flush()
+
+def _index_corpus_rows(
+    rows: Any,
+    catalog_cache: dict[str, dict[str, Any] | None],
+) -> dict[tuple[str, str | None], dict[str, Any]]:
+    by_key: dict[tuple[str, str | None], dict[str, Any]] = {}
+    if not isinstance(rows, list):
+        return by_key
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        code = normalize_code(row.get("course_code"))
+        if not code:
+            continue
+        by_key[(code, normalize_section(row.get("section")))] = row
+        if code not in catalog_cache and (
+            row.get("catalog_text") or row.get("catalog_en_text") or row.get("catalog_tr_text")
+        ):
+            catalog_cache[code] = row
+    return by_key
 
 
-def _upsert_course(
-    session,
+def _load_term_corpus_lookup(
+    client: ScraperClient,
     term_id: str,
-    dept_kisaadi: Optional[str],
-    course_code: str,
-    section: Optional[str],
-    val_payload: Dict[str, Any],
-    inst_cache: Dict[str, int],
-    room_cache: Dict[str, int],
-    dept_cache: Optional[Union[Dict[str, str], Dict[str, Department]]],
-    term_cache: Optional[Union[Set[str], Dict[str, Any]]],
-    dry_run: bool = False
-) -> Optional[Course]:
-    val_payload = _sanitize_shifted_payload(val_payload)
-    ensure_term(session, term_id, term_cache)
-
-    if dept_kisaadi and str(dept_kisaadi).strip():
-        dept_kisaadi = str(dept_kisaadi).strip().upper()
-        dept = ensure_department(session, dept_kisaadi, dept_cache=dept_cache)
-        if dept:
-            dept_kisaadi = dept.kisaadi
-
-    title = val_payload.get("course_name") or val_payload.get("title")
-    instructor_name = val_payload.get("instructor")
-    instructor_id = ensure_instructor(session, instructor_name, inst_cache)
-    credits = clean_int(val_payload.get("credits"))
-    ects = clean_int(val_payload.get("ects"))
-    delivery_method = val_payload.get("delivery_method")
-
-    course = session.query(Course).filter(
-        Course.term_id == term_id,
-        Course.course_code == course_code,
-        Course.section == section
-    ).first()
-
-    if not course:
-        course = Course(
-            term_id=term_id,
-            dept_kisaadi=dept_kisaadi,
-            course_code=course_code,
-            section=section,
-            title=title,
-            instructor_id=instructor_id,
-            credits=credits,
-            ects=ects,
-            delivery_method=delivery_method
-        )
-        if not dry_run:
-            session.add(course)
-            session.flush()
-    else:
-        if dept_kisaadi is not None:
-            course.dept_kisaadi = dept_kisaadi
-        if title is not None:
-            course.title = title
-        if instructor_id is not None:
-            course.instructor_id = instructor_id
-        if credits is not None:
-            course.credits = credits
-        if ects is not None:
-            course.ects = ects
-        if delivery_method is not None:
-            course.delivery_method = delivery_method
-        if not dry_run:
-            session.flush()
-
-    slots_payload = val_payload.get("slots") or val_payload.get("course_slots")
-    if course and course.id:
-        _sync_course_slots(session, course.id, slots_payload, room_cache, dry_run=dry_run)
-
-    return course
-
-
-SUBJECT_PREFIX_TO_DEPT: Dict[str, str] = {
-    "FA": "LL",
-    "EL": "LL",
-    "CL": "LL",
-    "AL": "LL",
-    "LIT": "LL",
-    "CRIT": "LL",
-    "DRA": "LL",
-    "HUM": "LL",
-    "ESC": "ENV",
-    "ADEX": "XMBA",
-    "SFL": "YADYOK",
-    "AE": "YADYOK",
-    "GER": "YADYOK",
-    "FR": "YADYOK",
-    "SPA": "YADYOK",
-    "ITA": "YADYOK",
-    "RUS": "YADYOK",
-    "ARA": "YADYOK",
-    "PER": "YADYOK",
-    "CHI": "YADYOK",
-    "ARM": "YADYOK",
-    "KUR": "YADYOK",
-    "TK": "TKL",
-    "TKF": "TKL",
-    "TKR": "TKL",
-}
-
-
-def _resolve_dept_for_course(session, raw_dept: Optional[str], course_code: Optional[str]) -> Optional[str]:
-    if raw_dept and str(raw_dept).strip():
-        cand = str(raw_dept).strip().upper()
-        if not any(c.isdigit() for c in cand):
-            return cand
-    if not course_code:
-        return None
-    existing = (
-        session.query(Course.dept_kisaadi)
-        .filter(Course.course_code == course_code, Course.dept_kisaadi.isnot(None))
-        .order_by(Course.term_id.desc())
-        .first()
-    )
-    if existing and existing[0]:
-        return str(existing[0]).strip().upper()
-    import re
-    match = re.match(r"^([A-Za-z]+)", course_code.strip())
-    if match:
-        prefix = match.group(1).upper()
-        return SUBJECT_PREFIX_TO_DEPT.get(prefix, prefix)
-    return None
-
-
-def _apply_delta_event(
-    session,
-    item: Dict[str, Any],
-    inst_cache: Dict[str, int],
-    room_cache: Dict[str, int],
-    dept_cache: Optional[Union[Dict[str, str], Dict[str, Department]]],
-    term_cache: Optional[Union[Set[str], Dict[str, Any]]],
-    touched_course_ids: Set[int],
-    meili_index,
-    dry_run: bool = False
-) -> None:
-    raw_change_type = item.get("change_type")
-    term_id = item.get("term")
-    course_code = normalize_code(item.get("course_code"))
-    dept_kisaadi = _resolve_dept_for_course(session, item.get("department"), course_code)
-    section = normalize_section(item.get("section"))
-    timestamp = item.get("timestamp") or ""
-
-    if not raw_change_type or not term_id or not course_code:
-        return
-
-    change_type = str(raw_change_type).strip().lower()
-
-    if not dry_run:
-        change_log = CourseChange(
-            change_type=raw_change_type,
-            term_id=term_id,
-            dept_kisaadi=dept_kisaadi,
-            course_code=course_code,
-            section=section,
-            timestamp=timestamp,
-            old_value=json.dumps(item.get("old_value")) if item.get("old_value") else None,
-            new_value=json.dumps(item.get("new_value")) if item.get("new_value") else None,
-            details=item.get("details")
-        )
-        session.add(change_log)
-
-    if change_type in ("added", "insert", "inserted", "create", "created", "modified", "update", "updated", "modify", "room_changed", "slots_changed", "instructor_changed"):
-        val_payload = item.get("new_value") or {}
-        if not val_payload and any(k in item for k in ("course_name", "title", "instructor", "credits", "ects", "slots", "course_slots")):
-            val_payload = item
-        course = _upsert_course(
-            session=session,
-            term_id=term_id,
-            dept_kisaadi=dept_kisaadi,
-            course_code=course_code,
-            section=section,
-            val_payload=val_payload,
-            inst_cache=inst_cache,
-            room_cache=room_cache,
-            dept_cache=dept_cache,
-            term_cache=term_cache,
-            dry_run=dry_run
-        )
-        if course and course.id:
-            touched_course_ids.add(course.id)
-
-    elif change_type in ("removed", "delete", "deleted", "remove", "drop", "dropped"):
-        course = session.query(Course).filter(
-            Course.term_id == term_id,
-            Course.course_code == course_code,
-            Course.section == section
-        ).first()
-
-        if course and not dry_run:
-            course_id = course.id
-            session.query(CourseSlot).filter(CourseSlot.course_id == course_id).delete(synchronize_session="fetch")
-            session.delete(course)
-            session.flush()
-            if meili_index:
-                try:
-                    meili_index.delete_document(course_id)
-                except Exception as e:
-                    logger.warning("Meilisearch delete error for course %s: %s", course_id, e)
-
-
-def _fetch_term_courses(client: ScraperClient, term_id: str) -> List[Dict[str, Any]]:
-    export_term_param = term_id.replace("/", "-")
+    corpus_cache: dict[str, dict[tuple[str, str | None], dict[str, Any]]],
+    catalog_cache: dict[str, dict[str, Any] | None],
+) -> dict[tuple[str, str | None], dict[str, Any]]:
+    if term_id in corpus_cache:
+        return corpus_cache[term_id]
+    rows = None
     try:
-        data = client.get(f"feeds/exports/{export_term_param}/json")
-        if isinstance(data, list):
-            return data
+        rows = client.get(f"feeds/exports/{term_id.replace('/', '-')}/corpus")
     except Exception as e:
-        logger.debug("Export feed not available (%s), falling back to /courses: %s", export_term_param, e)
+        logger.debug("Corpus lookup skipped for %s: %s", term_id, e)
+    indexed = _index_corpus_rows(rows, catalog_cache)
+    corpus_cache[term_id] = indexed
+    return indexed
 
-    logger.info("Export feed not available, pulling paginated /courses for term %s...", term_id)
-    courses_raw = []
-    page = 1
-    page_size = 100
-    while True:
+
+def _prepare_delta_item(
+    item: dict[str, Any],
+    client: ScraperClient,
+    corpus_cache: dict[str, dict[tuple[str, str | None], dict[str, Any]]],
+    catalog_cache: dict[str, dict[str, Any] | None],
+) -> dict[str, Any]:
+    ctype = str(item.get("change_type") or "").strip().lower()
+    term_id = item.get("term")
+    if not term_id or ctype not in ("syllabus_changed", "description_changed"):
+        return item
+
+    by_key = _load_term_corpus_lookup(client, str(term_id), corpus_cache, catalog_cache)
+    if ctype != "syllabus_changed":
+        return item
+
+    new_val = item.get("new_value")
+    if isinstance(new_val, dict) and new_val.get("syllabus_url") and "syllabus_text" not in new_val:
+        key = (normalize_code(item.get("course_code")) or "", normalize_section(item.get("section")))
+        match = by_key.get(key)
+        if match and match.get("syllabus_text"):
+            return {**item, "new_value": {**new_val, "syllabus_text": match["syllabus_text"]}}
+    return item
+
+
+def _process_delta_batch(
+    session,
+    client: ScraperClient,
+    events: list[dict[str, Any]],
+    caches: dict[str, dict[str, Any]],
+    last_ts: str | None,
+    touched_course_ids: set[int],
+    meili_index: Any,
+    dry_run: bool,
+    catalog_fetcher,
+    corpus_cache: dict[str, dict[tuple[str, str | None], dict[str, Any]]],
+    catalog_cache: dict[str, dict[str, Any] | None],
+) -> tuple[int, str | None]:
+    synced = 0
+    sorted_events = sorted(events, key=lambda ev: ev.get("timestamp") or ev.get("detected_at") or "")
+    for item in sorted_events:
+        ev_ts = item.get("timestamp") or item.get("detected_at")
+        prepared = _prepare_delta_item(item, client, corpus_cache, catalog_cache)
         try:
-            resp = client.get("courses", params={"term": term_id, "page": page, "size": page_size})
-            if not resp and "/" in term_id:
-                resp = client.get("courses", params={"term": export_term_param, "page": page, "size": page_size})
-            elif not resp and "-" in term_id:
-                resp = client.get("courses", params={"term": term_id.replace("-", "/"), "page": page, "size": page_size})
+            with session.begin_nested():
+                _apply_delta_event(
+                    session=session,
+                    item=prepared,
+                    inst_cache=caches["inst"],
+                    room_cache=caches["room"],
+                    dept_cache=caches["dept"],
+                    term_cache=caches["term"],
+                    touched_course_ids=touched_course_ids,
+                    meili_index=meili_index,
+                    dry_run=dry_run,
+                    catalog_fetcher=catalog_fetcher,
+                )
+            synced += 1
+            if ev_ts and (last_ts is None or ev_ts > last_ts):
+                last_ts = ev_ts
         except Exception as e:
-            logger.error("Error pulling /courses for term %s (page %d): %s", term_id, page, e)
-            break
-        if not resp:
-            break
-        items = resp.get("items", []) if isinstance(resp, dict) else resp
-        if not items:
-            break
-        courses_raw.extend(items)
-        total = resp.get("total", len(courses_raw)) if isinstance(resp, dict) else len(courses_raw)
-        if len(courses_raw) >= total or len(items) < page_size:
-            break
-        page += 1
-    return courses_raw
+            logger.warning("Skipping anomalous delta event %s: %s", item.get("course_code"), e)
+    return synced, last_ts
 
 
 def sync_deltas_feed(
@@ -762,88 +416,97 @@ def sync_deltas_feed(
     client: ScraperClient,
     meili_index=None,
     limit: int = 500,
-    dry_run: bool = False
+    dry_run: bool = False,
 ) -> int:
     state = session.query(SyncState).filter(SyncState.feed_name == "deltas").first()
     cursor = state.last_cursor if state else None
-
-    inst_cache: Dict[str, int] = {i.full_name: i.id for i in session.query(Instructor).all()}
-    room_cache: Dict[str, int] = {r.name: r.id for r in session.query(Room).all()}
-    dept_cache: Dict[str, Department] = {d.kisaadi: d for d in session.query(Department).all()}
-    term_cache: Dict[str, Term] = {t.id: t for t in session.query(Term).all()}
-
+    caches: dict[str, dict[str, Any]] = {
+        "inst": {i.full_name: i.id for i in session.query(Instructor).all()},
+        "room": {r.name: r.id for r in session.query(Room).all()},
+        "dept": {d.kisaadi: d for d in session.query(Department).all()},
+        "term": {t.id: t for t in session.query(Term).all()},
+    }
+    touched_course_ids: set[int] = set()
+    corpus_cache: dict[str, dict[tuple[str, str | None], dict[str, Any]]] = {}
+    catalog_cache: dict[str, dict[str, Any] | None] = {}
     total_synced = 0
+
+    def _fetch_catalog(code: str) -> dict[str, Any] | None:
+        norm = normalize_code(code) or code
+        if norm in catalog_cache:
+            return catalog_cache[norm]
+        data = client.get(f"catalog/{urllib.parse.quote(norm, safe='')}")
+        catalog_cache[norm] = data if isinstance(data, dict) else None
+        return catalog_cache[norm]
 
     while True:
         logger.info("Polling /feeds/deltas (cursor: %s, limit: %d)...", cursor, limit)
-        params = {"limit": limit}
-        if cursor:
-            params["after_timestamp"] = cursor
-
+        params = {"limit": limit, "after_timestamp": cursor} if cursor else {"limit": limit}
         try:
             data = client.get("feeds/deltas", params=params)
         except Exception as e:
             logger.error("Error fetching deltas feed: %s", e)
             break
-
         if not data or not isinstance(data, list):
-            logger.info("No new delta change events available.")
+            logger.info("No new delta events available.")
             break
 
-        # Sort delta events ascending by timestamp to replay state changes in causal order
-        data.sort(key=lambda x: x.get("timestamp") or "")
-
-        last_timestamp = cursor
-        touched_course_ids: Set[int] = set()
-
-        for item in data:
-            ts = item.get("timestamp") or ""
-            if ts and (last_timestamp is None or ts > last_timestamp):
-                last_timestamp = ts
-
-            try:
-                with session.begin_nested():
-                    _apply_delta_event(
-                        session=session,
-                        item=item,
-                        inst_cache=inst_cache,
-                        room_cache=room_cache,
-                        dept_cache=dept_cache,
-                        term_cache=term_cache,
-                        touched_course_ids=touched_course_ids,
-                        meili_index=meili_index,
-                        dry_run=dry_run
-                    )
-                total_synced += 1
-            except Exception as e:
-                logger.warning("Skipping anomalous delta item %s: %s", item.get("course_code"), e)
-
-        if not dry_run:
-            if not last_timestamp:
-                last_timestamp = datetime.now(timezone.utc).isoformat()
-            if not state:
-                state = SyncState(feed_name="deltas", last_cursor=last_timestamp)
-                session.add(state)
-            else:
-                state.last_cursor = last_timestamp
-            session.commit()
-            cursor = last_timestamp
-
-            # Push batch updates to Meilisearch
-            if meili_index and touched_course_ids:
-                updated_courses = session.query(Course).options(
-                    joinedload(Course.term),
-                    joinedload(Course.department),
-                    joinedload(Course.instructor),
-                    selectinload(Course.slots).joinedload(CourseSlot.room)
-                ).filter(Course.id.in_(touched_course_ids)).all()
-                sync_meili_documents(meili_index, updated_courses)
-
-        if len(data) < limit:
+        batch_synced, last_ts = _process_delta_batch(
+            session=session,
+            client=client,
+            events=data,
+            caches=caches,
+            last_ts=cursor,
+            touched_course_ids=touched_course_ids,
+            meili_index=meili_index,
+            dry_run=dry_run,
+            catalog_fetcher=_fetch_catalog,
+            corpus_cache=corpus_cache,
+            catalog_cache=catalog_cache,
+        )
+        total_synced += batch_synced
+        prev_cursor = cursor
+        state, cursor = _advance_sync_cursor(session, "deltas", last_ts, state, dry_run)
+        if len(data) < limit or cursor == prev_cursor:
             break
 
-    logger.info("Processed %d delta change event(s). Current cursor: %s", total_synced, cursor)
+    _sync_touched_meili_courses(session, meili_index, touched_course_ids, dry_run)
+    logger.info("Processed %d delta event(s). Current cursor: %s", total_synced, cursor)
     return total_synced
+
+
+def _fetch_paginated_term_courses(client: ScraperClient, term_id: str) -> list[dict[str, Any]]:
+    courses_raw: list[dict[str, Any]] = []
+    offset = 0
+    page_size = 500
+    while True:
+        try:
+            data = client.get("courses", params={"term": term_id, "limit": page_size, "offset": offset})
+        except Exception as e:
+            logger.error("Error fetching paginated courses for term %s: %s", term_id, e)
+            break
+        if not data or not isinstance(data, dict):
+            break
+        items = data.get("items") or []
+        if not items:
+            break
+        courses_raw.extend(items)
+        offset += len(items)
+        if offset >= data.get("total", len(items)) or len(items) < page_size:
+            break
+    return courses_raw
+
+
+def _fetch_term_courses(client: ScraperClient, term_id: str) -> list[dict[str, Any]]:
+    export_term_param = term_id.replace("/", "-")
+    for variant in ("corpus", "json"):
+        try:
+            data = client.get(f"feeds/exports/{export_term_param}/{variant}")
+            if isinstance(data, list) and (data or variant == "json"):
+                return data
+        except Exception as e:
+            logger.debug("Export feed (%s/%s) unavailable, trying next: %s", export_term_param, variant, e)
+    return _fetch_paginated_term_courses(client, term_id)
 
 
 def backfill_term(
@@ -863,11 +526,12 @@ def backfill_term(
 
     logger.info("Retrieved %d courses for term %s. Upserting into PostgreSQL...", len(courses_raw), term_id)
 
-    inst_cache: Dict[str, int] = {i.full_name: i.id for i in session.query(Instructor).all()}
-    room_cache: Dict[str, int] = {r.name: r.id for r in session.query(Room).all()}
-    dept_cache: Dict[str, Department] = {d.kisaadi: d for d in session.query(Department).all()}
-    term_cache: Dict[str, Term] = {t.id: t for t in session.query(Term).all()}
-    touched_courses: List[Course] = []
+    inst_cache: dict[str, int] = {i.full_name: i.id for i in session.query(Instructor).all()}
+    room_cache: dict[str, int] = {r.name: r.id for r in session.query(Room).all()}
+    dept_cache: dict[str, Department] = {d.kisaadi: d for d in session.query(Department).all()}
+    term_cache: dict[str, Term] = {t.id: t for t in session.query(Term).all()}
+    catalog_seen: set[str] = set()
+    touched_courses: list[Course] = []
 
     for item in courses_raw:
         try:
@@ -890,7 +554,8 @@ def backfill_term(
                     room_cache=room_cache,
                     dept_cache=dept_cache,
                     term_cache=term_cache,
-                    dry_run=dry_run
+                    dry_run=dry_run,
+                    catalog_seen=catalog_seen,
                 )
                 if course:
                     touched_courses.append(course)
@@ -916,7 +581,7 @@ def backfill_term(
     return len(touched_courses)
 
 
-def _fetch_upstream_term_runs(client: ScraperClient) -> Dict[str, Dict[str, Any]]:
+def _fetch_upstream_term_runs(client: ScraperClient) -> dict[str, dict[str, Any]]:
     """Fetch the latest completed scrape run per upstream term.
 
     Returns a {term_id: {"total": int, "started_at": str}} map derived from
@@ -924,7 +589,7 @@ def _fetch_upstream_term_runs(client: ScraperClient) -> Dict[str, Dict[str, Any]
     ingested locally (e.g. an early backfill latched onto a mid-scrape
     snapshot) and reconcile them at most once per upstream run.
     """
-    runs_by_term: Dict[str, Dict[str, Any]] = {}
+    runs_by_term: dict[str, dict[str, Any]] = {}
     try:
         runs = client.get("feeds/runs", params={"limit": 500})
     except Exception as e:
@@ -933,7 +598,7 @@ def _fetch_upstream_term_runs(client: ScraperClient) -> Dict[str, Dict[str, Any]
     if not isinstance(runs, list):
         return runs_by_term
 
-    latest_by_term: Dict[str, Dict[str, Any]] = {}
+    latest_by_term: dict[str, dict[str, Any]] = {}
     for r in runs:
         if not isinstance(r, dict):
             continue
@@ -952,7 +617,7 @@ def _fetch_upstream_term_runs(client: ScraperClient) -> Dict[str, Dict[str, Any]
     return runs_by_term
 
 
-def _last_reconciled_run(session, term_id: str) -> Optional[str]:
+def _last_reconciled_run(session, term_id: str) -> str | None:
     state = session.query(SyncState).filter(
         SyncState.feed_name == f"term_reconciled:{term_id}"
     ).first()
@@ -971,22 +636,52 @@ def _mark_term_reconciled(session, term_id: str, run_started_at: str) -> None:
     session.commit()
 
 
+def _reconcile_term_offerings(
+    session,
+    client: ScraperClient,
+    meili_index: Any,
+    term_id: str,
+    upstream_run: dict[str, Any] | None,
+    dry_run: bool,
+) -> int:
+    """Reconcile a single term against upstream snapshot counts or new 0-course state."""
+    course_count = session.query(Course.id).filter(Course.term_id == term_id).count()
+    if upstream_run is not None and course_count < upstream_run["total"]:
+        if _last_reconciled_run(session, term_id) == upstream_run["started_at"]:
+            logger.info(
+                "Term '%s' trails upstream (%d/%d courses) but was already reconciled against run %s; skipping.",
+                term_id, course_count, upstream_run["total"], upstream_run["started_at"],
+            )
+            return 0
+        logger.info(
+            "Term '%s' incomplete locally (%d/%d courses). Starting reconciliation backfill...",
+            term_id, course_count, upstream_run["total"],
+        )
+        synced = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
+        if not dry_run and synced > 0:
+            _mark_term_reconciled(session, term_id, upstream_run["started_at"])
+        return synced
+
+    if course_count == 0 and _last_reconciled_run(session, term_id) is None:
+        logger.info("Found new upstream term '%s' with 0 local courses. Starting automatic backfill...", term_id)
+        synced = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
+        if not dry_run:
+            marker = upstream_run["started_at"] if upstream_run else "zero_upstream_offerings"
+            _mark_term_reconciled(session, term_id, marker)
+        return synced
+
+    return 0
+
+
 def sync_terms_and_new_offerings(
     session,
     client: ScraperClient,
     meili_index=None,
-    dry_run: bool = False
+    dry_run: bool = False,
 ) -> int:
     """
-    Discovers all available terms from upstream scraper.
-    Ensures each term exists in PostgreSQL terms table.
-    Backfills any term that is missing courses locally:
-      - new upstream terms (0 local courses, e.g. newly published 2026/2027-1)
-      - partially ingested terms whose local count trails the latest completed
-        upstream scrape run (e.g. an earlier backfill latched onto a snapshot);
-        each completed upstream run is reconciled at most once per term
-        (tracked in sync_state) so a persistent count mismatch cannot
-        re-trigger a full backfill on every boot.
+    Discovers all available terms from upstream scraper, ensures each exists in DB,
+    and backfills newly published or partially ingested terms.
     """
     logger.info("Checking upstream scraper terms for new offerings...")
     try:
@@ -999,49 +694,22 @@ def sync_terms_and_new_offerings(
         return 0
 
     upstream_runs = _fetch_upstream_term_runs(client)
-
-    term_cache: Dict[str, Term] = {t.id: t for t in session.query(Term).all()}
+    term_cache: dict[str, Term] = {t.id: t for t in session.query(Term).all()}
     total_synced_courses = 0
 
-    for term_id in scraper_terms:
-        if not isinstance(term_id, str) or not term_id.strip():
+    for raw_term in scraper_terms:
+        if not isinstance(raw_term, str) or not raw_term.strip():
             continue
-        term_id = term_id.strip()
+        term_id = raw_term.strip()
         ensure_term(session, term_id, term_cache)
-
-        # Check if local DB has courses for this term
-        course_count = session.query(Course.id).filter(Course.term_id == term_id).count()
-        upstream_run = upstream_runs.get(term_id)
-
-        if upstream_run is not None and course_count < upstream_run["total"]:
-            if _last_reconciled_run(session, term_id) == upstream_run["started_at"]:
-                logger.info(
-                    "Term '%s' trails upstream (%d/%d courses) but was already reconciled against run %s; skipping.",
-                    term_id, course_count, upstream_run["total"], upstream_run["started_at"]
-                )
-                continue
-            logger.info(
-                "Term '%s' incomplete locally (%d/%d courses). Starting reconciliation backfill...",
-                term_id, course_count, upstream_run["total"]
-            )
-            synced = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
-            total_synced_courses += synced
-            if not dry_run and synced > 0:
-                _mark_term_reconciled(session, term_id, upstream_run["started_at"])
-        elif course_count == 0:
-            if _last_reconciled_run(session, term_id) is not None:
-                continue
-            logger.info("Found new upstream term '%s' with 0 local courses. Starting automatic backfill...", term_id)
-            synced = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
-            total_synced_courses += synced
-            if not dry_run:
-                marker = upstream_run["started_at"] if upstream_run else "zero_upstream_offerings"
-                _mark_term_reconciled(session, term_id, marker)
+        total_synced_courses += _reconcile_term_offerings(
+            session, client, meili_index, term_id, upstream_runs.get(term_id), dry_run
+        )
 
     return total_synced_courses
 
 
-def sync_upstream_run_metadata(session, client: ScraperClient, dry_run: bool = False) -> Optional[Dict[str, Any]]:
+def sync_upstream_run_metadata(session, client: ScraperClient, dry_run: bool = False) -> dict[str, Any] | None:
     """Fetch latest scrape run execution metadata from upstream boun-scrape."""
     try:
         runs = client.get("feeds/runs", params={"limit": 5})
@@ -1099,57 +767,76 @@ def _release_sync_lock(session, lock_id: int = 4288192) -> None:
         pass
 
 
+def _apply_db_hygiene(session, dry_run: bool) -> None:
+    if dry_run:
+        return
+    logger.info("Applying database hygiene (cleaning bogus departments and course code spacing)...")
+    try:
+        session.execute(text("DELETE FROM departments WHERE kisaadi ~ '[0-9]'"))
+        session.execute(
+            text("UPDATE courses SET course_code = regexp_replace(trim(course_code), '\\s+', ' ', 'g') WHERE course_code LIKE '%  %'")
+        )
+        session.commit()
+    except Exception as e:
+        logger.warning("Database hygiene query notice: %s", e)
+        session.rollback()
+
+
+def _sync_scraper_departments(session, client: ScraperClient, dry_run: bool) -> None:
+    logger.info("Fetching and syncing academic departments from scraper...")
+    scraper_depts = client.get("departments")
+    if not scraper_depts or not isinstance(scraper_depts, list):
+        return
+    dept_cache: dict[str, Department] = {d.kisaadi: d for d in session.query(Department).all()}
+    for d_item in scraper_depts:
+        if not isinstance(d_item, dict):
+            continue
+        code = (d_item.get("code") or d_item.get("kisaadi") or "").strip().upper()
+        name = (d_item.get("name") or d_item.get("bolum") or "").strip()
+        if code and not any(ch.isdigit() for ch in code) and code not in dept_cache:
+            dept = Department(kisaadi=code, bolum=name or code)
+            if not dry_run:
+                session.add(dept)
+            dept_cache[code] = dept
+    if not dry_run:
+        session.commit()
+        logger.info("Departments synchronized (%d total).", len(dept_cache))
+
+
+def _sync_all_terms(session, client: ScraperClient, meili_index: Any, valid_terms: list[str], dry_run: bool) -> int:
+    total_upserted = 0
+    total_terms_count = len(valid_terms)
+    prev_interval = getattr(client, "min_interval", 0.0)
+    if isinstance(client, ScraperClient) and prev_interval < 1.1:
+        client.min_interval = 1.1
+    try:
+        for idx, term_id in enumerate(valid_terms, start=1):
+            logger.info("[%d/%d] Refreshing term: %s...", idx, total_terms_count, term_id)
+            try:
+                count = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
+                total_upserted += count
+                if not dry_run:
+                    _mark_term_reconciled(session, term_id, datetime.now(UTC).isoformat())
+                session.expunge_all()
+            except Exception as e:
+                logger.error("Error refreshing term %s: %s", term_id, e)
+    finally:
+        if isinstance(client, ScraperClient):
+            client.min_interval = prev_interval
+    return total_upserted
+
+
 def refresh_all_data(
     session,
     client: ScraperClient,
     meili_index=None,
-    dry_run: bool = False
+    dry_run: bool = False,
 ) -> int:
-    """Completely refresh and standardize all academic course data from scraper.
-
-    1. Applies database hygiene (cleans invalid department codes containing digits,
-       normalizes legacy whitespace in course_code).
-    2. Synchronizes all clean academic departments from /departments.
-    3. Discovers all 146 terms and sequentially streams their precompiled bulk
-       exports from /feeds/exports/{term}/json.
-    4. Upserts courses and slot records with forward-filled contiguous rooms.
-    5. Syncs Meilisearch index in bulk batches.
-    6. Flushes Redis response cache.
-    """
+    """Completely refresh and standardize all academic course data from scraper."""
     logger.info("=== Starting Complete BOUN Archive Data Refresh ===")
+    _apply_db_hygiene(session, dry_run)
+    _sync_scraper_departments(session, client, dry_run)
 
-    # 1. Database Hygiene
-    if not dry_run:
-        logger.info("Applying database hygiene (cleaning bogus departments and course code spacing)...")
-        try:
-            session.execute(text("DELETE FROM departments WHERE kisaadi ~ '[0-9]'"))
-            session.execute(text("UPDATE courses SET course_code = regexp_replace(trim(course_code), '\\s+', ' ', 'g') WHERE course_code LIKE '%  %'"))
-            session.commit()
-        except Exception as e:
-            logger.warning("Database hygiene query notice: %s", e)
-            session.rollback()
-
-    # 2. Sync Departments from Scraper
-    logger.info("Fetching and syncing academic departments from scraper...")
-    scraper_depts = client.get("departments")
-    dept_cache: Dict[str, Department] = {d.kisaadi: d for d in session.query(Department).all()}
-    if scraper_depts and isinstance(scraper_depts, list):
-        for d_item in scraper_depts:
-            if not isinstance(d_item, dict):
-                continue
-            code = (d_item.get("code") or d_item.get("kisaadi") or "").strip().upper()
-            name = (d_item.get("name") or d_item.get("bolum") or "").strip()
-            if code and not any(ch.isdigit() for ch in code):
-                if code not in dept_cache:
-                    dept = Department(kisaadi=code, bolum=name or code)
-                    if not dry_run:
-                        session.add(dept)
-                    dept_cache[code] = dept
-        if not dry_run:
-            session.commit()
-            logger.info("Departments synchronized (%d total).", len(dept_cache))
-
-    # 3. Discover Terms
     scraper_terms = client.get("terms")
     if not scraper_terms or not isinstance(scraper_terms, list):
         logger.error("Could not retrieve terms list from scraper.")
@@ -1157,33 +844,17 @@ def refresh_all_data(
 
     valid_terms = [t.strip() for t in scraper_terms if isinstance(t, str) and t.strip()]
     logger.info("Discovered %d terms to refresh from upstream scraper.", len(valid_terms))
-
     term_cache = {t.id: t for t in session.query(Term).all()}
     for t_id in valid_terms:
         ensure_term(session, t_id, term_cache)
     if not dry_run:
         session.commit()
 
-    # 4. Stream each term
-    total_upserted = 0
-    total_terms_count = len(valid_terms)
-
-    for idx, term_id in enumerate(valid_terms, start=1):
-        logger.info("[%d/%d] Refreshing term: %s...", idx, total_terms_count, term_id)
-        try:
-            count = backfill_term(session, client, meili_index=meili_index, term_id=term_id, dry_run=dry_run)
-            total_upserted += count
-            if not dry_run:
-                _mark_term_reconciled(session, term_id, datetime.now(timezone.utc).isoformat())
-            session.expunge_all()
-        except Exception as e:
-            logger.error("Error refreshing term %s: %s", term_id, e)
-
-    # 5. Flush Redis Cache
+    total_upserted = _sync_all_terms(session, client, meili_index, valid_terms, dry_run)
     if not dry_run:
         invalidate_redis_cache()
 
-    logger.info("=== Complete Data Refresh Finished (%d courses upserted across %d terms) ===", total_upserted, total_terms_count)
+    logger.info("=== Complete Data Refresh Finished (%d courses upserted across %d terms) ===", total_upserted, len(valid_terms))
     return total_upserted
 
 
@@ -1223,7 +894,7 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
         total_changes = synced_terms + synced_backfill + synced_deltas + synced_quotas
 
         if not args.dry_run:
-            now_iso = datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(UTC).isoformat()
             for feed in ("local_sync", "scraper"):
                 state = session.query(SyncState).filter(SyncState.feed_name == feed).first()
                 if not state:
@@ -1286,7 +957,7 @@ def main():
         sys.exit(1)
 
     engine = create_engine(pg_url, pool_pre_ping=True)
-    Base.metadata.create_all(engine)
+    ensure_schema_columns(engine)
 
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     client = ScraperClient(base_url=args.scraper_url)
@@ -1300,10 +971,10 @@ def main():
             meili_index = meili_client.index("courses")
             meili_index.update_settings({
                 'filterableAttributes': [
-                    'term', 'dept_code', 'department', 'instructor', 'instructor_id', 'delivery_method'
+                    'term', 'dept_code', 'department', 'instructor', 'instructor_id', 'delivery_method', 'has_syllabus'
                 ],
                 'searchableAttributes': [
-                    'course_code', 'title', 'instructor', 'department'
+                    'course_code', 'title', 'instructor', 'department', 'catalog_text', 'syllabus_snippet'
                 ],
                 'faceting': {
                     'maxValuesPerFacet': 10000

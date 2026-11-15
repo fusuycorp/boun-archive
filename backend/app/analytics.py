@@ -1,7 +1,9 @@
-from typing import Optional
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+
 from . import models
+
 
 class MacroEngine:
     """
@@ -40,7 +42,7 @@ class MacroEngine:
         }
 
     @staticmethod
-    def get_scheduling_heatmap(db: Session, decade: Optional[int] = None):
+    def get_scheduling_heatmap(db: Session, decade: int | None = None):
         query = db.query(
             models.CourseSlot.day_code,
             models.CourseSlot.slot_hour,

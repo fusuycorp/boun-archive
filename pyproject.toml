@@ -26,3 +26,13 @@ members = ["backend"]
 [tool.uv.sources]
 backend = { workspace = true }
 
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "I", "UP", "SIM", "RET", "C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+

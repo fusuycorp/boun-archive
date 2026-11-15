@@ -1,10 +1,10 @@
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
-import pytest
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -12,24 +12,20 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app import models
-from app.main import escape_meili_filter, escape_sql_wildcards
+from app.main import escape_meili_filter
+
 from scripts.sync_from_scraper import (
     ScraperClient,
+    _apply_delta_event,
+    backfill_term,
     clean_int,
+    ensure_term,
     normalize_code,
     normalize_section,
-    ensure_term,
-    ensure_department,
-    ensure_instructor,
-    ensure_room,
-    _upsert_course,
-    _apply_delta_event,
-    sync_quota_feed,
     sync_deltas_feed,
-    backfill_term,
     sync_meili_documents,
+    sync_quota_feed,
 )
-
 
 # ==============================================================================
 # TIER 2 - FEATURE 1: Course Search & Fallback (5 boundary tests)

@@ -3,11 +3,12 @@ Empirical Adversarial & Stress Benchmark Harness for BOUN Archive.
 Runs high-iteration stress tests and outputs quantitative empirical performance metrics.
 """
 
+import random
 import sys
 import time
-import random
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 from fastapi.testclient import TestClient
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
@@ -23,18 +24,14 @@ if str(backend_path) not in sys.path:
     sys.path.insert(0, str(backend_path))
 
 from app import models
-from app.main import app, escape_meili_filter, escape_sql_wildcards, _search_courses_from_db
 from app.database import Base, get_db
+from app.main import app
+
 from scripts.sync_from_scraper import (
     ScraperClient,
     ensure_term,
-    ensure_department,
-    ensure_instructor,
-    ensure_room,
-    _upsert_course,
-    sync_quota_feed,
     sync_deltas_feed,
-    backfill_term,
+    sync_quota_feed,
 )
 
 

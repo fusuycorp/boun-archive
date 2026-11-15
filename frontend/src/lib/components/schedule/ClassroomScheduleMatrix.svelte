@@ -46,6 +46,57 @@
 
   const hours = Array.from({ length: 14 }, (_, i) => i + 1);
   const CAMPUS_ORDER = ["Güney", "Kuzey", "Hisar", "Uçaksavar", "Kandilli", "Kilyos", "Virtual", "Other"];
+  const CAMPUS_DISPLAY_LABELS: Record<string, string> = {
+    "Güney": "🏛️ Güney Kampüs (South)",
+    "Kuzey": "🏫 Kuzey Kampüs (North)",
+    "Hisar": "🏰 Hisar Kampüs",
+    "Uçaksavar": "🏃 Uçaksavar Kampüs",
+    "Kandilli": "🔭 Kandilli Kampüs",
+    "Kilyos": "🌊 Sarıtepe Kampüs (Kilyos)",
+    "Virtual": "💻 Virtual / Remote"
+  };
+
+  interface BuildingGroup {
+    building: string;
+    campus: string;
+    rooms: string[];
+  }
+
+  interface CampusGroup {
+    campus: string;
+    buildings: BuildingGroup[];
+    totalRooms: number;
+  }
+
+  function compareCampusOrder(a: string, b: string): number {
+    const idxA = CAMPUS_ORDER.indexOf(a);
+    const idxB = CAMPUS_ORDER.indexOf(b);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return a.localeCompare(b);
+  }
+
+  function normalizeCampusName(campus?: string): string {
+    return !campus || campus === "Campus" ? "Other" : campus;
+  }
+
+  function matchesAvailability(
+    room: string,
+    mode: "all" | "occupied" | "free" | "conflicts",
+    focusHour: number | null,
+    conflicts: Set<string>,
+    slotsByRoomHour: Map<string, GhostScheduleItem[]>
+  ): boolean {
+    if (mode === "all") return true;
+    if (mode === "conflicts") return conflicts.has(room);
+    const wantOccupied = mode === "occupied";
+    const checkHours = focusHour !== null ? [focusHour] : hours;
+    return checkHours.some((h) => {
+      const hasSlots = (slotsByRoomHour.get(`${room}|${h}`)?.length ?? 0) > 0;
+      return wantOccupied ? hasSlots : !hasSlots;
+    });
+  }
 
   // Active Day
   let activeDay = $state("M");
@@ -57,11 +108,8 @@
     for (const s of filteredSchedule) {
       const key = `${s.room_name}|${s.slot_hour}`;
       const list = map.get(key);
-      if (list) {
-        list.push(s);
-      } else {
-        map.set(key, [s]);
-      }
+      if (list) list.push(s);
+      else map.set(key, [s]);
     }
     return map;
   });
@@ -70,14 +118,13 @@
   let roomLocationMap = $derived.by(() => {
     const map = new Map<string, { building: string; campus: string }>();
     for (const s of scheduleData) {
-      if (!map.has(s.room_name)) {
-        const loc = resolveRoomLocation(s.room_name, s.building);
-        const resolvedCampus = (loc.campus === "Campus" || !loc.campus) ? "Other" : loc.campus;
-        map.set(s.room_name, {
-          building: s.building || loc.building,
-          campus: s.campus && s.campus !== "Campus" ? s.campus : resolvedCampus
-        });
-      }
+      if (map.has(s.room_name)) continue;
+      const loc = resolveRoomLocation(s.room_name, s.building);
+      const resolvedCampus = normalizeCampusName(loc.campus);
+      map.set(s.room_name, {
+        building: s.building || loc.building,
+        campus: s.campus && s.campus !== "Campus" ? s.campus : resolvedCampus
+      });
     }
     return map;
   });
@@ -94,20 +141,13 @@
     const cMap = new Map<string, Set<string>>();
     for (const s of scheduleData) {
       const loc = roomLocationMap.get(s.room_name) || resolveRoomLocation(s.room_name, s.building);
-      const cName = (loc.campus === "Campus" || !loc.campus) ? "Other" : loc.campus;
+      const cName = normalizeCampusName(loc.campus);
       if (!cMap.has(cName)) cMap.set(cName, new Set());
       cMap.get(cName)!.add(s.room_name);
     }
     return Array.from(cMap.entries())
       .map(([name, set]) => ({ name, count: set.size }))
-      .sort((a, b) => {
-        const idxA = CAMPUS_ORDER.indexOf(a.name);
-        const idxB = CAMPUS_ORDER.indexOf(b.name);
-        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-        if (idxA !== -1) return -1;
-        if (idxB !== -1) return 1;
-        return a.name.localeCompare(b.name);
-      });
+      .sort((a, b) => compareCampusOrder(a.name, b.name));
   });
 
   // Available unique buildings (filtered by selectedCampuses if active)
@@ -115,7 +155,7 @@
     const bCountMap = new Map<string, Set<string>>();
     for (const s of scheduleData) {
       const loc = roomLocationMap.get(s.room_name) || resolveRoomLocation(s.room_name, s.building);
-      const cName = (loc.campus === "Campus" || !loc.campus) ? "Other" : loc.campus;
+      const cName = normalizeCampusName(loc.campus);
       if (selectedCampuses.length > 0 && !selectedCampuses.includes(cName)) continue;
       if (!bCountMap.has(loc.building)) bCountMap.set(loc.building, new Set());
       bCountMap.get(loc.building)!.add(s.room_name);
@@ -125,79 +165,23 @@
       .sort((a, b) => a.name.localeCompare(b.name));
   });
 
-  // Building Groups for rendering in the 2D matrix
-  interface BuildingGroup {
-    building: string;
-    campus: string;
-    rooms: string[];
-  }
-
-  interface CampusGroup {
-    campus: string;
-    buildings: BuildingGroup[];
-    totalRooms: number;
+  function roomMatchesQuery(room: string, building: string, q: string): boolean {
+    if (!q) return true;
+    return room.toLowerCase().includes(q) || building.toLowerCase().includes(q);
   }
 
   let buildingGroups = $derived.by(() => {
     const activeRooms = Array.from(new Set(filteredSchedule.map(s => s.room_name)));
     const bMap = new Map<string, { campus: string; rooms: string[] }>();
+    const q = roomSearch.toLowerCase().trim();
 
     for (const room of activeRooms) {
-      // Room name search filter
-      if (roomSearch.trim()) {
-        const q = roomSearch.toLowerCase().trim();
-        const loc = roomLocationMap.get(room) || resolveRoomLocation(room);
-        if (!room.toLowerCase().includes(q) && !loc.building.toLowerCase().includes(q)) {
-          continue;
-        }
-      }
-
-      // Multi-select campus filter
       const loc = roomLocationMap.get(room) || resolveRoomLocation(room);
-      const cName = (loc.campus === "Campus" || !loc.campus) ? "Other" : loc.campus;
-      if (selectedCampuses.length > 0 && !selectedCampuses.includes(cName)) {
-        continue;
-      }
-
-      // Building filter
-      if (selectedBuilding && loc.building !== selectedBuilding) {
-        continue;
-      }
-
-      // Availability / Schedule filter
-      if (availabilityFilter === "conflicts") {
-        if (!conflictRoomNames.has(room)) continue;
-      } else if (availabilityFilter === "free") {
-        if (selectedHour !== null) {
-          const slots = slotMap.get(`${room}|${selectedHour}`);
-          if (slots && slots.length > 0) continue;
-        } else {
-          let hasFreeSlot = false;
-          for (const h of hours) {
-            const slots = slotMap.get(`${room}|${h}`);
-            if (!slots || slots.length === 0) {
-              hasFreeSlot = true;
-              break;
-            }
-          }
-          if (!hasFreeSlot) continue;
-        }
-      } else if (availabilityFilter === "occupied") {
-        if (selectedHour !== null) {
-          const slots = slotMap.get(`${room}|${selectedHour}`);
-          if (!slots || slots.length === 0) continue;
-        } else {
-          let hasClass = false;
-          for (const h of hours) {
-            const slots = slotMap.get(`${room}|${h}`);
-            if (slots && slots.length > 0) {
-              hasClass = true;
-              break;
-            }
-          }
-          if (!hasClass) continue;
-        }
-      }
+      const cName = normalizeCampusName(loc.campus);
+      if (!roomMatchesQuery(room, loc.building, q)) continue;
+      if (selectedCampuses.length > 0 && !selectedCampuses.includes(cName)) continue;
+      if (selectedBuilding && loc.building !== selectedBuilding) continue;
+      if (!matchesAvailability(room, availabilityFilter, selectedHour, conflictRoomNames, slotMap)) continue;
 
       if (!bMap.has(loc.building)) {
         bMap.set(loc.building, { campus: cName, rooms: [] });
@@ -205,13 +189,9 @@
       bMap.get(loc.building)!.rooms.push(room);
     }
 
-    const groups: BuildingGroup[] = [];
-    for (const [building, data] of bMap.entries()) {
-      data.rooms.sort();
-      groups.push({ building, campus: data.campus, rooms: data.rooms });
-    }
-    groups.sort((a, b) => a.building.localeCompare(b.building));
-    return groups;
+    return Array.from(bMap.entries())
+      .map(([building, data]) => ({ building, campus: data.campus, rooms: data.rooms.sort() }))
+      .sort((a, b) => a.building.localeCompare(b.building));
   });
 
   // Hierarchical Campus -> Building groups for clean tabular presentation
@@ -221,23 +201,13 @@
       if (!cMap.has(bg.campus)) cMap.set(bg.campus, []);
       cMap.get(bg.campus)!.push(bg);
     }
-    const groups: CampusGroup[] = [];
-    for (const [campus, bldgs] of cMap.entries()) {
-      groups.push({
+    return Array.from(cMap.entries())
+      .map(([campus, buildings]) => ({
         campus,
-        buildings: bldgs,
-        totalRooms: bldgs.reduce((sum, b) => sum + b.rooms.length, 0)
-      });
-    }
-    groups.sort((a, b) => {
-      const idxA = CAMPUS_ORDER.indexOf(a.campus);
-      const idxB = CAMPUS_ORDER.indexOf(b.campus);
-      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-      if (idxA !== -1) return -1;
-      if (idxB !== -1) return 1;
-      return a.campus.localeCompare(b.campus);
-    });
-    return groups;
+        buildings,
+        totalRooms: buildings.reduce((sum, b) => sum + b.rooms.length, 0)
+      }))
+      .sort((a, b) => compareCampusOrder(a.campus, b.campus));
   });
 
   let totalVisibleRooms = $derived(buildingGroups.reduce((sum, g) => sum + g.rooms.length, 0));
@@ -708,15 +678,16 @@
         {/if}
       </div>
 
-      <div class="overflow-x-auto custom-scrollbar">
+      <div class="overflow-x-auto custom-scrollbar" role="region" aria-labelledby="classroom-matrix-caption">
         <table class="w-full border-collapse min-w-[950px]">
+          <caption id="classroom-matrix-caption" class="sr-only">Classroom occupancy matrix across Boğaziçi campuses</caption>
           <thead>
             <tr class="bg-[#f3efe6]/90 border-b border-[#e5e0d8] dark:bg-[#0a0e1a] dark:border-[#1e293b] sticky top-0 z-20">
-              <th class="p-3 text-left font-mono text-[11px] font-bold text-[#525f7f] dark:text-slate-400 uppercase border-r border-[#e5e0d8] dark:border-[#1e293b] w-44 sm:w-52 sticky left-0 z-30 bg-[#f3efe6] dark:bg-[#0a0e1a] shadow-2xs">
+              <th scope="col" class="p-3 text-left font-mono text-[11px] font-bold text-[#525f7f] dark:text-slate-400 uppercase border-r border-[#e5e0d8] dark:border-[#1e293b] w-44 sm:w-52 sticky left-0 z-30 bg-[#f3efe6] dark:bg-[#0a0e1a] shadow-2xs">
                 Room / Hour
               </th>
               {#each hours as hour}
-                <th class="p-2.5 text-center font-mono text-[11px] font-bold uppercase min-w-[75px] sm:min-w-[95px] {
+                <th scope="col" class="p-2.5 text-center font-mono text-[11px] font-bold uppercase min-w-[75px] sm:min-w-[95px] {
                   selectedHour === hour 
                     ? 'bg-[#002d72]/15 text-[#002d72] dark:bg-[#8cc8ea]/20 dark:text-[#8cc8ea]' 
                     : 'text-[#525f7f] dark:text-slate-400'
@@ -727,22 +698,15 @@
               {/each}
             </tr>
           </thead>
-          <tbody>
-            {#each campusGroups as cGroup}
+          {#each campusGroups as cGroup, cIdx}
+            <tbody class={cIdx > 0 ? "deferred-campus-section" : undefined}>
               <!-- Campus Section Header Row -->
               <tr class="bg-[#002d72] text-white dark:bg-[#1a2333] border-t-2 border-b border-[#002d72] dark:border-[#2b3a51]">
                 <td colspan={15} class="py-2.5 px-3 sticky left-0 z-16 bg-[#002d72] dark:bg-[#1a2333]">
                   <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-2">
                       <span class="font-mono text-xs font-bold uppercase tracking-wider text-white dark:text-[#8cc8ea]">
-                        {cGroup.campus === 'Güney' ? '🏛️ Güney Kampüs (South)' :
-                         cGroup.campus === 'Kuzey' ? '🏫 Kuzey Kampüs (North)' :
-                         cGroup.campus === 'Hisar' ? '🏰 Hisar Kampüs' :
-                         cGroup.campus === 'Uçaksavar' ? '🏃 Uçaksavar Kampüs' :
-                         cGroup.campus === 'Kandilli' ? '🔭 Kandilli Kampüs' :
-                         cGroup.campus === 'Kilyos' ? '🌊 Sarıtepe Kampüs (Kilyos)' :
-                         cGroup.campus === 'Virtual' ? '💻 Virtual / Remote' :
-                         `${cGroup.campus} Kampüs`}
+                        {CAMPUS_DISPLAY_LABELS[cGroup.campus] ?? `${cGroup.campus} Kampüs`}
                       </span>
                       <span class="font-mono text-[10px] text-white/80 dark:text-slate-300">
                         ({cGroup.buildings.length} {cGroup.buildings.length === 1 ? 'building' : 'buildings'}, {cGroup.totalRooms} rooms)
@@ -811,8 +775,8 @@
                   </tr>
                 {/each}
               {/each}
+            </tbody>
             {/each}
-          </tbody>
         </table>
       </div>
     </div>

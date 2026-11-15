@@ -6,16 +6,15 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from app import models
+from app.database import Base, get_db
+from app.main import ResponseAwareJsonCoder, app
 from fastapi.testclient import TestClient
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
-
-from app.main import app, ResponseAwareJsonCoder
-from app.database import Base, get_db
-from app import models
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # In-memory SQLite database for test contracts
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"

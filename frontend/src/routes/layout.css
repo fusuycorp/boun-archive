@@ -88,6 +88,40 @@ body {
   scrollbar-width: none;
 }
 
+:root {
+  color-scheme: light dark;
+  accent-color: #002d72;
+}
+
+:root.dark {
+  color-scheme: dark;
+  accent-color: #8cc8ea;
+}
+
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse,
+  .animate-spin,
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+.deferred-campus-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 220px;
+}
+
 .font-mono {
   font-feature-settings: 'zero' 1, 'tnum' 1;
   font-variant-numeric: tabular-nums;
