@@ -1,9 +1,9 @@
-FROM python:3.11-slim-bookworm AS builder
+FROM python:3.11-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libpq-dev \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -12,10 +12,10 @@ COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
 RUN mkdir app && touch app/__init__.py
 RUN uv pip install --system --no-cache ".[scripts]"
 
-FROM python:3.11-slim-bookworm AS runtime
+FROM python:3.11-slim AS runtime
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libpq5 \
     wget \
     curl \

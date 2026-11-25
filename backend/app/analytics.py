@@ -1,5 +1,5 @@
 
-from sqlalchemy import func
+from sqlalchemy import func, literal_column
 from sqlalchemy.orm import Session
 
 from . import models
@@ -13,19 +13,20 @@ class MacroEngine:
     
     @staticmethod
     def get_latest_data_year(db: Session) -> int:
-        latest = db.query(func.max(func.substr(models.Course.term_id, 1, 4))).scalar()
+        latest = db.query(func.max(func.substr(models.Course.term_id, literal_column("1"), literal_column("4")))).scalar()
         return int(latest) if latest else 0
 
     @staticmethod
     def get_department_evolution(db: Session):
         # Count of courses per department per academic year (extracted from term_id prefix)
+        year_expr = func.substr(models.Course.term_id, literal_column("1"), literal_column("4"))
         results = db.query(
             models.Course.dept_kisaadi,
-            func.substr(models.Course.term_id, 1, 4).label('year'),
+            year_expr.label('year'),
             func.count(models.Course.id).label('count')
         ).group_by(
             models.Course.dept_kisaadi,
-            func.substr(models.Course.term_id, 1, 4)
+            year_expr
         ).all()
         
         data = {}
