@@ -88,10 +88,13 @@ DEFAULT_SCRAPER_API_URL = "https://scraper.bountools.com/api/v1"
 
 
 class StrictRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Prevent cross-domain or protocol-downgrade redirects that could leak authorization headers."""
+    """Prevent cross-domain, non-HTTP(S), or protocol-downgrade redirects that could leak authorization headers."""
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         orig_parsed = urllib.parse.urlparse(req.full_url)
         new_parsed = urllib.parse.urlparse(newurl)
+        if new_parsed.scheme not in ("http", "https") or not new_parsed.netloc:
+            logger.warning("Blocked unsafe redirect scheme/target: %s", newurl)
+            return None
         if orig_parsed.netloc != new_parsed.netloc:
             logger.warning("Blocked cross-domain redirect from %s to %s", orig_parsed.netloc, new_parsed.netloc)
             return None
@@ -106,7 +109,11 @@ _RATE_LIMIT_BACKOFF_SECONDS: tuple[int, ...] = (5, 15, 35, 62)
 
 class ScraperClient:
     def __init__(self, base_url: str | None = None, token: str | None = None, min_interval: float = 0.0):
-        self.base_url = (base_url or os.getenv("SCRAPER_API_URL") or DEFAULT_SCRAPER_API_URL).rstrip("/")
+        raw_base = (base_url or os.getenv("SCRAPER_API_URL") or DEFAULT_SCRAPER_API_URL).strip().rstrip("/")
+        parsed = urllib.parse.urlsplit(raw_base)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(f"Invalid scraper base URL (must be http/https with host): {raw_base!r}")
+        self.base_url = raw_base
         self.token = token or os.getenv("SCRAPER_FEED_TOKEN")
         self.min_interval = min_interval
         self._last_req_mono = 0.0
@@ -172,6 +179,36 @@ class ScraperClient:
         return None
 
 
+def _split_keyset_cursor(cursor: str | None) -> tuple[str | None, int | None]:
+    """Split a persisted cursor `ts|id` (or legacy plain `ts`) into `(timestamp, after_id)`."""
+    if not cursor:
+        return None, None
+    if "|" in cursor:
+        ts_part, id_part = cursor.rsplit("|", 1)
+        if id_part.isdigit():
+            return ts_part, int(id_part)
+    return cursor, None
+
+
+def _format_keyset_cursor(ts: str | None, item_id: int | None) -> str | None:
+    if not ts:
+        return None
+    return f"{ts}|{item_id}" if item_id is not None else ts
+
+
+def _is_newer_keyset(
+    ts: str | None,
+    item_id: int | None,
+    best_ts: str | None,
+    best_id: int | None,
+) -> bool:
+    if not ts:
+        return False
+    if best_ts is None or ts > best_ts:
+        return True
+    return ts == best_ts and item_id is not None and (best_id is None or item_id > best_id)
+
+
 def _advance_sync_cursor(
     session,
     feed_name: str,
@@ -179,17 +216,16 @@ def _advance_sync_cursor(
     state: SyncState | None,
     dry_run: bool,
 ) -> tuple[SyncState | None, str | None]:
-    """Persist updated polling cursor for incremental scraper feeds."""
-    if dry_run:
+    """Persist updated polling cursor for incremental scraper feeds without jumping None to NOW()."""
+    if dry_run or not last_cursor:
         return state, state.last_cursor if state else None
-    next_cursor = last_cursor or datetime.now(UTC).isoformat()
     if not state:
-        state = SyncState(feed_name=feed_name, last_cursor=next_cursor)
+        state = SyncState(feed_name=feed_name, last_cursor=last_cursor)
         session.add(state)
     else:
-        state.last_cursor = next_cursor
+        state.last_cursor = last_cursor
     session.commit()
-    return state, next_cursor
+    return state, last_cursor
 
 
 def _parse_quota_item_fields(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -247,6 +283,43 @@ def _upsert_quota_snapshot(session, fields: dict[str, Any], term_cache: dict[str
     return fields["captured_at"]
 
 
+def _build_keyset_params(cursor_ts: str | None, cursor_id: int | None, limit: int) -> dict[str, Any]:
+    params: dict[str, Any] = {"limit": limit, "order": "asc"}
+    if cursor_ts:
+        params["after_timestamp"] = cursor_ts
+    if cursor_id is not None:
+        params["after_id"] = cursor_id
+    return params
+
+
+def _apply_quota_batch(
+    session,
+    data: list[dict[str, Any]],
+    term_cache: dict[str, Term],
+    best_ts: str | None,
+    best_id: int | None,
+    dry_run: bool,
+) -> tuple[int, str | None, int | None]:
+    synced = 0
+    for item in data:
+        fields = _parse_quota_item_fields(item)
+        if fields is None:
+            continue
+        item_id = clean_int(item.get("id"))
+        term_snap = dict(term_cache)
+        try:
+            with session.begin_nested():
+                captured = _upsert_quota_snapshot(session, fields, term_cache, dry_run)
+            if _is_newer_keyset(captured, item_id, best_ts, best_id):
+                best_ts, best_id = captured, item_id
+            synced += 1
+        except Exception as e:
+            term_cache.clear()
+            term_cache.update(term_snap)
+            logger.warning("Skipping anomalous quota snapshot item %s: %s", item.get("course_code"), e)
+    return synced, best_ts, best_id
+
+
 def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: bool = False) -> int:
     state = session.query(SyncState).filter(SyncState.feed_name == "quota_snapshots").first()
     cursor = state.last_cursor if state else None
@@ -254,10 +327,10 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
     total_synced = 0
 
     while True:
+        cursor_ts, cursor_id = _split_keyset_cursor(cursor)
         logger.info("Polling /feeds/quota-snapshots (cursor: %s, limit: %d)...", cursor, limit)
-        params = {"limit": limit, "after_timestamp": cursor} if cursor else {"limit": limit}
         try:
-            data = client.get("feeds/quota-snapshots", params=params)
+            data = client.get("feeds/quota-snapshots", params=_build_keyset_params(cursor_ts, cursor_id, limit))
         except Exception as e:
             logger.error("Error fetching quota snapshots: %s", e)
             break
@@ -265,22 +338,12 @@ def sync_quota_feed(session, client: ScraperClient, limit: int = 500, dry_run: b
             logger.info("No new quota snapshot records available.")
             break
 
-        last_captured_at = cursor
-        for item in data:
-            fields = _parse_quota_item_fields(item)
-            if fields is None:
-                continue
-            try:
-                with session.begin_nested():
-                    captured = _upsert_quota_snapshot(session, fields, term_cache, dry_run)
-                if captured and (last_captured_at is None or captured > last_captured_at):
-                    last_captured_at = captured
-                total_synced += 1
-            except Exception as e:
-                logger.warning("Skipping anomalous quota snapshot item %s: %s", item.get("course_code"), e)
-
-        state, cursor = _advance_sync_cursor(session, "quota_snapshots", last_captured_at, state, dry_run)
-        if len(data) < limit:
+        batch_synced, best_ts, best_id = _apply_quota_batch(session, data, term_cache, cursor_ts, cursor_id, dry_run)
+        total_synced += batch_synced
+        prev_cursor = cursor
+        next_cursor = _format_keyset_cursor(best_ts, best_id)
+        state, cursor = _advance_sync_cursor(session, "quota_snapshots", next_cursor, state, dry_run)
+        if len(data) < limit or cursor == prev_cursor:
             break
 
     logger.info("Processed %d quota snapshot(s). Current cursor: %s", total_synced, cursor)
@@ -377,18 +440,24 @@ def _process_delta_batch(
     events: list[dict[str, Any]],
     caches: dict[str, dict[str, Any]],
     last_ts: str | None,
+    last_id: int | None,
     touched_course_ids: set[int],
-    meili_index: Any,
+    deleted_course_ids: set[int],
     dry_run: bool,
     catalog_fetcher,
     corpus_cache: dict[str, dict[tuple[str, str | None], dict[str, Any]]],
     catalog_cache: dict[str, dict[str, Any] | None],
-) -> tuple[int, str | None]:
+) -> tuple[int, str | None, int | None]:
     synced = 0
-    sorted_events = sorted(events, key=lambda ev: ev.get("timestamp") or ev.get("detected_at") or "")
+    sorted_events = sorted(
+        events,
+        key=lambda ev: (ev.get("timestamp") or ev.get("detected_at") or "", clean_int(ev.get("id")) or 0),
+    )
     for item in sorted_events:
         ev_ts = item.get("timestamp") or item.get("detected_at")
+        ev_id = clean_int(item.get("id"))
         prepared = _prepare_delta_item(item, client, corpus_cache, catalog_cache)
+        snaps = {k: dict(v) for k, v in caches.items()}
         try:
             with session.begin_nested():
                 _apply_delta_event(
@@ -399,16 +468,30 @@ def _process_delta_batch(
                     dept_cache=caches["dept"],
                     term_cache=caches["term"],
                     touched_course_ids=touched_course_ids,
-                    meili_index=meili_index,
+                    meili_index=None,
                     dry_run=dry_run,
                     catalog_fetcher=catalog_fetcher,
+                    deleted_course_ids=deleted_course_ids,
                 )
             synced += 1
-            if ev_ts and (last_ts is None or ev_ts > last_ts):
-                last_ts = ev_ts
+            if _is_newer_keyset(ev_ts, ev_id, last_ts, last_id):
+                last_ts, last_id = ev_ts, ev_id
         except Exception as e:
+            for k, snap in snaps.items():
+                caches[k].clear()
+                caches[k].update(snap)
             logger.warning("Skipping anomalous delta event %s: %s", item.get("course_code"), e)
-    return synced, last_ts
+    return synced, last_ts, last_id
+
+
+def _delete_meili_courses(meili_index: Any, deleted_course_ids: set[int], dry_run: bool) -> None:
+    if dry_run or not meili_index or not deleted_course_ids:
+        return
+    for cid in sorted(deleted_course_ids):
+        try:
+            meili_index.delete_document(cid)
+        except Exception as e:
+            logger.warning("Meilisearch post-commit delete error for course %s: %s", cid, e)
 
 
 def sync_deltas_feed(
@@ -427,6 +510,7 @@ def sync_deltas_feed(
         "term": {t.id: t for t in session.query(Term).all()},
     }
     touched_course_ids: set[int] = set()
+    deleted_course_ids: set[int] = set()
     corpus_cache: dict[str, dict[tuple[str, str | None], dict[str, Any]]] = {}
     catalog_cache: dict[str, dict[str, Any] | None] = {}
     total_synced = 0
@@ -440,10 +524,10 @@ def sync_deltas_feed(
         return catalog_cache[norm]
 
     while True:
+        cursor_ts, cursor_id = _split_keyset_cursor(cursor)
         logger.info("Polling /feeds/deltas (cursor: %s, limit: %d)...", cursor, limit)
-        params = {"limit": limit, "after_timestamp": cursor} if cursor else {"limit": limit}
         try:
-            data = client.get("feeds/deltas", params=params)
+            data = client.get("feeds/deltas", params=_build_keyset_params(cursor_ts, cursor_id, limit))
         except Exception as e:
             logger.error("Error fetching deltas feed: %s", e)
             break
@@ -451,14 +535,15 @@ def sync_deltas_feed(
             logger.info("No new delta events available.")
             break
 
-        batch_synced, last_ts = _process_delta_batch(
+        batch_synced, last_ts, last_id = _process_delta_batch(
             session=session,
             client=client,
             events=data,
             caches=caches,
-            last_ts=cursor,
+            last_ts=cursor_ts,
+            last_id=cursor_id,
             touched_course_ids=touched_course_ids,
-            meili_index=meili_index,
+            deleted_course_ids=deleted_course_ids,
             dry_run=dry_run,
             catalog_fetcher=_fetch_catalog,
             corpus_cache=corpus_cache,
@@ -466,10 +551,12 @@ def sync_deltas_feed(
         )
         total_synced += batch_synced
         prev_cursor = cursor
-        state, cursor = _advance_sync_cursor(session, "deltas", last_ts, state, dry_run)
+        next_cursor = _format_keyset_cursor(last_ts, last_id)
+        state, cursor = _advance_sync_cursor(session, "deltas", next_cursor, state, dry_run)
         if len(data) < limit or cursor == prev_cursor:
             break
 
+    _delete_meili_courses(meili_index, deleted_course_ids, dry_run)
     _sync_touched_meili_courses(session, meili_index, touched_course_ids, dry_run)
     logger.info("Processed %d delta event(s). Current cursor: %s", total_synced, cursor)
     return total_synced
@@ -477,11 +564,11 @@ def sync_deltas_feed(
 
 def _fetch_paginated_term_courses(client: ScraperClient, term_id: str) -> list[dict[str, Any]]:
     courses_raw: list[dict[str, Any]] = []
-    offset = 0
-    page_size = 500
+    page = 1
+    page_size = 200
     while True:
         try:
-            data = client.get("courses", params={"term": term_id, "limit": page_size, "offset": offset})
+            data = client.get("courses", params={"term": term_id, "page": page, "size": page_size})
         except Exception as e:
             logger.error("Error fetching paginated courses for term %s: %s", term_id, e)
             break
@@ -491,9 +578,10 @@ def _fetch_paginated_term_courses(client: ScraperClient, term_id: str) -> list[d
         if not items:
             break
         courses_raw.extend(items)
-        offset += len(items)
-        if offset >= data.get("total", len(items)) or len(items) < page_size:
+        total = data.get("total")
+        if (isinstance(total, int) and len(courses_raw) >= total) or len(items) < page_size:
             break
+        page += 1
     return courses_raw
 
 
@@ -517,7 +605,8 @@ def backfill_term(
     dry_run: bool = False
 ) -> int:
     logger.info("Starting backfill for term: %s", term_id)
-    ensure_term(session, term_id)
+    if not dry_run:
+        ensure_term(session, term_id)
 
     courses_raw = _fetch_term_courses(client, term_id)
     if not courses_raw:
@@ -754,8 +843,8 @@ def _try_acquire_sync_lock(session, lock_id: int = 4288192) -> bool:
             return bool(res)
         return True
     except Exception as e:
-        logger.debug("Advisory lock check skipped: %s", e)
-        return True
+        logger.error("Advisory lock acquisition failed (failing closed): %s", e)
+        return False
 
 
 def _release_sync_lock(session, lock_id: int = 4288192) -> None:
@@ -765,6 +854,37 @@ def _release_sync_lock(session, lock_id: int = 4288192) -> None:
             session.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": lock_id})
     except Exception:
         pass
+
+
+def _acquire_pinned_pg_lock(session, lock_id: int = 4288192):
+    """Acquire a PostgreSQL session advisory lock on a dedicated pinned connection."""
+    bind = session.get_bind()
+    if not bind or bind.dialect.name != "postgresql":
+        return None, True
+    lock_conn = bind.connect()
+    try:
+        acquired = bool(
+            lock_conn.execute(text("SELECT pg_try_advisory_lock(:lock_id)"), {"lock_id": lock_id}).scalar()
+        )
+        if not acquired:
+            lock_conn.close()
+            return None, False
+        return lock_conn, True
+    except Exception as e:
+        logger.error("Pinned advisory lock acquisition failed (failing closed): %s", e)
+        lock_conn.close()
+        return None, False
+
+
+def _release_pinned_pg_lock(lock_conn, lock_id: int = 4288192) -> None:
+    if lock_conn is None:
+        return
+    try:
+        lock_conn.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": lock_id})
+    except Exception:
+        pass
+    finally:
+        lock_conn.close()
 
 
 def _apply_db_hygiene(session, dry_run: bool) -> None:
@@ -860,7 +980,7 @@ def refresh_all_data(
 
 def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) -> None:
     session = session_factory()
-    lock_acquired = _try_acquire_sync_lock(session)
+    lock_conn, lock_acquired = _acquire_pinned_pg_lock(session)
     if not lock_acquired:
         logger.info("Another sync_from_scraper cycle holds the advisory lock. Skipping concurrent execution.")
         session.close()
@@ -912,7 +1032,7 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
         session.rollback()
         raise
     finally:
-        _release_sync_lock(session)
+        _release_pinned_pg_lock(lock_conn)
         session.close()
 
 
@@ -921,9 +1041,10 @@ def invalidate_redis_cache() -> None:
     redis_url = os.getenv("REDIS_URL")
     if not redis_url:
         return
+    r = None
     try:
         import redis
-        r = redis.from_url(redis_url)
+        r = redis.from_url(redis_url, socket_timeout=5, socket_connect_timeout=5)
         deleted_count = 0
         batch = []
         for key in r.scan_iter(match="fastapi-cache:*", count=500):
@@ -936,7 +1057,10 @@ def invalidate_redis_cache() -> None:
         if deleted_count > 0:
             logger.info("Invalidated %d cached FastAPI response key(s) in Redis via SCAN.", deleted_count)
     except Exception as e:
-        logger.debug("Redis cache invalidation skipped: %s", e)
+        logger.warning("Redis cache invalidation skipped: %s", e)
+    finally:
+        if r is not None:
+            r.close()
 
 
 def main():

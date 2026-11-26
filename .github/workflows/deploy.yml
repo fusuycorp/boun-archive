@@ -1,5 +1,12 @@
 name: Build, Push and Deploy
 
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     branches:
@@ -11,8 +18,37 @@ on:
   workflow_dispatch:
 
 jobs:
+  verify:
+    name: Verify Backend & Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Verify Backend Import & Tests
+        working-directory: backend
+        run: |
+          uv sync --frozen
+          uv run python -c "from app.main import app"
+          CI=true uv run pytest -q
+
+      - name: Verify Frontend Check, Tests & Build
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run check
+          bun test
+          bun run build
+
   build-backend:
     name: Build & Push Backend
+    needs: [verify]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -57,6 +93,7 @@ jobs:
 
   build-frontend:
     name: Build & Push Frontend
+    needs: [verify]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -111,7 +148,8 @@ jobs:
           DEPLOY_STACK_ID: ${{ secrets.DEPLOY_STACK_ID || secrets.DOKPLOY_COMPOSE_ID }}
         run: |
           echo "Triggering cluster redeployment..."
-          curl -f -s -S -X POST "$DEPLOY_URL/api/compose.redeploy" \
+          PAYLOAD=$(jq -n --arg id "$DEPLOY_STACK_ID" '{composeId: $id}')
+          curl --max-time 30 -f -s -S -X POST "$DEPLOY_URL/api/compose.redeploy" \
             -H "x-api-key: $DEPLOY_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"composeId\": \"$DEPLOY_STACK_ID\"}"
+            -d "$PAYLOAD"

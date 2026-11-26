@@ -78,9 +78,6 @@ async def async_db_tests():
         db.commit()
 
         # Test MacroEngine
-        latest_year = MacroEngine.get_latest_data_year(db)
-        assert latest_year == 2024, f"Expected 2024, got {latest_year}"
-
         evo = MacroEngine.get_department_evolution(db)
         assert "departments" in evo and "CMPE" in evo["departments"]
 

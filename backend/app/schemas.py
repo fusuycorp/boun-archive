@@ -156,6 +156,12 @@ class ScheduleOptimizationRequest(BaseModel):
     max_campus_days: int | None = Field(default=None, ge=1, le=7)
     max_results: int = Field(default=5, ge=1, le=50)
 
+    @model_validator(mode="after")
+    def validate_hour_bounds(self):
+        if self.min_hour > self.max_hour:
+            raise ValueError("min_hour must be less than or equal to max_hour")
+        return self
+
 class TimetableSection(BaseModel):
     course_code: str
     section: str

@@ -1,3 +1,4 @@
+import time
 from itertools import combinations
 from typing import Any
 
@@ -150,8 +151,6 @@ def _build_candidate_groups(
 
 
 def _limits_reached(valid_count: int, states_count: int, start_time: float) -> bool:
-    import time
-
     return (
         valid_count >= _MAX_COLLECTED_RESULTS
         or states_count >= _MAX_EXPLORED_STATES
@@ -164,6 +163,7 @@ def _search_course_group(
     index: int,
     current_assignment: list[SectionSlotData],
     current_occupied: set[tuple[str, int]],
+    current_days: set[str],
     filtered_by_course: dict[str, list[SectionSlotData]],
     max_campus_days: int | None,
     valid_combinations: list[dict[str, Any]],
@@ -182,11 +182,15 @@ def _search_course_group(
     for sec in filtered_by_course.get(course_list[index], []):
         if sec.occupied_slots.intersection(current_occupied):
             continue
+        next_days = current_days.union(d for d, _ in sec.occupied_slots)
+        if max_campus_days and len(next_days) > max_campus_days:
+            continue
         _search_course_group(
             course_list,
             index + 1,
             current_assignment + [sec],
             current_occupied.union(sec.occupied_slots),
+            next_days,
             filtered_by_course,
             max_campus_days,
             valid_combinations,
@@ -202,8 +206,6 @@ def _run_csp_backtrack(
     filtered_by_course: dict[str, list[SectionSlotData]],
     max_campus_days: int | None,
 ) -> list[dict[str, Any]]:
-    import time
-
     start_time = time.monotonic()
     valid_combinations: list[dict[str, Any]] = []
     states_count = [0]
@@ -213,6 +215,7 @@ def _run_csp_backtrack(
             group_set,
             0,
             [],
+            set(),
             set(),
             filtered_by_course,
             max_campus_days,
@@ -254,40 +257,65 @@ def _serialize_combinations(top_results: list[dict[str, Any]]) -> list[schemas.T
     return result_combinations
 
 
+def _normalize_course_list(raw_codes: list[str]) -> list[str]:
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for raw in raw_codes:
+        norm = " ".join((raw or "").split()).upper()
+        if norm and norm not in seen:
+            seen.add(norm)
+            normalized.append(norm)
+    return normalized
+
+
+def _empty_opt_response(term_id: str, message: str) -> schemas.ScheduleOptimizationResponse:
+    return schemas.ScheduleOptimizationResponse(
+        term_id=term_id,
+        success=False,
+        total_combinations_found=0,
+        combinations=[],
+        message=message,
+    )
+
+
 def solve_schedule_csp(
     db: Session,
     request: schemas.ScheduleOptimizationRequest,
 ) -> schemas.ScheduleOptimizationResponse:
-    all_codes = list(set([c.upper() for c in request.target_courses] + [e.upper() for e in request.candidate_electives]))
+    required_course_keys = _normalize_course_list(request.target_courses)
+    required_set = set(required_course_keys)
+    elective_pool = [c for c in _normalize_course_list(request.candidate_electives) if c not in required_set]
+
+    if not required_course_keys and request.num_electives_needed == 0:
+        return _empty_opt_response(request.term_id, "At least one required course or elective must be specified.")
+
+    all_codes = required_course_keys + elective_pool
     sections_by_course = fetch_course_sections(db, request.term_id, all_codes)
 
-    missing_required = [
-        c for c in request.target_courses if c.upper() not in sections_by_course or not sections_by_course[c.upper()]
-    ]
+    missing_required = [c for c in required_course_keys if not sections_by_course.get(c)]
     if missing_required:
-        return schemas.ScheduleOptimizationResponse(
-            term_id=request.term_id,
-            success=False,
-            total_combinations_found=0,
-            combinations=[],
-            message=f"Courses not offered in term {request.term_id}: {', '.join(missing_required)}",
+        return _empty_opt_response(
+            request.term_id, f"Courses not offered in term {request.term_id}: {', '.join(missing_required)}"
         )
 
     filtered_by_course = _filter_sections_by_constraints(sections_by_course, request)
-    pruned_required = [c for c in request.target_courses if not filtered_by_course.get(c.upper())]
+    pruned_required = [c for c in required_course_keys if not filtered_by_course.get(c)]
     if pruned_required:
-        return schemas.ScheduleOptimizationResponse(
-            term_id=request.term_id,
-            success=False,
-            total_combinations_found=0,
-            combinations=[],
-            message=f"No sections available for {', '.join(pruned_required)} matching your hour and day constraints.",
+        return _empty_opt_response(
+            request.term_id,
+            f"No sections available for {', '.join(pruned_required)} matching your hour and day constraints.",
         )
 
-    required_course_keys = [c.upper() for c in request.target_courses]
-    elective_course_keys = [e.upper() for e in request.candidate_electives if filtered_by_course.get(e.upper())]
-    num_electives = min(request.num_electives_needed, len(elective_course_keys))
-    candidate_group_sets = _build_candidate_groups(required_course_keys, elective_course_keys, num_electives)
+    elective_course_keys = [e for e in elective_pool if filtered_by_course.get(e)]
+    if request.num_electives_needed > len(elective_course_keys):
+        return _empty_opt_response(
+            request.term_id,
+            f"Requested {request.num_electives_needed} elective(s), but only {len(elective_course_keys)} candidate(s) match constraints.",
+        )
+
+    candidate_group_sets = _build_candidate_groups(
+        required_course_keys, elective_course_keys, request.num_electives_needed
+    )
 
     valid_combinations = _run_csp_backtrack(candidate_group_sets, filtered_by_course, request.max_campus_days)
     valid_combinations.sort(

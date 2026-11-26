@@ -83,7 +83,7 @@ def test_instructor_turtle_content_negotiation(client: TestClient):
     assert response.status_code == 200
     assert "text/turtle" in response.headers.get("content-type", "")
     assert "@prefix schema:" in response.text
-    assert "boun:instructor/1 a schema:Person" in response.text
+    assert "/id/instructor/1> a schema:Person" in response.text
     assert 'schema:name "Albert Long"' in response.text
 
 def test_departments_turtle_content_negotiation(client: TestClient):
@@ -92,7 +92,7 @@ def test_departments_turtle_content_negotiation(client: TestClient):
     assert response.status_code == 200
     assert "text/turtle" in response.headers.get("content-type", "")
     assert "@prefix aiiso:" in response.text
-    assert "boun:department/CMPE a aiiso:Department" in response.text
+    assert "/id/department/CMPE> a aiiso:Department" in response.text
     assert 'schema:alternateName "CMPE"' in response.text
 
 def test_course_history_turtle_content_negotiation(client: TestClient):
@@ -102,7 +102,7 @@ def test_course_history_turtle_content_negotiation(client: TestClient):
         assert response.status_code == 200
         assert "text/turtle" in response.headers.get("content-type", "")
         assert "@prefix schema:" in response.text
-        assert "boun:course/CMPE150 a schema:Course" in response.text
+        assert "/id/course/CMPE150> a schema:Course" in response.text
         assert 'schema:courseCode "CMPE 150"' in response.text
 
 def test_void_dataset_description_endpoint(client: TestClient):

@@ -27,7 +27,7 @@ def wait_for_postgres(timeout: int = 120):
     start_time = time.time()
     while True:
         try:
-            conn = psycopg2.connect(db_url)
+            conn = psycopg2.connect(db_url, connect_timeout=5)
             conn.close()
             print("PostgreSQL is ready!")
             break
@@ -43,7 +43,7 @@ def wait_for_meilisearch(timeout: int = 120):
     if not meili_key:
         raise RuntimeError("MEILI_MASTER_KEY must be set.")
     print(f"Waiting for Meilisearch to be ready on: {_sanitize_url(meili_url)}...")
-    client = meilisearch.Client(meili_url, meili_key)
+    client = meilisearch.Client(meili_url, meili_key, timeout=5)
     start_time = time.time()
     while True:
         try:
@@ -62,7 +62,7 @@ def wait_for_meilisearch(timeout: int = 120):
 def wait_for_redis(timeout: int = 120):
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
     print(f"Waiting for Redis to be ready on: {_sanitize_url(redis_url)}...")
-    client = redis.from_url(redis_url)
+    client = redis.from_url(redis_url, socket_timeout=5, socket_connect_timeout=5)
     start_time = time.time()
     while True:
         try:

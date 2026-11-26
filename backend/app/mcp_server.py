@@ -1,7 +1,6 @@
 import json
 import logging
 import sys
-from contextlib import suppress
 from typing import Any
 
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -121,26 +120,35 @@ TOOLS_DEFINITIONS = [
     }
 ]
 
+def _escape_sql_wildcards(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def execute_tool(name: str, args: dict[str, Any], db: Session) -> dict[str, Any]:
+    if not isinstance(args, dict):
+        raise ValueError("Tool arguments must be a JSON object")
+
     if name == "boun_search_courses":
-        query_str = args.get("query", "").strip()
+        query_str = str(args.get("query") or "").strip()
         term = args.get("term")
         dept = args.get("dept")
-        limit = min(int(args.get("limit", 10)), 50)
+        limit = max(1, min(int(args.get("limit", 10)), 50))
 
         q = db.query(models.Course).options(
             joinedload(models.Course.instructor),
             selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
         ).join(models.Course.instructor, isouter=True)
         if term:
-            q = q.filter(models.Course.term_id == term)
+            q = q.filter(models.Course.term_id == str(term).strip())
         if dept:
-            q = q.filter(models.Course.dept_kisaadi == dept.upper())
+            q = q.filter(models.Course.dept_kisaadi == str(dept).strip().upper())
         if query_str:
+            escaped = _escape_sql_wildcards(query_str)
+            pattern = f"%{escaped}%"
             q = q.filter(
-                (models.Course.course_code.ilike(f"%{query_str}%")) |
-                (models.Course.title.ilike(f"%{query_str}%")) |
-                (models.Instructor.full_name.ilike(f"%{query_str}%"))
+                (models.Course.course_code.ilike(pattern, escape="\\")) |
+                (models.Course.title.ilike(pattern, escape="\\")) |
+                (models.Instructor.full_name.ilike(pattern, escape="\\"))
             )
 
         courses = q.order_by(models.Course.term_id.desc(), models.Course.course_code.asc()).limit(limit).all()
@@ -162,13 +170,14 @@ def execute_tool(name: str, args: dict[str, Any], db: Session) -> dict[str, Any]
         }
 
     if name == "boun_get_course_history":
-        course_code = args.get("course_code", "").strip()
+        course_code = str(args.get("course_code") or "").strip()
         clean_code = " ".join(course_code.split()).upper()
+        escaped_code = _escape_sql_wildcards(clean_code)
         courses = db.query(models.Course).options(
             joinedload(models.Course.instructor),
             selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
         ).filter(
-            models.Course.course_code.ilike(clean_code)
+            models.Course.course_code.ilike(escaped_code, escape="\\")
         ).order_by(models.Course.term_id.desc()).limit(100).all()
 
         return {
@@ -187,15 +196,16 @@ def execute_tool(name: str, args: dict[str, Any], db: Session) -> dict[str, Any]
         }
 
     if name == "boun_get_course_quota":
-        course_code = args.get("course_code", "").strip()
+        course_code = str(args.get("course_code") or "").strip()
         term = args.get("term")
         clean_code = " ".join(course_code.split()).upper()
+        escaped_code = _escape_sql_wildcards(clean_code)
 
         q = db.query(models.QuotaSnapshot).filter(
-            models.QuotaSnapshot.course_code.ilike(clean_code)
+            models.QuotaSnapshot.course_code.ilike(escaped_code, escape="\\")
         )
         if term:
-            q = q.filter(models.QuotaSnapshot.term_id == term)
+            q = q.filter(models.QuotaSnapshot.term_id == str(term).strip())
         snapshots = q.order_by(models.QuotaSnapshot.captured_at.desc()).limit(50).all()
 
         return {
@@ -234,10 +244,11 @@ def execute_tool(name: str, args: dict[str, Any], db: Session) -> dict[str, Any]
 
 
 def _execute_mcp_tool_call(msg_id: Any, params: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(params, dict):
+        params = {}
     tool_name = params.get("name")
     tool_args = params.get("arguments", {})
-    db_gen = database.get_db()
-    db = next(db_gen)
+    db = database.SessionLocal()
     try:
         tool_res = execute_tool(tool_name, tool_args, db)
         result = {
@@ -245,17 +256,19 @@ def _execute_mcp_tool_call(msg_id: Any, params: dict[str, Any]) -> dict[str, Any
             "isError": False,
         }
     except Exception as ex:
+        db.rollback()
         result = {
             "content": [{"type": "text", "text": f"Error executing {tool_name}: {ex!s}"}],
             "isError": True,
         }
     finally:
-        with suppress(StopIteration):
-            next(db_gen)
+        db.close()
     return {"jsonrpc": "2.0", "id": msg_id, "result": result}
 
 
 def _dispatch_mcp_message(msg: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(msg, dict):
+        return None
     msg_id = msg.get("id")
     method = msg.get("method")
     params = msg.get("params", {})
@@ -288,6 +301,9 @@ def run_stdio_mcp_server():
             msg = json.loads(line)
         except Exception as e:
             logger.error(f"Invalid JSON: {e}")
+            continue
+        if not isinstance(msg, dict):
+            logger.warning("Ignoring non-object JSON-RPC frame")
             continue
 
         resp = _dispatch_mcp_message(msg)

@@ -125,10 +125,12 @@ const PREFIX_CAMPUS_RULES: ReadonlyArray<{
   prefixes: readonly string[];
   excluded?: readonly string[];
 }> = [
+  { campus: "Kandilli", labelPrefix: "Kandilli Building", prefixes: ["BME", "KOERI", "KAND"] },
+  { campus: "Kilyos", labelPrefix: "Kilyos Building", prefixes: ["KLY", "KİL", "KIL"] },
   { campus: "Güney", labelPrefix: "Hamlin Hall", prefixes: ["HH", "HAML", "HÜL", "HUL"] },
   { campus: "Hisar", labelPrefix: "Hisar Building", prefixes: ["HK", "HB", "HC", "HA", "HD", "HİS", "HIS"] },
-  { campus: "Kuzey", labelPrefix: "Kuzey Building", prefixes: ["EF", "NH", "BM", "ETA", "VY", "K"], excluded: ["KAND", "KİL", "KIL"] },
-  { campus: "Güney", labelPrefix: "Güney Building", prefixes: ["M", "T", "JF", "İB", "IB", "NB"] }
+  { campus: "Kuzey", labelPrefix: "Kuzey Building", prefixes: ["EF", "NH", "BM", "ETA", "VY", "K"], excluded: ["BME", "KAND", "KOERI", "KLY", "KİL", "KIL"] },
+  { campus: "Güney", labelPrefix: "Güney Building", prefixes: ["M", "T", "JF", "İB", "IB", "NB"], excluded: ["MBG"] }
 ];
 
 function inferCampusFromBuildingName(buildingClean: string): string {
@@ -155,7 +157,10 @@ export function resolveRoomLocation(roomName?: string | null, explicitBuilding?:
   const upper = clean.toUpperCase();
 
   if (!clean || PLACEHOLDER_MARKERS.has(upper)) {
-    return { building: bClean || "Unassigned", campus: "Other" };
+    return {
+      building: bClean || "Unassigned",
+      campus: bClean ? inferCampusFromBuildingName(bClean) : "Other"
+    };
   }
   if (VIRTUAL_KEYWORDS.some((kw) => upper.includes(kw))) {
     return { building: "Online / Remote", campus: "Virtual" };

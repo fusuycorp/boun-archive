@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import logging
@@ -204,7 +205,7 @@ def _init_meilisearch_on_boot() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
-    redis = aioredis.from_url(redis_url)
+    redis = aioredis.from_url(redis_url, socket_timeout=5, socket_connect_timeout=5)
     FastAPICache.init(
         RedisBackend(redis),
         prefix="fastapi-cache",
@@ -213,11 +214,11 @@ async def lifespan(app: FastAPI):
     )
 
     try:
-        ensure_schema_columns(database.engine)
+        await asyncio.to_thread(ensure_schema_columns, database.engine)
     except Exception as e:
         logger.warning("Schema column check skipped on startup: %s", e)
 
-    _init_meilisearch_on_boot()
+    await asyncio.to_thread(_init_meilisearch_on_boot)
 
     # Start background scraper sync on boot only if explicitly enabled (sync_worker handles daemon sync in cluster)
     if os.getenv("ENABLE_BOOT_SYNC", "").lower() in ("true", "1", "yes"):
@@ -290,9 +291,13 @@ app.add_middleware(
 MEILI_MASTER_KEY = os.getenv("MEILI_MASTER_KEY") or "boun_meili_master_key"
 
 MEILI_CLIENT = meilisearch.Client(
-    os.getenv("MEILI_URL", "http://localhost:7700"), 
-    MEILI_MASTER_KEY
+    os.getenv("MEILI_URL", "http://localhost:7700"),
+    MEILI_MASTER_KEY,
+    timeout=5,
 )
+
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://bountools.com").strip().rstrip("/") or "https://bountools.com"
+_MAX_WEBHOOK_BODY_BYTES = 2 * 1024 * 1024
 
 _DB_SORT_COLUMN_MAP = {
     "course_code": models.Course.course_code,
@@ -330,9 +335,16 @@ def _get_global_facets_from_db(db: Session) -> dict:
         for flag, count in syllabus_rows:
             key = "true" if flag else "false"
             has_syllabus_counts[key] = has_syllabus_counts.get(key, 0) + count
+        instructor_counts = dict(
+            db.query(models.Instructor.full_name, func.count(models.Course.id))
+            .join(models.Course, models.Course.instructor_id == models.Instructor.id)
+            .group_by(models.Instructor.full_name)
+            .all()
+        )
         return {
             "term": term_counts,
             "dept_code": dept_counts,
+            "instructor": instructor_counts,
             "delivery_method": delivery_counts,
             "has_syllabus": has_syllabus_counts,
         }
@@ -355,15 +367,15 @@ def _apply_db_search_query_filter(query: Any, q: str) -> tuple[Any, bool]:
     )
     query = query.filter(
         or_(
-            models.Course.course_code.ilike(pattern),
-            func.replace(models.Course.course_code, " ", "").ilike(pattern_nospace),
-            models.Course.title.ilike(pattern),
-            models.Course.dept_kisaadi.ilike(pattern),
-            func.replace(models.Course.dept_kisaadi, " ", "").ilike(pattern_nospace),
-            models.Instructor.full_name.ilike(pattern),
-            models.Department.bolum.ilike(pattern),
-            models.Course.syllabus_text.ilike(pattern),
-            models.CourseCatalog.canonical_text.ilike(pattern),
+            models.Course.course_code.ilike(pattern, escape="\\"),
+            func.replace(models.Course.course_code, " ", "").ilike(pattern_nospace, escape="\\"),
+            models.Course.title.ilike(pattern, escape="\\"),
+            models.Course.dept_kisaadi.ilike(pattern, escape="\\"),
+            func.replace(models.Course.dept_kisaadi, " ", "").ilike(pattern_nospace, escape="\\"),
+            models.Instructor.full_name.ilike(pattern, escape="\\"),
+            models.Department.bolum.ilike(pattern, escape="\\"),
+            models.Course.syllabus_text.ilike(pattern, escape="\\"),
+            models.CourseCatalog.canonical_text.ilike(pattern, escape="\\"),
         )
     )
     return query, True
@@ -378,10 +390,13 @@ def _apply_db_search_filters(
     has_instructor_join: bool,
 ) -> tuple[Any, bool]:
     if term:
-        query = query.filter(models.Course.term_id.in_(term))
+        clean_terms = [t.strip() for t in term if t and t.strip()]
+        if clean_terms:
+            query = query.filter(models.Course.term_id.in_(clean_terms))
     if dept:
         clean_depts = [d.strip().upper() for d in dept if d and d.strip()]
-        query = query.filter(func.upper(models.Course.dept_kisaadi).in_(clean_depts))
+        if clean_depts:
+            query = query.filter(func.upper(models.Course.dept_kisaadi).in_(clean_depts))
     if instructor:
         if not has_instructor_join:
             query = query.join(models.Instructor)
@@ -503,7 +518,7 @@ def _is_timestamp_stale(ts_str: str | None) -> bool:
             ts_dt = ts_dt.replace(tzinfo=UTC)
         return (datetime.now(UTC) - ts_dt).total_seconds() / 3600 > 24
     except Exception:
-        return False
+        return True
 
 
 @app.get("/v1/system/status", response_model=schemas.SystemStatusResponse)
@@ -607,6 +622,14 @@ def search_courses(
                 "facets": ["term", "dept_code", "instructor", "delivery_method", "has_syllabus"],
                 "sort": sort_list,
             },
+        )
+    except MeilisearchApiError as e:
+        if e.code == "index_not_found":
+            logger.warning("Meilisearch index 'courses' not ready during search; raising 503 to avoid caching empty state")
+            raise HTTPException(status_code=503, detail="Search index is initializing")
+        logger.warning("Meilisearch API error, falling back to PostgreSQL: %s", e)
+        return _search_courses_from_db(
+            db, q, term, dept, instructor, sort_by, sort_order, limit, offset, has_syllabus=has_syllabus
         )
     except Exception as e:
         logger.warning("Meilisearch search error, falling back to PostgreSQL: %s", e)
@@ -750,8 +773,10 @@ _BUILDING_CAMPUS_RULES = (
 _PREFIX_CAMPUS_RULES = (
     ("Güney", "Hamlin Hall", ("HH", "HAML", "HÜL", "HUL"), ()),
     ("Hisar", "Hisar Building", ("HK", "HB", "HC", "HA", "HD", "HİS", "HIS"), ()),
-    ("Kuzey", "Kuzey Building", ("EF", "NH", "BM", "ETA", "VY", "K"), ("KAND", "KİL", "KIL")),
-    ("Güney", "Güney Building", ("M", "T", "JF", "İB", "IB", "NB"), ()),
+    ("Kandilli", "Kandilli Building", ("BME", "KOERI", "KAND"), ()),
+    ("Kilyos", "Sarıtepe Building", ("KLY", "KİL", "KIL"), ()),
+    ("Kuzey", "Kuzey Building", ("EF", "NH", "BM", "ETA", "VY", "K"), ("BME", "KAND", "KOERI", "KLY", "KİL", "KIL")),
+    ("Güney", "Güney Building", ("M", "T", "JF", "İB", "IB", "NB"), ("MBG",)),
 )
 
 
@@ -774,18 +799,23 @@ def _infer_campus_from_prefix(upper: str, clean: str) -> tuple[str, str] | None:
 
 def resolve_room_location(room_name: str | None, building: str | None = None) -> tuple[str, str]:
     clean = (room_name or "").strip()
-    if not clean:
-        return ("Unassigned / Other", "Other")
+    b_clean = (building or "").strip()
+    if not clean or clean.upper() in ("TBA", "N/A"):
+        if b_clean:
+            return (b_clean, _infer_campus_from_building(b_clean))
+        return ("TBA" if clean.upper() == "TBA" else "Unassigned / Other", "Other")
     upper = clean.upper()
     if any(tag in upper for tag in _VIRTUAL_KEYWORDS):
         return ("Online / Remote", "Virtual")
 
-    b_clean = (building or "").strip()
     match = re.match(r"^([A-Za-zÇĞİÖŞÜçğıöşü]+)", clean)
     if match:
-        reg = ROOM_LOCATION_REGISTRY.get(match.group(1).upper())
-        if reg:
-            return (b_clean or reg[0], reg[1])
+        prefix = match.group(1).upper()
+        # Only match "TBA" to Anderson Hall when followed by room digits/block (e.g. "TBA 101"), never bare "TBA".
+        if prefix != "TBA" or any(ch.isdigit() for ch in clean):
+            reg = ROOM_LOCATION_REGISTRY.get(prefix)
+            if reg:
+                return (b_clean or reg[0], reg[1])
 
     if b_clean:
         return (b_clean, _infer_campus_from_building(b_clean))
@@ -795,13 +825,9 @@ def resolve_room_location(room_name: str | None, building: str | None = None) ->
         "Other",
     )
 
-def infer_building_from_room(room_name: str | None, building: str | None = None) -> str:
-    bldg, _ = resolve_room_location(room_name, building)
-    return bldg
-
 
 def _is_assigned_room(room_name: str | None) -> bool:
-    return bool(room_name and room_name.strip() not in ("", "N/A"))
+    return bool(room_name and room_name.strip().upper() not in ("", "N/A", "TBA"))
 
 
 def _resolve_existing_term_id(db: Session, term: str) -> str:
@@ -820,17 +846,33 @@ def _resolve_existing_term_id(db: Session, term: str) -> str:
     return term
 
 
+def _same_session_title(title_a: str | None, title_b: str | None) -> bool:
+    a = (title_a or "").strip().lower()
+    b = (title_b or "").strip().lower()
+    if not a or not b:
+        return True
+    return a == b
+
+
 def _forward_fill_day_slots(day_code: str, slots: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    slots.sort(key=lambda s: s["slot_hour"] if s["slot_hour"] is not None else 0)
+    slots.sort(key=lambda s: (s["slot_hour"] if s["slot_hour"] is not None else 0, (s.get("slot_title") or "").lower()))
     curr_room: str | None = None
     curr_bldg: str | None = None
     curr_hour: int | None = None
+    curr_title: str | None = None
     expanded: list[dict[str, Any]] = []
 
     for s in slots:
         hr = s["slot_hour"]
         r_name = s["room_name"]
-        is_contiguous = curr_room and hr is not None and curr_hour is not None and hr == curr_hour + 1
+        s_title = s.get("slot_title")
+        is_contiguous = (
+            curr_room
+            and hr is not None
+            and curr_hour is not None
+            and hr == curr_hour + 1
+            and _same_session_title(curr_title, s_title)
+        )
         if not _is_assigned_room(r_name) and is_contiguous:
             r_name = curr_room
             s["room_name"] = curr_room
@@ -838,9 +880,11 @@ def _forward_fill_day_slots(day_code: str, slots: list[dict[str, Any]]) -> list[
         elif _is_assigned_room(r_name):
             curr_room = r_name
             curr_bldg = s["building"]
-        else:
+            curr_title = s_title
+        elif curr_hour != hr:
             curr_room = None
             curr_bldg = None
+            curr_title = s_title
         curr_hour = hr
 
         if _is_assigned_room(r_name):
@@ -931,7 +975,7 @@ def get_dept_evolution(db: Session = Depends(database.get_db)):
 
 @app.get("/v1/analytics/macro/scheduling-heatmap")
 @cache(expire=86400)
-def get_heatmap(decade: int | None = Query(None), db: Session = Depends(database.get_db)):
+def get_heatmap(decade: int | None = Query(None, ge=1000, le=9999), db: Session = Depends(database.get_db)):
     return MacroEngine.get_scheduling_heatmap(db, decade)
 
 @app.get("/v1/courses/catalog/{course_code}", response_model=schemas.CourseCatalogResponse)
@@ -1026,6 +1070,44 @@ def get_instructor(instructor_id: int, request: Request = None, db: Session = De
             )
     return schemas.Instructor.model_validate(instructor).model_dump()
 
+def _summarize_instructor_courses(rows: list[Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    summary: dict[str, dict[str, Any]] = {}
+    history: list[dict[str, Any]] = []
+    for term_id, course_code, section, title in rows:
+        code = " ".join((course_code or "").split())
+        sec = section.strip() if section else None
+        history.append({"term": term_id, "course_code": code, "section": sec, "title": title})
+        if not code:
+            continue
+        entry = summary.setdefault(
+            code,
+            {"course_code": code, "title": title or "", "sections": set(), "terms": set(), "latest_term": term_id or "", "count": 0},
+        )
+        if sec:
+            entry["sections"].add(sec)
+        if term_id:
+            entry["terms"].add(term_id)
+            if not entry["latest_term"] or term_id > entry["latest_term"]:
+                entry["latest_term"] = term_id
+                if title:
+                    entry["title"] = title
+        entry["count"] += 1
+
+    unique_courses = [
+        {
+            "course_code": v["course_code"],
+            "title": v["title"],
+            "sections": sorted(v["sections"]),
+            "terms_count": len(v["terms"]),
+            "latest_term": v["latest_term"],
+            "total_offerings": v["count"],
+        }
+        for v in sorted(summary.values(), key=lambda x: x["count"], reverse=True)
+    ]
+    history.sort(key=lambda x: (x["term"] or "", x["course_code"] or "", x["section"] or ""), reverse=True)
+    return unique_courses, history
+
+
 @app.get("/v1/analytics/instructor/{instructor_id}/legacy")
 @cache(expire=3600)
 def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get_db)):
@@ -1068,58 +1150,27 @@ def get_instructor_legacy(instructor_id: int, db: Session = Depends(database.get
         for row in preferred_slots_query
     ]
 
-    courses = db.query(models.Course).filter(models.Course.instructor_id == instructor_id).all()
-    total_semesters = len(set([c.term_id for c in courses]))
-
-    courses_summary = {}
-    for c in courses:
-        code = " ".join((c.course_code or "").split())
-        if not code:
-            continue
-        if code not in courses_summary:
-            courses_summary[code] = {
-                "course_code": code,
-                "title": c.title or "",
-                "sections": set(),
-                "terms": set(),
-                "latest_term": c.term_id or "",
-                "count": 0
-            }
-        if c.section:
-            courses_summary[code]["sections"].add(c.section.strip())
-        if c.term_id:
-            courses_summary[code]["terms"].add(c.term_id)
-            if not courses_summary[code]["latest_term"] or c.term_id > courses_summary[code]["latest_term"]:
-                courses_summary[code]["latest_term"] = c.term_id
-                if c.title:
-                    courses_summary[code]["title"] = c.title
-        courses_summary[code]["count"] += 1
-
-    unique_courses = [
-        {
-            "course_code": v["course_code"],
-            "title": v["title"],
-            "sections": sorted(list(v["sections"])),
-            "terms_count": len(v["terms"]),
-            "latest_term": v["latest_term"],
-            "total_offerings": v["count"]
-        }
-        for v in sorted(courses_summary.values(), key=lambda x: x["count"], reverse=True)
-    ]
+    course_rows = (
+        db.query(
+            models.Course.term_id,
+            models.Course.course_code,
+            models.Course.section,
+            models.Course.title,
+        )
+        .filter(models.Course.instructor_id == instructor_id)
+        .all()
+    )
+    total_semesters = len({r.term_id for r in course_rows})
+    unique_courses, history = _summarize_instructor_courses(course_rows)
 
     return {
         "instructor_name": instructor.full_name,
         "total_semesters_taught": total_semesters,
-        "total_courses_taught": len(courses),
+        "total_courses_taught": len(course_rows),
         "most_frequent_courses": most_frequent,
         "preferred_slots": slots_count,
         "courses_summary": unique_courses,
-        "history": sorted([{
-            "term": c.term_id,
-            "course_code": " ".join((c.course_code or "").split()),
-            "section": c.section.strip() if c.section else None,
-            "title": c.title
-        } for c in courses], key=lambda x: (x['term'] or '', x['course_code'] or '', x['section'] or ''), reverse=True)
+        "history": history,
     }
 
 @app.get("/v1/terms", response_model=list[schemas.Term])
@@ -1172,7 +1223,8 @@ def get_department_unique_courses(dept_code: str, db: Session = Depends(database
                 "title": title or "",
                 "terms": []
             }
-        unique_courses[code]["terms"].append(term_id)
+        if term_id and term_id not in unique_courses[code]["terms"]:
+            unique_courses[code]["terms"].append(term_id)
         
     return [unique_courses[code] for code in sorted(unique_courses.keys())]
 
@@ -1326,18 +1378,21 @@ def get_course_quota(
     clean_code = " ".join(course_code.strip().split())
     if not clean_code:
         return []
+    nospace_code = clean_code.replace(" ", "").upper()
+    code_match = or_(
+        func.upper(models.QuotaSnapshot.course_code) == clean_code.upper(),
+        func.upper(func.replace(models.QuotaSnapshot.course_code, " ", "")) == nospace_code,
+    )
 
-    target_term = term
+    target_term = _resolve_existing_term_id(db, term.strip()) if term and term.strip() else None
     if not target_term:
         latest_term = db.query(models.QuotaSnapshot.term_id).filter(
-            func.upper(models.QuotaSnapshot.course_code) == clean_code.upper()
+            code_match
         ).order_by(models.QuotaSnapshot.term_id.desc()).first()
         if latest_term:
             target_term = latest_term[0]
 
-    query = db.query(models.QuotaSnapshot).filter(
-        func.upper(models.QuotaSnapshot.course_code) == clean_code.upper()
-    )
+    query = db.query(models.QuotaSnapshot).filter(code_match)
     if target_term:
         query = query.filter(models.QuotaSnapshot.term_id == target_term)
 
@@ -1381,9 +1436,13 @@ def get_course_changes(
     clean_code = " ".join(course_code.strip().split())
     if not clean_code:
         return []
+    nospace_code = clean_code.replace(" ", "").upper()
 
     changes = db.query(models.CourseChange).filter(
-        func.upper(models.CourseChange.course_code) == clean_code.upper()
+        or_(
+            func.upper(models.CourseChange.course_code) == clean_code.upper(),
+            func.upper(func.replace(models.CourseChange.course_code, " ", "")) == nospace_code,
+        )
     ).order_by(
         models.CourseChange.timestamp.desc()
     ).limit(limit).all()
@@ -1393,20 +1452,20 @@ def get_course_changes(
 @app.get("/.well-known/void")
 @app.get("/v1/void.ttl")
 @cache(expire=86400)
-def get_void_dataset_description(request: Request):
-    base_url = str(request.base_url).rstrip("/")
+def get_void_dataset_description():
     return Response(
-        content=generate_void_description(base_url=base_url),
-        media_type="text/turtle; charset=utf-8"
+        content=generate_void_description(base_url=PUBLIC_BASE_URL),
+        media_type="text/turtle; charset=utf-8",
+        headers={"Vary": "Accept"},
     )
 
 @app.get("/v1/catalog.jsonld")
 @cache(expire=86400)
-def get_dcat_catalog(request: Request):
-    base_url = str(request.base_url).rstrip("/")
+def get_dcat_catalog():
     return JSONResponse(
-        content=generate_dcat_catalog_jsonld(base_url=base_url),
-        media_type="application/ld+json"
+        content=generate_dcat_catalog_jsonld(base_url=PUBLIC_BASE_URL),
+        media_type="application/ld+json",
+        headers={"Vary": "Accept"},
     )
 
 @app.post("/v1/optimizer/schedule", response_model=schemas.ScheduleOptimizationResponse)
@@ -1443,13 +1502,16 @@ async def handle_scraper_webhook(
     Real-time webhook ingestion endpoint for upstream boun-scrape events.
     Receives and processes HMAC-SHA256 signed delta change events and scrape completion summaries.
     """
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > _MAX_WEBHOOK_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Webhook payload exceeds 2 MiB limit")
+
     raw_body = await request.body()
+    if len(raw_body) > _MAX_WEBHOOK_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Webhook payload exceeds 2 MiB limit")
+
     signature = request.headers.get("x-boun-signature")
     secret = os.getenv("WEBHOOK_SECRET")
-    env = os.getenv("ENVIRONMENT", "").lower()
-    if env in ("production", "prod") and (not secret or not secret.strip()):
-        raise HTTPException(status_code=401, detail="Webhook secret not configured in production")
-
     if not verify_webhook_signature(raw_body, signature, secret):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
@@ -1467,11 +1529,12 @@ async def handle_scraper_webhook(
     # 1. Delta Changes Event
     if event_type == "courses.deltas" or (isinstance(payload, dict) and "deltas" in payload):
         deltas = _parse_webhook_deltas(payload)
-        touched_ids = apply_deltas_batch(
-            session=db,
-            deltas=deltas,
-            meili_index=meili_index,
-            dry_run=False,
+        touched_ids = await asyncio.to_thread(
+            apply_deltas_batch,
+            db,
+            deltas,
+            meili_index,
+            False,
         )
         await _clear_fastapi_cache_safely()
         return {
@@ -1484,7 +1547,7 @@ async def handle_scraper_webhook(
 
     # 2. Scrape Completion Summary Event
     if event_type == "scrape.summary" or (isinstance(payload, dict) and "run_id" in payload and "status" in payload):
-        record_scrape_summary(session=db, summary=payload, dry_run=False)
+        await asyncio.to_thread(record_scrape_summary, db, payload, False)
         if payload.get("changes_detected", 0) > 0:
             await _clear_fastapi_cache_safely()
         return {
@@ -1497,11 +1560,12 @@ async def handle_scraper_webhook(
 
     # 3. Direct Single Delta (fallback)
     if isinstance(payload, dict) and payload.get("change_type") and payload.get("course_code"):
-        touched_ids = apply_deltas_batch(
-            session=db,
-            deltas=[payload],
-            meili_index=meili_index,
-            dry_run=False,
+        touched_ids = await asyncio.to_thread(
+            apply_deltas_batch,
+            db,
+            [payload],
+            meili_index,
+            False,
         )
         await _clear_fastapi_cache_safely()
         return {
@@ -1537,7 +1601,6 @@ def get_sync_status(db: Session = Depends(database.get_db)):
     }
 
     scraper_url = os.getenv("SCRAPER_API_URL", "https://scraper.bountools.com/api/v1")
-    webhook_secret_set = bool(os.getenv("WEBHOOK_SECRET"))
 
     return {
         "status": "healthy",
@@ -1545,7 +1608,6 @@ def get_sync_status(db: Session = Depends(database.get_db)):
         "timestamp": datetime.now(UTC).isoformat(),
         "upstream_scraper": {
             "url": scraper_url,
-            "webhook_secret_configured": webhook_secret_set,
         },
         "database": {
             "total_courses": total_courses,

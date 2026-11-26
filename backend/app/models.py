@@ -34,7 +34,6 @@ class Room(Base):
 class Course(Base):
     __tablename__ = "courses"
     __table_args__ = (
-        Index("idx_courses_lookup", "term_id", "course_code", "section"),
         Index("idx_courses_term_dept", "term_id", "dept_kisaadi"),
         UniqueConstraint("term_id", "course_code", "section", name="uq_courses_term_code_section"),
     )

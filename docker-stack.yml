@@ -158,10 +158,13 @@ services:
   backend:
     image: ${BACKEND_IMAGE:-registry.bogazici.app/budok/boun-archive-backend:latest}
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://boun_user:boun_password@db:5432/boun_archive}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       MEILI_URL: ${MEILI_URL:-http://meilisearch:7700}
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?MEILI_MASTER_KEY must be set}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:?WEBHOOK_SECRET must be set}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://bountools.com}
       PORT: ${BACKEND_PORT:-8000}
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
@@ -197,7 +200,7 @@ services:
     image: ${FRONTEND_IMAGE:-registry.bogazici.app/budok/boun-archive-frontend:latest}
     environment:
       PUBLIC_API_URL: ${PUBLIC_API_URL}
-      PORT: ${FRONTEND_PORT}
+      PORT: ${FRONTEND_PORT:-3000}
     networks:
       - frontend_net
     healthcheck:

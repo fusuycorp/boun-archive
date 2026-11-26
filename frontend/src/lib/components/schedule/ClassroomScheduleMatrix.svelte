@@ -32,6 +32,7 @@
   let isDeptOpen = $state(false);
   let scheduleData = $state<GhostScheduleItem[]>([]);
   let loading = $state(false);
+  let scheduleAbortController: AbortController | null = null;
 
   const days = ["M", "T", "W", "Th", "F", "St", "Su"];
   const dayLabels: Record<string, string> = {
@@ -269,27 +270,44 @@
 
   async function fetchSchedule() {
     if (!selectedTerm) return;
+    if (scheduleAbortController) scheduleAbortController.abort();
+    const controller = new AbortController();
+    scheduleAbortController = controller;
     loading = true;
     try {
       const params = new URLSearchParams();
       selectedDepts.forEach(d => params.append("dept", d));
       // Load term schedule so campus selections toggle instantly in-memory without destructive loss
-      const res = await fetch(`${API_BASE}/v1/analytics/ghost-schedule/${selectedTerm}?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/v1/analytics/ghost-schedule/${selectedTerm}?${params.toString()}`, {
+        signal: controller.signal
+      });
+      if (scheduleAbortController !== controller) return;
       if (res.ok) {
         scheduleData = await res.json();
       }
     } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
       console.error("Failed to fetch classroom schedule", e);
     } finally {
-      loading = false;
+      if (scheduleAbortController === controller && !controller.signal.aborted) {
+        loading = false;
+      }
     }
   }
 
   function handleExport() {
     if (scheduleData.length === 0) return;
+
+    const fullWeekSlotMap = new Map<string, GhostScheduleItem[]>();
+    for (const s of scheduleData) {
+      const key = `${s.day_code}|${s.room_name}|${s.slot_hour}`;
+      const list = fullWeekSlotMap.get(key);
+      if (list) list.push(s);
+      else fullWeekSlotMap.set(key, [s]);
+    }
     
     const exportData = scheduleData.map(s => {
-      const slots = slotMap.get(`${s.room_name}|${s.slot_hour}`);
+      const slots = fullWeekSlotMap.get(`${s.day_code}|${s.room_name}|${s.slot_hour}`);
       const isConflict = slots && slots.length > 1;
       const loc = roomLocationMap.get(s.room_name) || resolveRoomLocation(s.room_name, s.building);
       return {

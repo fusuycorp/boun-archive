@@ -50,8 +50,15 @@ def test_verify_webhook_signature():
     assert verify_webhook_signature(payload, f"sha256={valid_sig}", secret) is True
     assert verify_webhook_signature(payload, "invalid_signature", secret) is False
     assert verify_webhook_signature(payload, None, secret) is False
-    # If secret is unset, signature validation is skipped
-    assert verify_webhook_signature(payload, None, None) is True
+    # Fail-closed by default when secret is unset
+    assert verify_webhook_signature(payload, None, None) is False
+    # Explicit local opt-in only
+    import os
+    os.environ["ALLOW_INSECURE_WEBHOOK"] = "1"
+    try:
+        assert verify_webhook_signature(payload, None, None) is True
+    finally:
+        os.environ.pop("ALLOW_INSECURE_WEBHOOK", None)
 
 
 def test_webhook_unauthorized_when_secret_set(client, monkeypatch):
@@ -136,7 +143,8 @@ def test_webhook_deltas_ingestion(client, test_db, monkeypatch):
 
 
 def test_webhook_scrape_summary(client, test_db, monkeypatch):
-    monkeypatch.delenv("WEBHOOK_SECRET", raising=False)
+    secret = "summary_secret_key"
+    monkeypatch.setenv("WEBHOOK_SECRET", secret)
 
     summary_payload = {
         "event": "scrape.summary",
@@ -150,9 +158,13 @@ def test_webhook_scrape_summary(client, test_db, monkeypatch):
         "completed_at": "2026-09-23T18:05:00Z"
     }
 
+    raw_bytes = json.dumps(summary_payload).encode("utf-8")
+    sig = hmac.new(secret.encode(), raw_bytes, hashlib.sha256).hexdigest()
+
     response = client.post(
         "/v1/webhooks/scraper",
-        json=summary_payload
+        content=raw_bytes,
+        headers={"Content-Type": "application/json", "X-Boun-Signature": sig},
     )
     assert response.status_code == 200
     assert response.json()["status"] == "ok"

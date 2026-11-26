@@ -29,25 +29,34 @@
     | { status: "ready"; label: string; data: CourseSyllabusDetail }
     | { status: "error"; label: string; message: string };
 
+  type CourseDataOverride = {
+    code: string;
+    history: CourseHistoryItem[];
+    quotas: QuotaSnapshot[];
+    catalog: CourseCatalogInfo | null;
+    error: string | null;
+  };
+
   let { data }: { data: PageData } = $props();
 
   let courseCode = $derived(data.courseCode || page.params.code || "");
-  let history = $state<CourseHistoryItem[]>([]);
-  let quotas = $state<QuotaSnapshot[]>([]);
-  let catalog = $state<CourseCatalogInfo | null>(null);
-  let catalogLang = $state<"en" | "tr">("en");
+  let retryOverride = $state<CourseDataOverride | null>(null);
+  let langOverride = $state<{ code: string; lang: "en" | "tr" } | null>(null);
   let syllabusModal = $state<SyllabusModalState>({ status: "closed" });
   let syllabusDialog = $state<HTMLDialogElement | null>(null);
+  let syllabusAbortController: AbortController | null = null;
   let loading = $state(false);
-  let error = $state<string | null>(null);
 
-  $effect(() => {
-    history = data.history ?? [];
-    quotas = data.quotas ?? [];
-    catalog = data.catalog ?? null;
-    catalogLang = data.catalog?.en_text ? "en" : data.catalog?.tr_text ? "tr" : "en";
-    error = data.error ?? null;
-  });
+  const activeOverride = $derived(retryOverride && retryOverride.code === courseCode ? retryOverride : null);
+  const history = $derived(activeOverride ? activeOverride.history : (data.history ?? []));
+  const quotas = $derived(activeOverride ? activeOverride.quotas : (data.quotas ?? []));
+  const catalog = $derived(activeOverride ? activeOverride.catalog : (data.catalog ?? null));
+  const error = $derived(activeOverride ? activeOverride.error : (data.error ?? null));
+  const catalogLang = $derived<"en" | "tr">(
+    langOverride && langOverride.code === courseCode
+      ? langOverride.lang
+      : (catalog?.en_text ? "en" : catalog?.tr_text ? "tr" : "en")
+  );
 
   $effect(() => {
     if (!syllabusDialog) return;
@@ -68,17 +77,34 @@
     }
   }
 
+  function closeSyllabusModal() {
+    if (syllabusAbortController) {
+      syllabusAbortController.abort();
+      syllabusAbortController = null;
+    }
+    syllabusModal = { status: "closed" };
+  }
+
   async function openSyllabusModal(section: CourseHistoryItem) {
+    if (syllabusAbortController) syllabusAbortController.abort();
+    const controller = new AbortController();
+    syllabusAbortController = controller;
     const label = `${courseCode}.${section.section || "01"} (${section.term_id})`;
     syllabusModal = { status: "loading", label };
     try {
-      const res = await fetch(`${API_BASE}/v1/courses/${section.id}/syllabus-text`);
+      const res = await fetch(`${API_BASE}/v1/courses/${section.id}/syllabus-text`, {
+        signal: controller.signal
+      });
+      if (syllabusAbortController !== controller) return;
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
       const detail: CourseSyllabusDetail = await res.json();
+      if (syllabusAbortController !== controller) return;
       syllabusModal = { status: "ready", label, data: detail };
     } catch (e) {
+      if (syllabusAbortController !== controller) return;
+      if (e instanceof Error && e.name === "AbortError") return;
       syllabusModal = {
         status: "error",
         label,
@@ -92,7 +118,6 @@
     if (!code) return;
     
     loading = true;
-    error = null;
     try {
       const encodedCode = encodeURIComponent(code.trim());
       
@@ -102,28 +127,35 @@
         fetch(`${API_BASE}/v1/courses/catalog/${encodedCode}`)
       ]);
 
+      let nextHistory: CourseHistoryItem[] = [];
       if (histRes.status === "fulfilled" && histRes.value.ok) {
-        history = await histRes.value.json();
+        nextHistory = await histRes.value.json();
       } else if (histRes.status === "fulfilled" && histRes.value.status === 404) {
         throw new Error("Course history not found");
       } else {
         throw new Error("Failed to fetch course history");
       }
 
-      if (quotaRes.status === "fulfilled" && quotaRes.value.ok) {
-        quotas = await quotaRes.value.json();
-      } else {
-        quotas = [];
-      }
+      const nextQuotas: QuotaSnapshot[] =
+        quotaRes.status === "fulfilled" && quotaRes.value.ok ? await quotaRes.value.json() : [];
+      const nextCatalog: CourseCatalogInfo | null =
+        catalogRes.status === "fulfilled" && catalogRes.value.ok ? await catalogRes.value.json() : null;
 
-      if (catalogRes.status === "fulfilled" && catalogRes.value.ok) {
-        catalog = await catalogRes.value.json();
-      } else {
-        catalog = null;
-      }
-
+      retryOverride = {
+        code,
+        history: nextHistory,
+        quotas: nextQuotas,
+        catalog: nextCatalog,
+        error: null
+      };
     } catch (e) {
-      error = e instanceof Error ? e.message : "An unexpected error occurred";
+      retryOverride = {
+        code,
+        history: [],
+        quotas: [],
+        catalog: null,
+        error: e instanceof Error ? e.message : "An unexpected error occurred"
+      };
     } finally {
       loading = false;
     }
@@ -255,7 +287,7 @@
                 <button
                   type="button"
                   disabled={!catalog?.en_text}
-                  onclick={() => (catalogLang = "en")}
+                  onclick={() => (langOverride = { code: courseCode, lang: "en" })}
                   class="px-2.5 py-1 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed
                   {catalogLang === 'en' ? 'bg-[#002d72] text-white dark:bg-[#8cc8ea] dark:text-[#0a0e1a]' : 'text-[#525f7f] dark:text-slate-400 hover:text-[#161e2e] dark:hover:text-slate-200'}"
                 >
@@ -264,7 +296,7 @@
                 <button
                   type="button"
                   disabled={!catalog?.tr_text}
-                  onclick={() => (catalogLang = "tr")}
+                  onclick={() => (langOverride = { code: courseCode, lang: "tr" })}
                   class="px-2.5 py-1 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed
                   {catalogLang === 'tr' ? 'bg-[#002d72] text-white dark:bg-[#8cc8ea] dark:text-[#0a0e1a]' : 'text-[#525f7f] dark:text-slate-400 hover:text-[#161e2e] dark:hover:text-slate-200'}"
                 >
@@ -467,7 +499,7 @@
 
   <dialog
     bind:this={syllabusDialog}
-    onclose={() => (syllabusModal = { status: "closed" })}
+    onclose={closeSyllabusModal}
     aria-labelledby="syllabus-dialog-title"
     class="open:flex flex-col m-auto p-0 w-[min(92vw,48rem)] max-h-[85dvh] rounded-2xl bg-white dark:bg-[#121827] border border-[#e5e0d8] dark:border-[#1e293b] shadow-2xl text-inherit backdrop:bg-black/60 backdrop:backdrop-blur-xs"
   >
@@ -480,7 +512,7 @@
       </div>
       <button
         type="button"
-        onclick={() => (syllabusModal = { status: "closed" })}
+        onclick={closeSyllabusModal}
         class="p-1.5 text-[#525f7f] hover:text-[#002d72] dark:hover:text-slate-200 rounded-lg cursor-pointer"
         aria-label="Close syllabus dialog"
       >

@@ -10,22 +10,34 @@
   let query = $state("");
   let instructors = $state<Instructor[]>([]);
   let loading = $state(false);
+  let searchAbortController: AbortController | null = null;
 
   async function searchInstructors() {
+    if (searchAbortController) searchAbortController.abort();
     if (query.length < 2) {
+      searchAbortController = null;
       instructors = [];
+      loading = false;
       return;
     }
+    const controller = new AbortController();
+    searchAbortController = controller;
     loading = true;
     try {
-      const res = await fetch(`${API_BASE}/v1/instructors?q=${encodeURIComponent(query)}`);
+      const res = await fetch(`${API_BASE}/v1/instructors?q=${encodeURIComponent(query)}`, {
+        signal: controller.signal
+      });
+      if (searchAbortController !== controller) return;
       if (res.ok) {
         instructors = await res.json();
       }
     } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
       console.error("Failed to search instructors", e);
     } finally {
-      loading = false;
+      if (searchAbortController === controller && !controller.signal.aborted) {
+        loading = false;
+      }
     }
   }
 

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -59,17 +60,14 @@ def normalize_section(section: Any) -> str | None:
 def verify_webhook_signature(raw_body: bytes, signature: str | None, secret: str | None) -> bool:
     """Verify HMAC-SHA256 signature from boun-scrape WebhookDispatcher.
 
-    Returns True if:
-      - secret is None or empty (signature check disabled only for local non-production development)
-      - signature matches the computed HMAC-SHA256 hex digest using constant-time comparison
+    Fails closed by default when `secret` is unset unless `ALLOW_INSECURE_WEBHOOK=1`
+    is explicitly set for local development/testing.
     """
     if not secret or not secret.strip():
-        env = os.getenv("ENVIRONMENT", "").lower()
-        return env not in ("production", "prod")
+        return os.getenv("ALLOW_INSECURE_WEBHOOK", "").strip().lower() in ("1", "true", "yes")
     if not signature:
         return False
     computed = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-    # Support optional 'sha256=' prefix if provided
     clean_sig = signature.removeprefix("sha256=").strip()
     return hmac.compare_digest(computed.lower(), clean_sig.lower())
 
@@ -237,6 +235,46 @@ def ensure_room(
     return room.id
 
 
+_DAY_SORT_ORDER: dict[str, int] = {
+    "M": 0,
+    "T": 1,
+    "W": 2,
+    "Th": 3,
+    "F": 4,
+    "St": 5,
+    "Su": 6,
+}
+
+
+def _normalize_day_code(day_raw: str) -> str | None:
+    if day_raw in VALID_DAYS:
+        return day_raw
+    cap = day_raw.capitalize()
+    return cap if cap in VALID_DAYS else None
+
+
+def _parse_raw_slots(slots_payload: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate and normalize raw slot dicts before forward-fill."""
+    parsed_slots: list[dict[str, Any]] = []
+    for s in slots_payload:
+        slot_hour = clean_int(s.get("hour") or s.get("slot_hour"))
+        if slot_hour is None or slot_hour < 1 or slot_hour > 14:
+            continue
+        day_raw = (s.get("day") or s.get("day_code") or "").strip()
+        day_code = _normalize_day_code(day_raw) if day_raw else None
+        if not day_code:
+            continue
+        room_name = (s.get("room") or s.get("room_name") or "").strip()
+        clean_room = room_name if room_name and room_name.upper() != "N/A" else None
+        parsed_slots.append({
+            "day_code": day_code,
+            "slot_hour": slot_hour,
+            "slot_title": s.get("slot_title"),
+            "room_name": clean_room,
+        })
+    return parsed_slots
+
+
 def _sync_course_slots(
     session: Session,
     course_id: int,
@@ -244,61 +282,69 @@ def _sync_course_slots(
     room_cache: dict[str, int],
     dry_run: bool = False
 ) -> None:
-    """Sync course slots, forward-filling rooms across contiguous hours."""
+    """Sync course slots, forward-filling rooms strictly within contiguous same-day, same-session hours."""
     if slots_payload is None or dry_run:
         return
 
     session.query(models.CourseSlot).filter(models.CourseSlot.course_id == course_id).delete(synchronize_session="fetch")
+    parsed_slots = _parse_raw_slots(slots_payload)
 
-    parsed_slots: list[dict[str, Any]] = []
-    for s in slots_payload:
-        slot_hour = clean_int(s.get("hour") or s.get("slot_hour"))
-        if slot_hour is None or slot_hour < 1 or slot_hour > 14:
-            continue
-        day_raw = (s.get("day") or s.get("day_code") or "").strip()
-        if not day_raw:
-            continue
-        day_code = day_raw if day_raw in VALID_DAYS else (day_raw.capitalize() if day_raw.capitalize() in VALID_DAYS else "M")
-        room_name = (s.get("room") or s.get("room_name") or "").strip()
-        parsed_slots.append({
-            "day_code": day_code,
-            "slot_hour": slot_hour,
-            "slot_title": s.get("slot_title"),
-            "room_name": room_name if room_name and room_name != "N/A" else None
-        })
-
-    # Forward-fill contiguous hours within the same session/day
-    day_groups: dict[str, list[dict[str, Any]]] = {}
+    # Forward-fill contiguous hours strictly within the same (day_code, normalized slot_title) block
+    block_groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for ps in parsed_slots:
-        day_groups.setdefault(ps["day_code"], []).append(ps)
+        title_key = (ps["slot_title"] or "").strip().lower()
+        block_groups.setdefault((ps["day_code"], title_key), []).append(ps)
 
-    for day_code, day_slots in day_groups.items():
+    for day_slots in block_groups.values():
         day_slots.sort(key=lambda x: x["slot_hour"])
-        curr_room = None
-        curr_hour = None
+        curr_room: str | None = None
+        curr_hour: int | None = None
         for ps in day_slots:
             hr = ps["slot_hour"]
             r_name = ps["room_name"]
             if not r_name and curr_room and curr_hour is not None and hr == curr_hour + 1:
-                r_name = curr_room
                 ps["room_name"] = curr_room
-            elif r_name:
+            elif r_name and r_name.upper() != "TBA":
                 curr_room = r_name
-            else:
+            elif curr_hour != hr:
                 curr_room = None
             curr_hour = hr
 
             room_id = ensure_room(session, ps["room_name"], room_cache) if ps["room_name"] else None
-            slot = models.CourseSlot(
-                course_id=course_id,
-                day_code=ps["day_code"],
-                slot_hour=ps["slot_hour"],
-                slot_title=ps["slot_title"],
-                room_id=room_id
+            session.add(
+                models.CourseSlot(
+                    course_id=course_id,
+                    day_code=ps["day_code"],
+                    slot_hour=ps["slot_hour"],
+                    slot_title=ps["slot_title"],
+                    room_id=room_id,
+                )
             )
-            session.add(slot)
 
     session.flush()
+
+
+def _parse_shifted_hours(raw_delivery: str) -> list[int]:
+    """Parse concatenated period digits (1..14) from shifted delivery_method strings."""
+    if not raw_delivery.isdigit():
+        return []
+    hours: list[int] = []
+    i = 0
+    n = len(raw_delivery)
+    while i < n:
+        if (
+            i + 2 <= n
+            and 10 <= int(raw_delivery[i : i + 2]) <= 14
+            and (raw_delivery[i + 1] == "0" or i + 2 == n or raw_delivery[i + 2] != "0")
+        ):
+            hours.append(int(raw_delivery[i : i + 2]))
+            i += 2
+            continue
+        one = int(raw_delivery[i])
+        if 1 <= one <= 9:
+            hours.append(one)
+        i += 1
+    return hours
 
 
 def _sanitize_shifted_payload(val_payload: dict[str, Any]) -> dict[str, Any]:
@@ -331,7 +377,7 @@ def _sanitize_shifted_payload(val_payload: dict[str, Any]) -> dict[str, Any]:
 
     hours = []
     if raw_delivery.isdigit():
-        hours = [int(ch) for ch in raw_delivery if ch.isdigit() and 1 <= int(ch) <= 14]
+        hours = _parse_shifted_hours(raw_delivery)
         p["delivery_method"] = ""
 
     rooms = [r.strip() for r in raw_exam_date.split("|") if r.strip()]
@@ -367,13 +413,22 @@ _COURSE_ENRICHMENT_COLUMNS: tuple[tuple[str, str], ...] = (
 
 
 def _widen_pg_change_columns(engine: Any) -> None:
-    """Idempotently widen legacy CourseChange column limits on PostgreSQL."""
+    """Idempotently widen legacy CourseChange column limits on PostgreSQL only when needed."""
     if getattr(getattr(engine, "dialect", None), "name", None) != "postgresql":
         return
     try:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE course_changes ALTER COLUMN change_type TYPE VARCHAR(32)"))
-            conn.execute(text("ALTER TABLE course_changes ALTER COLUMN details TYPE TEXT"))
+        cols = {c["name"]: c for c in sa_inspect(engine).get_columns("course_changes")}
+        ct_len = getattr(cols.get("change_type", {}).get("type"), "length", None)
+        det_type = str(cols.get("details", {}).get("type", "")).upper()
+        stmts: list[str] = []
+        if ct_len is not None and ct_len < 32:
+            stmts.append("ALTER TABLE course_changes ALTER COLUMN change_type TYPE VARCHAR(32)")
+        if "TEXT" not in det_type:
+            stmts.append("ALTER TABLE course_changes ALTER COLUMN details TYPE TEXT")
+        if stmts:
+            with engine.begin() as conn:
+                for stmt in stmts:
+                    conn.execute(text(stmt))
     except Exception as e:
         logger.warning("Could not widen course_changes columns: %s", e)
 
@@ -393,11 +448,14 @@ def ensure_schema_columns(engine: Any) -> None:
 
 
 def _sanitize_http_url(val: Any) -> str | None:
-    """Accept only http(s) URLs up to 2048 characters; reject javascript:/data: payloads."""
+    """Accept only http(s) URLs with a valid host, no whitespace/CRLF, up to 2048 characters."""
     if not val:
         return None
     clean = str(val).strip()
-    if clean.startswith(("https://", "http://")) and len(clean) <= 2048:
+    if len(clean) > 2048 or any(ch in clean for ch in ("\r", "\n", "\t", " ")):
+        return None
+    parsed = urllib.parse.urlsplit(clean)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
         return clean
     return None
 
@@ -472,13 +530,17 @@ def _apply_course_updates(
 def _extract_enrichment_fields(
     val_payload: dict[str, Any],
     is_new: bool,
+    existing_course: models.Course | None = None,
 ) -> tuple[dict[str, Any], set[str]]:
     """Extract course syllabus and description metadata without clobbering existing values on partial deltas."""
     fields: dict[str, Any] = {}
     clear_fields: set[str] = set()
 
     if "desc_url" in val_payload or "description_link_url" in val_payload:
-        fields["desc_url"] = _sanitize_http_url(val_payload.get("desc_url") or val_payload.get("description_link_url"))
+        raw_desc = val_payload.get("desc_url") if "desc_url" in val_payload else val_payload.get("description_link_url")
+        fields["desc_url"] = _sanitize_http_url(raw_desc)
+        if raw_desc == "":
+            clear_fields.add("desc_url")
 
     if "syllabus_url" in val_payload:
         raw_syl = val_payload.get("syllabus_url")
@@ -500,12 +562,10 @@ def _extract_enrichment_fields(
 
     has_syl_signal = any(k in val_payload for k in ("has_syllabus", "syllabus_url", "syllabus_hash", "syllabus_text"))
     if is_new or has_syl_signal:
-        fields["has_syllabus"] = bool(
-            val_payload.get("has_syllabus")
-            or fields.get("syllabus_url")
-            or fields.get("syllabus_hash")
-            or fields.get("syllabus_text")
-        )
+        eff_url = fields["syllabus_url"] if "syllabus_url" in fields else getattr(existing_course, "syllabus_url", None)
+        eff_hash = fields["syllabus_hash"] if "syllabus_hash" in fields else getattr(existing_course, "syllabus_hash", None)
+        eff_text = fields["syllabus_text"] if "syllabus_text" in fields else getattr(existing_course, "syllabus_text", None)
+        fields["has_syllabus"] = bool(val_payload.get("has_syllabus") or eff_url or eff_hash or eff_text)
 
     return fields, clear_fields
 
@@ -548,15 +608,20 @@ def _upsert_course(
     ).first()
 
     is_new = course is None
+    raw_inst = val_payload.get("instructor")
     fields: dict[str, Any] = {
         "dept_kisaadi": normalized_dept,
         "title": val_payload.get("course_name") or val_payload.get("title"),
-        "instructor_id": ensure_instructor(session, val_payload.get("instructor"), inst_cache),
+        "instructor_id": ensure_instructor(session, raw_inst, inst_cache),
         "credits": clean_int(val_payload.get("credits")),
         "ects": clean_int(val_payload.get("ects")),
         "delivery_method": val_payload.get("delivery_method"),
     }
-    enrichment_fields, clear_fields = _extract_enrichment_fields(val_payload, is_new=is_new)
+    enrichment_fields, clear_fields = _extract_enrichment_fields(
+        val_payload, is_new=is_new, existing_course=course
+    )
+    if "instructor" in val_payload and (raw_inst is None or str(raw_inst).strip().upper() in ("", "TBA")):
+        clear_fields.add("instructor_id")
     fields.update(enrichment_fields)
 
     if course is None:
@@ -570,7 +635,12 @@ def _upsert_course(
         session.flush()
         upsert_course_catalog(session, course_code, val_payload, catalog_seen=catalog_seen, dry_run=dry_run)
 
-    slots_payload = val_payload.get("slots") or val_payload.get("course_slots")
+    if "slots" in val_payload:
+        slots_payload = val_payload["slots"]
+    elif "course_slots" in val_payload:
+        slots_payload = val_payload["course_slots"]
+    else:
+        slots_payload = None
     if course and course.id:
         _sync_course_slots(session, course.id, slots_payload, room_cache, dry_run=dry_run)
 
@@ -709,11 +779,26 @@ def _apply_room_only_delta(
     if not dry_run:
         sorted_slots = sorted(
             course.slots,
-            key=lambda s: (s.day_code or "", s.slot_hour or 0, s.slot_title or ""),
+            key=lambda s: (
+                _DAY_SORT_ORDER.get(s.day_code or "", 99),
+                s.day_code or "",
+                s.slot_hour or 0,
+                s.slot_title or "",
+            ),
         )
+        if len(rooms_list) != len(sorted_slots):
+            logger.warning(
+                "Skipping positional ROOM_CHANGED for %s %s.%s: %d rooms != %d slots",
+                term_id,
+                course_code,
+                section,
+                len(rooms_list),
+                len(sorted_slots),
+            )
+            return None
         for slot, raw_room in zip(sorted_slots, rooms_list):
             r_name = str(raw_room or "").strip()
-            slot.room_id = ensure_room(session, r_name, room_cache) if r_name else None
+            slot.room_id = ensure_room(session, r_name, room_cache) if r_name and r_name.upper() != "N/A" else None
         session.flush()
     if touched_course_ids is not None:
         touched_course_ids.add(course.id)
@@ -766,28 +851,26 @@ def _remove_course_from_delta(
     term_id: str,
     course_code: str,
     section: str | None,
-    meili_index: Any,
+    deleted_course_ids: set[int] | None,
     dry_run: bool,
-) -> None:
-    """Delete a removed course section and its Meilisearch index entry."""
+) -> int | None:
+    """Delete a removed course section from PostgreSQL and queue post-commit Meilisearch cleanup."""
     course = session.query(models.Course).filter(
         models.Course.term_id == term_id,
         models.Course.course_code == course_code,
         models.Course.section == section,
     ).first()
     if not course or dry_run:
-        return
+        return None
     course_id = course.id
     session.query(models.CourseSlot).filter(models.CourseSlot.course_id == course_id).delete(
         synchronize_session="fetch"
     )
     session.delete(course)
     session.flush()
-    if meili_index:
-        try:
-            meili_index.delete_document(course_id)
-        except Exception as e:
-            logger.warning("Meilisearch delete error for course %s: %s", course_id, e)
+    if deleted_course_ids is not None:
+        deleted_course_ids.add(course_id)
+    return course_id
 
 
 def _is_room_only_delta(change_type: str, val_payload: dict[str, Any]) -> bool:
@@ -796,6 +879,45 @@ def _is_room_only_delta(change_type: str, val_payload: dict[str, Any]) -> bool:
         and "slots" not in val_payload
         and "course_slots" not in val_payload
         and isinstance(val_payload.get("rooms"), list)
+    )
+
+
+def _handle_course_removal_delta(
+    session: Session,
+    term_id: str,
+    course_code: str,
+    section: str | None,
+    touched_course_ids: set[int] | None,
+    deleted_course_ids: set[int] | None,
+    meili_index: Any,
+    dry_run: bool,
+) -> None:
+    removed_id = _remove_course_from_delta(
+        session, term_id, course_code, section, deleted_course_ids, dry_run
+    )
+    if removed_id is None:
+        return
+    if touched_course_ids is not None:
+        touched_course_ids.discard(removed_id)
+    if deleted_course_ids is None and meili_index:
+        try:
+            meili_index.delete_document(removed_id)
+        except Exception as e:
+            logger.warning("Meilisearch delete error for course %s: %s", removed_id, e)
+
+
+def _resolve_delta_caches(
+    session: Session,
+    inst_cache: dict[str, int] | None,
+    room_cache: dict[str, int] | None,
+    dept_cache: dict[str, str] | dict[str, models.Department] | None,
+    term_cache: set[str] | dict[str, Any] | None,
+) -> tuple[dict[str, int], dict[str, int], dict[str, str] | dict[str, models.Department], set[str] | dict[str, Any]]:
+    return (
+        inst_cache if inst_cache is not None else {i.full_name: i.id for i in session.query(models.Instructor).all()},
+        room_cache if room_cache is not None else {r.name: r.id for r in session.query(models.Room).all()},
+        dept_cache if dept_cache is not None else {d.kisaadi: d for d in session.query(models.Department).all()},
+        term_cache if term_cache is not None else {t.id: t for t in session.query(models.Term).all()},
     )
 
 
@@ -810,6 +932,7 @@ def apply_delta_event(
     meili_index=None,
     dry_run: bool = False,
     catalog_fetcher: Callable[[str], dict[str, Any] | None] | None = None,
+    deleted_course_ids: set[int] | None = None,
 ) -> int | None:
     """Apply a discrete course delta event to PostgreSQL."""
     raw_change_type = item.get("change_type")
@@ -823,11 +946,9 @@ def apply_delta_event(
         session, item.get("department"), course_code, term_id=term_id, section=section
     )
     timestamp = item.get("timestamp") or datetime.now(UTC).isoformat()
-
-    inst_cache = inst_cache if inst_cache is not None else {i.full_name: i.id for i in session.query(models.Instructor).all()}
-    room_cache = room_cache if room_cache is not None else {r.name: r.id for r in session.query(models.Room).all()}
-    dept_cache = dept_cache if dept_cache is not None else {d.kisaadi: d for d in session.query(models.Department).all()}
-    term_cache = term_cache if term_cache is not None else {t.id: t for t in session.query(models.Term).all()}
+    inst_cache, room_cache, dept_cache, term_cache = _resolve_delta_caches(
+        session, inst_cache, room_cache, dept_cache, term_cache
+    )
 
     if not dry_run:
         _record_course_change(session, item, term_id, dept_kisaadi, course_code, section, timestamp)
@@ -861,7 +982,9 @@ def apply_delta_event(
                 touched_course_ids.add(course.id)
             return course.id
     elif change_type in _REMOVE_CHANGE_TYPES:
-        _remove_course_from_delta(session, term_id, course_code, section, meili_index, dry_run)
+        _handle_course_removal_delta(
+            session, term_id, course_code, section, touched_course_ids, deleted_course_ids, meili_index, dry_run
+        )
 
     return None
 
@@ -944,14 +1067,19 @@ def apply_deltas_batch(
     meili_index = None,
     dry_run: bool = False
 ) -> list[int]:
-    """Apply a batch of delta events in a single transaction."""
+    """Apply a batch of delta events in a single transaction with savepoint cache isolation."""
     touched_ids: set[int] = set()
+    deleted_ids: set[int] = set()
     inst_cache = {i.full_name: i.id for i in session.query(models.Instructor).all()}
     room_cache = {r.name: r.id for r in session.query(models.Room).all()}
     dept_cache = {d.kisaadi: d for d in session.query(models.Department).all()}
     term_cache = {t.id: t for t in session.query(models.Term).all()}
 
     for item in deltas:
+        snap_inst = dict(inst_cache)
+        snap_room = dict(room_cache)
+        snap_dept = dict(dept_cache)
+        snap_term = dict(term_cache)
         try:
             with session.begin_nested():
                 apply_delta_event(
@@ -962,14 +1090,25 @@ def apply_deltas_batch(
                     dept_cache=dept_cache,
                     term_cache=term_cache,
                     touched_course_ids=touched_ids,
-                    meili_index=meili_index,
-                    dry_run=dry_run
+                    meili_index=None,
+                    dry_run=dry_run,
+                    deleted_course_ids=deleted_ids,
                 )
         except Exception as e:
+            inst_cache.clear(); inst_cache.update(snap_inst)
+            room_cache.clear(); room_cache.update(snap_room)
+            dept_cache.clear(); dept_cache.update(snap_dept)
+            term_cache.clear(); term_cache.update(snap_term)
             logger.warning("Error applying delta item %s: %s", item, e)
 
     if not dry_run:
         session.commit()
+        if meili_index and deleted_ids:
+            for cid in deleted_ids:
+                try:
+                    meili_index.delete_document(cid)
+                except Exception as e:
+                    logger.warning("Meilisearch post-commit delete error for course %s: %s", cid, e)
         if meili_index and touched_ids:
             updated_courses = session.query(models.Course).options(
                 joinedload(models.Course.term),

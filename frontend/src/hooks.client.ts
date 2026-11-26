@@ -14,13 +14,17 @@ function isChunkLoadError(error: unknown): boolean {
 
 export const handleError: HandleClientError = async ({ error, event, status, message }) => {
 	if (typeof window !== 'undefined' && isChunkLoadError(error)) {
-		const key = 'last_chunk_reload_timestamp';
-		const lastReload = Number(sessionStorage.getItem(key) || 0);
-		// Prevent infinite refresh loops by rate-limiting to once every 10 seconds
-		if (Date.now() - lastReload > 10000) {
-			sessionStorage.setItem(key, String(Date.now()));
-			window.location.reload();
-			return;
+		try {
+			const key = 'last_chunk_reload_timestamp';
+			const lastReload = Number(sessionStorage.getItem(key) || 0);
+			// Prevent infinite refresh loops by rate-limiting to once every 10 seconds
+			if (Date.now() - lastReload > 10000) {
+				sessionStorage.setItem(key, String(Date.now()));
+				window.location.reload();
+				return;
+			}
+		} catch {
+			// Ignore SecurityError in restricted browsing contexts
 		}
 	}
 

@@ -18,7 +18,10 @@
 - Campus topography: `JF` (John Freely Hall) is located on **Güney Kampüs** (South Campus), whereas `EF` (Faculty of Education / Eğitim Fakültesi) is on **Kuzey Kampüs** (North Campus). Do not swap them when mapping rooms or calculating inter-campus commute constraints.
 - `bountools.com` is the live public domain for the platform (`https://bountools.com`). Keep `bountools.com` as canonical in public environment variable templates and routing examples.
 - Public documentation hygiene: Never leak private infrastructure node names (`tanri`, `worky`), internal orchestration IDs (`FnoW3VW_TLpX8sXKPL60v`), or local user paths (`/home/devhax/...`, `fusuyfusuy`) in public-facing markdown documents.
+- [@scope: backend/app/main.py,backend/app/sync.py] POST /v1/webhooks/scraper is fail-closed: WEBHOOK_SECRET must be set unless ALLOW_INSECURE_WEBHOOK=1 in non-prod dev; VoID/DCAT base URLs bind strictly to PUBLIC_BASE_URL (never request.base_url).
+- [@scope: backend/app/sync.py,scripts/sync_from_scraper.py] boun-scrape feeds use compound (after_timestamp, after_id) keyset cursors (ts|id, order=asc) and ROOM_CHANGED emits structured slots alongside rooms; slot room forward-fill is strictly scoped to contiguous hours within the same (day_code, normalized slot_title) block excluding TBA.
+- [@scope: frontend/src/lib/schemas/planner.ts,frontend/src/routes/calendar/+page.svelte] GET /v1/courses/{id} returns relational instructor objects ({id, full_name}) and nullable slot fields; normalize at planner boundary (CoursePlannerItemSchema + normalizePlannerCourse) so localStorage schedules never wipe on reload or emit [object Object] in iCal.
 
 
 ## KNOWN DEBT (open only — one line per item, delete when done)
-# Deliberate gaps get ledger lines: - accepted <what> <- <why> -> <trigger>
+<!-- Deliberate gaps: - accepted <what> <- <why> -> <trigger> -->

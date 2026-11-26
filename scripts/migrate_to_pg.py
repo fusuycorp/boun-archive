@@ -81,9 +81,9 @@ def _migrate_instructors_and_rooms(session, sqlite_conn) -> None:
 
     print("Migrating Rooms...")
     all_rooms = pd.read_sql_query("SELECT DISTINCT room FROM course_slots", sqlite_conn)
-    for name in all_rooms["room"].dropna().unique():
-        if name and name.strip():
-            session.add(Room(name=name.strip()))
+    clean_rooms = {str(name).strip() for name in all_rooms["room"].dropna().unique() if name and str(name).strip()}
+    for name in sorted(clean_rooms):
+        session.add(Room(name=name))
     session.commit()
 
 

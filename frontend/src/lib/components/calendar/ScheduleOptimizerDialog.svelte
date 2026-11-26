@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Sparkles, X, Plus, AlertTriangle, CheckCircle2, Clock } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
   import type {
@@ -51,9 +52,11 @@
   $effect(() => {
     if (!dialogEl) return;
     if (open) {
-      if (requiredCourses.length === 0 && initialTargetCourses.length > 0) {
-        requiredCourses = initialTargetCourses.slice(0, 10);
-      }
+      untrack(() => {
+        if (requiredCourses.length === 0 && initialTargetCourses.length > 0) {
+          requiredCourses = initialTargetCourses.slice(0, 10);
+        }
+      });
       if (!dialogEl.open) dialogEl.showModal();
     } else {
       abortSolving();
@@ -173,6 +176,7 @@
         body: JSON.stringify(payload),
         signal: abort.signal
       });
+      if (optimizerState.status !== "solving" || optimizerState.abort !== abort) return;
 
       if (!res.ok) {
         let errDetail = `Solver failed (HTTP ${res.status})`;
@@ -180,11 +184,13 @@
           const errJson = await res.json();
           if (typeof errJson?.detail === "string") errDetail = errJson.detail;
         } catch {}
+        if (optimizerState.status !== "solving" || optimizerState.abort !== abort) return;
         optimizerState = { status: "error", httpCode: res.status, message: errDetail };
         return;
       }
 
       const data: ScheduleOptimizationResponse = await res.json();
+      if (optimizerState.status !== "solving" || optimizerState.abort !== abort) return;
       if (!data.success || data.combinations.length === 0) {
         optimizerState = {
           status: "empty",
@@ -200,8 +206,10 @@
         selectedIdx: 0
       };
     } catch (e) {
-      if (e instanceof Error && e.name === "AbortError") {
-        const timedOut = String(abort.signal.reason || "").includes("Timeout");
+      if (optimizerState.status !== "solving" || optimizerState.abort !== abort) return;
+      const errName = e instanceof Error ? e.name : "";
+      if (errName === "AbortError" || errName === "TimeoutError") {
+        const timedOut = errName === "TimeoutError" || String(abort.signal.reason || "").includes("Timeout");
         optimizerState = timedOut
           ? { status: "error", httpCode: 504, message: "Solver exceeded the 6.5s request timeout." }
           : { status: "idle" };

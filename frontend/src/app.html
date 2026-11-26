@@ -32,12 +32,14 @@
 		<script defer src="https://umami.bogazici.app/script.js" data-website-id="f58e2223-ae5b-4963-9663-2bb7d0da6cb3"></script>
 		<script>
 			window.addEventListener('vite:preloadError', () => {
-				const key = 'last_chunk_reload_timestamp';
-				const lastReload = Number(sessionStorage.getItem(key) || 0);
-				if (Date.now() - lastReload > 10000) {
-					sessionStorage.setItem(key, String(Date.now()));
-					window.location.reload();
-				}
+				try {
+					const key = 'last_chunk_reload_timestamp';
+					const lastReload = Number(sessionStorage.getItem(key) || 0);
+					if (Date.now() - lastReload > 10000) {
+						sessionStorage.setItem(key, String(Date.now()));
+						window.location.reload();
+					}
+				} catch {}
 			});
 		</script>
 		%sveltekit.head%

@@ -135,7 +135,10 @@ services:
       MEILI_URL: ${MEILI_URL}
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
       REDIS_URL: ${REDIS_URL}
-      PORT: ${BACKEND_PORT}
+      PORT: ${BACKEND_PORT:-8000}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://bountools.com}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
     expose:

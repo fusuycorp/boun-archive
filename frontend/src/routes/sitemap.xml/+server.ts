@@ -18,28 +18,10 @@ export const GET: RequestHandler = async ({ fetch }) => {
   const dynamicUrls: Array<{ loc: string; priority: string; changefreq: string }> = [];
 
   try {
-    const [deptRes, instRes] = await Promise.allSettled([
-      fetch(`${API_BASE}/v1/departments`),
-      fetch(`${API_BASE}/v1/instructors`)
-    ]);
+    const instRes = await fetch(`${API_BASE}/v1/instructors`);
 
-    if (deptRes.status === "fulfilled" && deptRes.value.ok) {
-      const depts = await deptRes.value.json();
-      if (Array.isArray(depts)) {
-        for (const dept of depts) {
-          if (dept.kisaadi) {
-            dynamicUrls.push({
-              loc: `${baseUrl}/departments`,
-              priority: "0.6",
-              changefreq: "weekly"
-            });
-          }
-        }
-      }
-    }
-
-    if (instRes.status === "fulfilled" && instRes.value.ok) {
-      const insts = await instRes.value.json();
+    if (instRes.ok) {
+      const insts = await instRes.json();
       if (Array.isArray(insts)) {
         for (const inst of insts.slice(0, 500)) {
           if (inst.id) {

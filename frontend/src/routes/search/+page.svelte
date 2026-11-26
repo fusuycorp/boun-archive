@@ -76,7 +76,8 @@
     if (searchAbortController) {
       searchAbortController.abort();
     }
-    searchAbortController = new AbortController();
+    const controller = new AbortController();
+    searchAbortController = controller;
 
     loading = true;
     if (resetOffset) offset = 0;
@@ -99,10 +100,12 @@
       if (onlyWithSyllabus) params.append("has_syllabus", "true");
 
       const response = await fetch(`${API_BASE}/v1/search?${params.toString()}`, {
-        signal: searchAbortController.signal
+        signal: controller.signal
       });
+      if (searchAbortController !== controller) return;
       if (response.ok) {
         const data = await response.json();
+        if (searchAbortController !== controller) return;
         results = data.hits || [];
         currentFacets = data.facetDistribution || {};
         totalHits = data.totalHits ?? data.estimatedTotalHits ?? 0;
@@ -116,7 +119,7 @@
       if (e instanceof Error && e.name === 'AbortError') return;
       console.error("Search failed", e);
     } finally {
-      if (!searchAbortController.signal.aborted) {
+      if (searchAbortController === controller && !controller.signal.aborted) {
         loading = false;
       }
     }
@@ -207,8 +210,10 @@
     // Parse URL search params on mount
     const urlParams = page.url.searchParams;
     query = urlParams.get("q") || "";
-    offset = parseInt(urlParams.get("offset") || "0");
-    limit = parseInt(urlParams.get("limit") || "20");
+    const parsedOffset = Number.parseInt(urlParams.get("offset") || "0", 10);
+    const parsedLimit = Number.parseInt(urlParams.get("limit") || "20", 10);
+    offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+    limit = Number.isFinite(parsedLimit) && parsedLimit >= 1 && parsedLimit <= 100 ? parsedLimit : 20;
     sortColumn = urlParams.get("sort_by") || "";
     sortDirection = (urlParams.get("sort_order") as "asc" | "desc") || "asc";
     selectedTerms = urlParams.getAll("term");
@@ -458,7 +463,7 @@
             </div>
             <div class="flex space-x-2 w-full sm:w-auto justify-center">
               <button 
-                onclick={() => handlePageChange(offset - limit)}
+                onclick={() => handlePageChange(Math.max(0, offset - limit))}
                 disabled={offset === 0}
                 class="flex-1 sm:flex-none px-4 py-2 bg-white border border-[#e5e0d8] rounded-lg text-xs font-semibold text-[#161e2e] hover:bg-[#f3efe6] hover:text-[#002d72] disabled:opacity-40 disabled:cursor-not-allowed transition-colors dark:bg-[#121827] dark:border-[#1e293b] dark:text-slate-300 dark:hover:bg-slate-800 shadow-2xs cursor-pointer"
               >

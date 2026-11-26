@@ -58,7 +58,37 @@ function escapeIcalText(val: unknown): string {
     .replace(/\\/g, "\\\\")
     .replace(/;/g, "\\;")
     .replace(/,/g, "\\,")
-    .replace(/\r?\n/g, "\\n");
+    .replace(/\r\n|\r|\n/g, "\\n");
+}
+
+function sanitizeIcalUid(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9._@-]+/g, "-").replace(/^-+|-+$/g, "") || "event";
+}
+
+function extractInstructorName(rawCourse: Record<string, any>): string {
+  if (typeof rawCourse.instructor_name === "string" && rawCourse.instructor_name.trim()) {
+    return rawCourse.instructor_name.trim();
+  }
+  if (typeof rawCourse.instructor === "string" && rawCourse.instructor.trim()) {
+    return rawCourse.instructor.trim();
+  }
+  if (rawCourse.instructor && typeof rawCourse.instructor === "object" && typeof rawCourse.instructor.full_name === "string") {
+    return rawCourse.instructor.full_name.trim() || "N/A";
+  }
+  return "N/A";
+}
+
+function extractRoomName(slot: Record<string, any>): string {
+  if (typeof slot.room_name === "string" && slot.room_name.trim()) {
+    return slot.room_name.trim();
+  }
+  if (typeof slot.room === "string" && slot.room.trim()) {
+    return slot.room.trim();
+  }
+  if (slot.room && typeof slot.room === "object" && typeof slot.room.name === "string" && slot.room.name.trim()) {
+    return slot.room.name.trim();
+  }
+  return "TBA";
 }
 
 // Exact official semester start ("Classes begin") and end ("Classes end" / "Last day of classes")
@@ -171,29 +201,30 @@ export function generateICS(
     const { start, untilUtc } = courseTerm ? resolveSemesterBounds(courseTerm) : { start: defaultStart, untilUtc: defaultUntilUtc };
     const slots: any[] = rawCourse.slots || [];
     const code = rawCourse.course_code || fallbackCode;
-    const instructor = rawCourse.instructor || rawCourse.instructor_name || "N/A";
+    const instructor = extractInstructorName(rawCourse);
     const title = rawCourse.title || code;
     const sec = rawCourse.section ? `.${rawCourse.section}` : "";
 
     slots.forEach((slot: any, slotIdx: number) => {
       if (slot.disabled) return;
       const dayCode = slot.day_code || slot.day;
-      const slotHour = slot.slot_hour ?? slot.hour;
-      if (!dayCode || !slotHour) return;
+      const rawSlotHour = slot.slot_hour ?? slot.hour;
+      const slotHour = Number(rawSlotHour);
+      if (!dayCode || !Number.isInteger(slotHour) || slotHour < 1 || slotHour > 14) return;
 
       const byDay = DAY_ICAL_MAP[dayCode];
       const dayOffset = DAY_OFFSET_MAP[dayCode] ?? 0;
       if (!byDay) return;
 
       const dateStr = formatFirstOccurrenceDate(start, dayOffset);
-      const startHour = 8 + Number(slotHour);
-      const endHour = 9 + Number(slotHour);
+      const startHour = 8 + slotHour;
+      const endHour = 9 + slotHour;
 
       const dtStart = `${dateStr}T${startHour.toString().padStart(2, "0")}0000`;
       const dtEnd = `${dateStr}T${endHour.toString().padStart(2, "0")}0000`;
-      const uid = `${code}${sec}-${dayCode}-${slotHour}-${slotIdx}@bountools.com`;
+      const uid = `${sanitizeIcalUid(`${code}${sec}-${dayCode}-${slotHour}-${slotIdx}`)}@bountools.com`;
 
-      const location = slot.room_name || slot.room || "TBA";
+      const location = extractRoomName(slot);
       const summaryEscaped = escapeIcalText(`${code}${sec} - ${title}`);
       const locationEscaped = escapeIcalText(location);
       const description = `Course: ${escapeIcalText(code + sec)}\\nTitle: ${escapeIcalText(title)}\\nInstructor: ${escapeIcalText(instructor)}\\nRoom: ${locationEscaped}`;

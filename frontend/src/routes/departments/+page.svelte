@@ -51,20 +51,34 @@
     try {
       const savedCourses = sessionStorage.getItem(`dept_courses_${deptCode}`);
       if (savedCourses) {
-        uniqueCourses = JSON.parse(savedCourses);
-        hasCourses = true;
+        const parsed = JSON.parse(savedCourses);
+        if (Array.isArray(parsed)) {
+          uniqueCourses = parsed;
+          hasCourses = true;
+        } else {
+          sessionStorage.removeItem(`dept_courses_${deptCode}`);
+        }
       }
     } catch {
-      sessionStorage.removeItem(`dept_courses_${deptCode}`);
+      try {
+        sessionStorage.removeItem(`dept_courses_${deptCode}`);
+      } catch {}
     }
     try {
       const savedInstructors = sessionStorage.getItem(`dept_instructors_${deptCode}`);
       if (savedInstructors) {
-        deptInstructors = JSON.parse(savedInstructors);
-        hasInstructors = true;
+        const parsed = JSON.parse(savedInstructors);
+        if (Array.isArray(parsed)) {
+          deptInstructors = parsed;
+          hasInstructors = true;
+        } else {
+          sessionStorage.removeItem(`dept_instructors_${deptCode}`);
+        }
       }
     } catch {
-      sessionStorage.removeItem(`dept_instructors_${deptCode}`);
+      try {
+        sessionStorage.removeItem(`dept_instructors_${deptCode}`);
+      } catch {}
     }
     return { hasCourses, hasInstructors };
   }

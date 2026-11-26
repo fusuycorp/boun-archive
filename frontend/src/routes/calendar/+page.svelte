@@ -169,11 +169,65 @@
     return "Lecture";
   }
 
+  function extractInstructorLabel(raw: any): string | null {
+    if (!raw) return null;
+    if (typeof raw.instructor_name === "string" && raw.instructor_name.trim()) return raw.instructor_name.trim();
+    if (typeof raw.instructor === "string" && raw.instructor.trim()) return raw.instructor.trim();
+    if (raw.instructor && typeof raw.instructor === "object" && typeof raw.instructor.full_name === "string") {
+      return raw.instructor.full_name.trim() || null;
+    }
+    return null;
+  }
+
+  function normalizePlannerCourse(raw: any, fallback?: any, disabledSlots?: Set<string>): CoursePlannerItem {
+    const resolvedInstructor = extractInstructorLabel(raw) ?? extractInstructorLabel(fallback);
+    const rawSlots = Array.isArray(raw?.slots) ? raw.slots : Array.isArray(fallback?.slots) ? fallback.slots : [];
+    const normalizedSlots = rawSlots
+      .filter(
+        (s: any) =>
+          s &&
+          typeof s.day_code === "string" &&
+          s.day_code.trim().length > 0 &&
+          typeof s.slot_hour === "number" &&
+          Number.isInteger(s.slot_hour) &&
+          s.slot_hour >= 1 &&
+          s.slot_hour <= 14
+      )
+      .map((s: any) => {
+        const dayCode = s.day_code.trim();
+        const roomName =
+          typeof s.room_name === "string" && s.room_name.trim()
+            ? s.room_name.trim()
+            : typeof s.room === "string" && s.room.trim()
+              ? s.room.trim()
+              : s.room && typeof s.room === "object" && typeof s.room.name === "string"
+                ? s.room.name.trim()
+                : null;
+        return {
+          ...s,
+          day_code: dayCode,
+          room_name: roomName,
+          disabled: disabledSlots ? disabledSlots.has(`${dayCode}_${s.slot_hour}`) : Boolean(s.disabled)
+        };
+      });
+
+    return {
+      ...(fallback || {}),
+      ...raw,
+      course_code: raw?.course_code || fallback?.course_code || "",
+      section: raw?.section ?? fallback?.section ?? "",
+      title: raw?.title ?? fallback?.title ?? "",
+      instructor_name: resolvedInstructor,
+      instructor: resolvedInstructor,
+      slots: normalizedSlots
+    };
+  }
+
   async function rehydrateEnrolledCourses(term: string) {
     if (!term || myCourses.length === 0) return;
     try {
       const snapshot = [...myCourses];
-      const updatesByKey = new Map<string, CoursePlannerItem>();
+      const updatesByKey = new Map<string, any>();
 
       await Promise.all(
         snapshot.map(async (course) => {
@@ -206,24 +260,16 @@
               disabledSlots.add(`${s.day_code}_${s.slot_hour}`);
             }
           }
-          const mergedSlots = detailed.slots.map((s: any) => ({
-            ...s,
-            disabled: disabledSlots.has(`${s.day_code}_${s.slot_hour}`)
-          }));
+          const normalized = normalizePlannerCourse(detailed, currentCourse, disabledSlots);
 
           const oldSlotsStr = JSON.stringify(currentCourse.slots || []);
-          const newSlotsStr = JSON.stringify(mergedSlots);
-          const oldInstructor = currentCourse.instructor_name || (currentCourse as any).instructor;
-          const newInstructor = detailed.instructor_name || (detailed as any).instructor;
+          const newSlotsStr = JSON.stringify(normalized.slots || []);
+          const oldInstructor = extractInstructorLabel(currentCourse);
+          const newInstructor = normalized.instructor_name;
 
           if (oldSlotsStr !== newSlotsStr || (!oldInstructor && newInstructor)) {
             hasChanges = true;
-            return {
-              ...currentCourse,
-              ...detailed,
-              instructor_name: newInstructor || oldInstructor,
-              slots: mergedSlots
-            };
+            return normalized;
           }
           return currentCourse;
         });
@@ -239,6 +285,7 @@
   }
 
   async function toggleCourse(course: SearchCourseHit | CoursePlannerItem) {
+    const reqTerm = selectedTerm;
     const courseId = course.id;
     const normCode = course.course_code.trim().toUpperCase();
     const normSec = (course.section || "01").trim();
@@ -253,15 +300,15 @@
       if (courseId != null) {
         try {
           const res = await fetch(`${API_BASE}/v1/courses/${courseId}`);
+          if (selectedTerm !== reqTerm) return;
           if (res.ok) {
             const detailed = await res.json();
+            if (selectedTerm !== reqTerm) return;
             if (detailed && (detailed.id || detailed.course_code)) {
               if (!myCourses.some(c => c.course_code.trim().toUpperCase() === normCode && (c.section || "01").trim() === normSec)) {
-                if (!detailed.instructor_name && (course as any).instructor) {
-                  detailed.instructor_name = (course as any).instructor;
-                }
-                myCourses = [...myCourses, detailed];
-                saveCoursesForTerm(selectedTerm, myCourses);
+                const normalized = normalizePlannerCourse(detailed, course);
+                myCourses = [...myCourses, normalized];
+                saveCoursesForTerm(reqTerm, myCourses);
               }
               return;
             }
@@ -270,9 +317,10 @@
           console.error("Failed to load full course slots, using search payload", e);
         }
       }
+      if (selectedTerm !== reqTerm) return;
       if (!myCourses.some(c => c.course_code.trim().toUpperCase() === normCode && (c.section || "01").trim() === normSec)) {
-        myCourses = [...myCourses, course as CoursePlannerItem];
-        saveCoursesForTerm(selectedTerm, myCourses);
+        myCourses = [...myCourses, normalizePlannerCourse(course)];
+        saveCoursesForTerm(reqTerm, myCourses);
       }
     }
   }
@@ -313,8 +361,8 @@
       section: sec.section,
       term: selectedTerm,
       term_id: selectedTerm,
-      instructor_name: sec.instructor ?? undefined,
-      instructor: sec.instructor ?? undefined,
+      instructor_name: sec.instructor ?? null,
+      instructor: sec.instructor ?? null,
       credits: sec.credits ?? undefined,
       ects: sec.ects ?? undefined,
       slots: (sec.slots || [])

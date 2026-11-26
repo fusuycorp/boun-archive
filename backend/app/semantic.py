@@ -1,3 +1,5 @@
+import re
+import urllib.parse
 from datetime import UTC, datetime
 from typing import Any
 
@@ -54,7 +56,7 @@ def course_history_to_json_ld(
     instances = []
     for item in history:
         term_id = item.get("term_id", "")
-        term_year = term_id.split("/")[0] if "/" in term_id else "2026"
+        (start_yr, start_mo, start_day), _ = _resolve_semester_bounds(term_id)
         sec = item.get("section") or ""
         inst_name = item.get("instructor")
         inst_obj = {
@@ -77,9 +79,9 @@ def course_history_to_json_ld(
 
         instance = {
             "@type": "CourseInstance",
-            "@id": f"{clean_base}/course/{course_code}?term={term_id}&sec={sec}#instance",
+            "@id": f"{clean_base}/course/{urllib.parse.quote(course_code, safe='')}?term={urllib.parse.quote(term_id, safe='')}&sec={urllib.parse.quote(sec, safe='')}#instance",
             "name": f"{course_code}.{sec} - {item.get('title') or title}",
-            "startDate": f"{term_year}-09-01",
+            "startDate": f"{start_yr:04d}-{start_mo:02d}-{start_day:02d}",
             "courseMode": "online" if "online" in str(item.get("delivery_method", "")).lower() else "onsite",
         }
         if inst_obj:
@@ -180,8 +182,13 @@ def _escape_ical_text(text: Any) -> str:
         .replace(";", "\\;")
         .replace(",", "\\,")
         .replace("\r\n", "\\n")
+        .replace("\r", "\\n")
         .replace("\n", "\\n")
     )
+
+
+def _sanitize_ical_uid(raw: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._@-]+", "-", raw).strip("-") or "slot"
 
 # Exact official semester start ("Classes begin") and end ("Classes end" / "Last day of classes")
 # sourced from https://academiccalendar.bogazici.edu.tr (akademiktakvim.bogazici.edu.tr)
@@ -293,14 +300,21 @@ def generate_course_schedule_ics(
             if not by_day:
                 continue
 
+            try:
+                slot_hour_int = int(slot_hour)
+            except (TypeError, ValueError):
+                continue
+            if slot_hour_int < 1 or slot_hour_int > 14:
+                continue
+
             days_ahead = (day_offset - sem_start_date.weekday()) % 7
             first_occurrence = sem_start_date + timedelta(days=days_ahead)
-            start_hour = 8 + int(slot_hour)
-            end_hour = 9 + int(slot_hour)
+            start_hour = 8 + slot_hour_int
+            end_hour = 9 + slot_hour_int
 
             dt_start = f"{first_occurrence.strftime('%Y%m%d')}T{start_hour:02d}0000"
             dt_end = f"{first_occurrence.strftime('%Y%m%d')}T{end_hour:02d}0000"
-            uid = f"{course_code}{sec}-{day_code}-{slot_hour}-{idx}@bountools.com"
+            uid = _sanitize_ical_uid(f"{course_code}{sec}-{day_code}-{slot_hour_int}-{idx}@bountools.com")
             location = s.get("room") or s.get("room_name") or "TBA"
 
             summary_escaped = _escape_ical_text(f"{course_code}{sec} - {title}")
@@ -368,16 +382,32 @@ def escape_turtle(val: Any) -> str:
     s = str(val)
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").replace("\r", " ")
 
+def _sanitize_iri_base(base_url: str) -> str:
+    raw = (base_url or DEFAULT_BASE_URL).strip().rstrip("/")
+    parsed = urllib.parse.urlsplit(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return DEFAULT_BASE_URL
+    if any(ch in raw for ch in ("<", ">", '"', "{", "}", "|", "^", "`", "\\", " ", "\r", "\n")):
+        return DEFAULT_BASE_URL
+    return raw
+
+
+def _turtle_iri(base_url: str, *segments: str) -> str:
+    clean_base = _sanitize_iri_base(base_url)
+    encoded = "/".join(urllib.parse.quote(str(seg), safe="") for seg in segments)
+    return f"<{clean_base}/{encoded}>"
+
+
 def _course_instance_to_turtle(
-    course_code: str, clean_code: str, title: str, item: dict[str, Any]
+    course_code: str, clean_code: str, title: str, item: dict[str, Any], base_url: str = DEFAULT_BASE_URL
 ) -> str:
-    t_id = item.get("term_id", "").replace("/", "-")
-    sec = item.get("section") or "01"
+    t_id = str(item.get("term_id") or "").replace("/", "-")
+    sec = str(item.get("section") or "01")
     inst_name = item.get("instructor")
     mode = "online" if "online" in str(item.get("delivery_method", "")).lower() else "onsite"
     inst_props = [
         "a schema:CourseInstance",
-        f'schema:name "{escape_turtle(course_code)}.{sec} - {escape_turtle(item.get("title") or title)}"',
+        f'schema:name "{escape_turtle(course_code)}.{escape_turtle(sec)} - {escape_turtle(item.get("title") or title)}"',
         f'schema:courseMode "{mode}"',
     ]
     if inst_name and inst_name != "TBA":
@@ -397,7 +427,8 @@ def _course_instance_to_turtle(
             sched_props.append(f'schema:location [ a schema:Room ; schema:name "{escape_turtle(r)}" ]')
         inst_props.append("schema:courseSchedule [ " + " ; ".join(sched_props) + " ]")
 
-    return f"boun:course/{clean_code}/{t_id}/{sec} " + " ;\n    ".join(inst_props) + " .\n"
+    subj_iri = _turtle_iri(base_url, "id", "course", clean_code, t_id, sec)
+    return f"{subj_iri} " + " ;\n    ".join(inst_props) + " .\n"
 
 
 def course_history_to_turtle(
@@ -405,6 +436,7 @@ def course_history_to_turtle(
     history: list[dict[str, Any]],
     base_url: str = DEFAULT_BASE_URL,
 ) -> str:
+    clean_base = _sanitize_iri_base(base_url)
     latest = history[0] if history else {}
     title = latest.get("title") or course_code
     dept_code = course_code.split()[0] if " " in course_code else ""
@@ -432,17 +464,17 @@ def course_history_to_turtle(
     if ects is not None:
         course_props.append(f'schema:educationalCredentialAwarded "ECTS {ects}"')
     if dept_code:
-        course_props.append(f"schema:department boun:department/{escape_turtle(dept_code)}")
+        course_props.append(f"schema:department {_turtle_iri(clean_base, 'id', 'department', dept_code)}")
 
     for item in history:
-        t_id = item.get("term_id", "").replace("/", "-")
-        sec = item.get("section") or "01"
-        inst_uri = f"{base_url}/id/course/{clean_code}/{t_id}/{sec}"
-        course_props.append(f"schema:hasCourseInstance <{inst_uri}>")
+        t_id = str(item.get("term_id") or "").replace("/", "-")
+        sec = str(item.get("section") or "01")
+        inst_iri = _turtle_iri(clean_base, "id", "course", clean_code, t_id, sec)
+        course_props.append(f"schema:hasCourseInstance {inst_iri}")
 
-    lines.append(f"boun:course/{clean_code} " + " ;\n    ".join(course_props) + " .\n")
+    lines.append(f"{_turtle_iri(clean_base, 'id', 'course', clean_code)} " + " ;\n    ".join(course_props) + " .\n")
     for item in history:
-        lines.append(_course_instance_to_turtle(course_code, clean_code, title, item))
+        lines.append(_course_instance_to_turtle(course_code, clean_code, title, item, base_url=clean_base))
 
     return "\n".join(lines)
 
@@ -451,13 +483,14 @@ def instructor_to_turtle(
     full_name: str,
     base_url: str = DEFAULT_BASE_URL
 ) -> str:
+    clean_base = _sanitize_iri_base(base_url)
     lines = [
         TURTLE_PREFIXES,
         'boun:university a schema:CollegeOrUniversity, aiiso:Institution ;\n'
         '    schema:name "Boğaziçi University" ;\n'
         '    schema:url <https://bogazici.edu.tr> ;\n'
         '    schema:sameAs wd:Q853512 .\n',
-        f'boun:instructor/{instructor_id} a schema:Person ;\n'
+        f"{_turtle_iri(clean_base, 'id', 'instructor', str(instructor_id))} a schema:Person ;\n"
         f'    schema:name "{escape_turtle(full_name)}" ;\n'
         f'    schema:jobTitle "Faculty Instructor" ;\n'
         f'    schema:worksFor boun:university .\n'
@@ -468,6 +501,7 @@ def departments_to_turtle(
     departments: list[dict[str, Any]],
     base_url: str = DEFAULT_BASE_URL
 ) -> str:
+    clean_base = _sanitize_iri_base(base_url)
     lines = [
         TURTLE_PREFIXES,
         'boun:university a schema:CollegeOrUniversity, aiiso:Institution ;\n'
@@ -481,7 +515,7 @@ def departments_to_turtle(
         if not code:
             continue
         lines.append(
-            f'boun:department/{escape_turtle(code)} a aiiso:Department, schema:EducationalOrganization ;\n'
+            f"{_turtle_iri(clean_base, 'id', 'department', code)} a aiiso:Department, schema:EducationalOrganization ;\n"
             f'    schema:alternateName "{escape_turtle(code)}" ;\n'
             f'    schema:name "{escape_turtle(name)}" ;\n'
             f'    schema:parentOrganization boun:university .\n'
@@ -489,13 +523,14 @@ def departments_to_turtle(
     return '\n'.join(lines)
 
 def generate_void_description(base_url: str = DEFAULT_BASE_URL) -> str:
+    clean_base = _sanitize_iri_base(base_url)
     return (
         f"{TURTLE_PREFIXES}\n"
         f"boun:university a schema:CollegeOrUniversity, aiiso:Institution ;\n"
         f'    schema:name "Boğaziçi University" ;\n'
         f"    schema:url <https://bogazici.edu.tr> ;\n"
         f"    schema:sameAs wd:Q853512 .\n\n"
-        f"<{base_url}/#dataset> a void:Dataset, dcat:Dataset ;\n"
+        f"<{clean_base}/#dataset> a void:Dataset, dcat:Dataset ;\n"
         f'    dcterms:title "BOUN Archive Academic Knowledge Graph" ;\n'
         f'    dcterms:description "50+ years of historical course schedules, faculties, rooms, and academic offerings at Boğaziçi University." ;\n'
         f"    dcterms:publisher boun:university ;\n"
@@ -504,11 +539,12 @@ def generate_void_description(base_url: str = DEFAULT_BASE_URL) -> str:
         f"    dcat:distribution [\n"
         f"        a dcat:Distribution ;\n"
         f'        dcat:mediaType "text/turtle" ;\n'
-        f"        dcat:accessURL <{base_url}/v1/departments>\n"
+        f"        dcat:accessURL <{clean_base}/v1/departments>\n"
         f"    ] .\n"
     )
 
 def generate_dcat_catalog_jsonld(base_url: str = DEFAULT_BASE_URL) -> dict[str, Any]:
+    clean_base = _sanitize_iri_base(base_url)
     return {
         "@context": {
             "dcat": "http://www.w3.org/ns/dcat#",
@@ -516,7 +552,7 @@ def generate_dcat_catalog_jsonld(base_url: str = DEFAULT_BASE_URL) -> dict[str, 
             "schema": "https://schema.org/",
             "void": "http://rdfs.org/ns/void#"
         },
-        "@id": f"{base_url}/#catalog",
+        "@id": f"{clean_base}/#catalog",
         "@type": "dcat:Catalog",
         "dcterms:title": "BOUN Archive Open Data Catalog",
         "dcterms:description": "Open Academic Course Timetables and Historical Registrar Catalog for Boğaziçi University",
@@ -527,7 +563,7 @@ def generate_dcat_catalog_jsonld(base_url: str = DEFAULT_BASE_URL) -> dict[str, 
         },
         "dcat:dataset": [
             {
-                "@id": f"{base_url}/#dataset",
+                "@id": f"{clean_base}/#dataset",
                 "@type": "dcat:Dataset",
                 "dcterms:title": "BOUN Archive Course Schedules & Analytics",
                 "dcterms:description": "Comprehensive historical dataset of course offerings, time slots, instructors, and quota history.",
@@ -535,12 +571,12 @@ def generate_dcat_catalog_jsonld(base_url: str = DEFAULT_BASE_URL) -> dict[str, 
                     {
                         "@type": "dcat:Distribution",
                         "dcat:mediaType": "application/ld+json",
-                        "dcat:accessURL": f"{base_url}/v1/departments"
+                        "dcat:accessURL": f"{clean_base}/v1/departments"
                     },
                     {
                         "@type": "dcat:Distribution",
                         "dcat:mediaType": "text/turtle",
-                        "dcat:accessURL": f"{base_url}/v1/departments"
+                        "dcat:accessURL": f"{clean_base}/v1/departments"
                     }
                 ]
             }

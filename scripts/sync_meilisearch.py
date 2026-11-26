@@ -61,7 +61,7 @@ def _prune_orphaned_docs(index, client, session):
         print(f"Warning: Document pruning check encountered an error: {e}")
 
 
-def _index_already_populated(index, force: bool) -> bool:
+def _index_already_populated(index, session, force: bool) -> bool:
     if force or "--force" in sys.argv:
         return False
     with suppress(Exception):
@@ -69,8 +69,9 @@ def _index_already_populated(index, force: bool) -> bool:
         doc_count = getattr(stats, "number_of_documents", None)
         if doc_count is None and isinstance(stats, dict):
             doc_count = stats.get("numberOfDocuments", 0)
-        if doc_count and doc_count > 0:
-            print(f"Meilisearch already contains {doc_count} indexed courses. Skipping sync (pass --force to re-sync).")
+        db_count = session.query(Course.id).count()
+        if doc_count and db_count and doc_count >= db_count:
+            print(f"Meilisearch already contains {doc_count}/{db_count} indexed courses. Skipping sync (pass --force to re-sync).")
             return True
     return False
 
@@ -147,17 +148,16 @@ def sync_meilisearch(force: bool = False):
     meili_url = os.getenv("MEILI_URL", "http://localhost:7700")
     meili_key = os.getenv("MEILI_MASTER_KEY")
     if not meili_key:
-        print("MEILI_MASTER_KEY is not set. Aborting sync.")
-        return
+        raise RuntimeError("MEILI_MASTER_KEY is not set. Aborting sync.")
 
-    client = meilisearch.Client(meili_url, meili_key)
+    client = meilisearch.Client(meili_url, meili_key, timeout=15)
     index = client.index("courses")
-    if _index_already_populated(index, force):
-        return
 
     engine = create_engine(os.getenv("DATABASE_URL"))
     session = sessionmaker(bind=engine)()
     try:
+        if _index_already_populated(index, session, force):
+            return
         _configure_meili_index(client, index)
         _push_course_chunks(client, index, session)
         _prune_orphaned_docs(index, client, session)

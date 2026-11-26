@@ -7,8 +7,16 @@ export const load: PageLoad = async ({ params, fetch }) => {
   let legacyData: InstructorLegacy | null = null;
   let loadError: string | null = null;
 
+  if (!/^\d+$/.test(id)) {
+    return {
+      instructorId: id,
+      legacyData: null,
+      error: 'Instructor DNA not found'
+    };
+  }
+
   try {
-    const res = await fetch(`${API_BASE}/v1/analytics/instructor/${id}/legacy`);
+    const res = await fetch(`${API_BASE}/v1/analytics/instructor/${encodeURIComponent(id)}/legacy`);
     if (res.ok) {
       legacyData = await res.json();
     } else if (res.status === 404) {
