@@ -55,7 +55,7 @@ class CourseSlot(CourseSlotBase):
 
 class CourseBase(BaseModel):
     term_id: str
-    dept_kisaadi: str
+    dept_kisaadi: str | None = None
     course_code: str
     section: str | None = None
     title: str | None = None

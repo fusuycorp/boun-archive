@@ -89,7 +89,7 @@ export function generateCourseJsonLd(
     const sec = item.section ? `.${item.section}` : "";
     return {
       "@type": "CourseInstance",
-      "@id": `${cleanBase}/course/${encodeURIComponent(code)}?term=${encodeURIComponent(item.term_id)}${item.section ? `&sec=${item.section}` : ""}#instance`,
+      "@id": `${cleanBase}/course/${encodeURIComponent(code)}?term=${encodeURIComponent(item.term_id)}${item.section ? `&sec=${encodeURIComponent(item.section)}` : ""}#instance`,
       "name": `${code}${sec} - ${item.title || primaryTitle}`,
       "courseMode": item.delivery_method?.toLowerCase().includes("online") ? "online" : "onsite",
       "startDate": `${termYear}-09-01`,

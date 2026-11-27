@@ -38,6 +38,7 @@ from app.sync import (
     normalize_section,
     sync_meili_documents,
     upsert_course_catalog,
+    wait_meili_tasks,
 )
 from app.sync import (
     apply_delta_event as _apply_delta_event,
@@ -146,7 +147,7 @@ class ScraperClient:
         if err.code == 429 and attempt < 3:
             raw_after = err.headers.get("Retry-After") if getattr(err, "headers", None) else None
             retry_after = clean_int(raw_after)
-            delay = max(0, retry_after) if retry_after is not None else _RATE_LIMIT_BACKOFF_SECONDS[attempt]
+            delay = min(max(0, retry_after), 120) if retry_after is not None else _RATE_LIMIT_BACKOFF_SECONDS[attempt]
             logger.warning("Rate limited (429) requesting %s; retrying in %ss...", url, delay)
             time.sleep(delay)
             return True
@@ -487,11 +488,8 @@ def _process_delta_batch(
 def _delete_meili_courses(meili_index: Any, deleted_course_ids: set[int], dry_run: bool) -> None:
     if dry_run or not meili_index or not deleted_course_ids:
         return
-    for cid in sorted(deleted_course_ids):
-        try:
-            meili_index.delete_document(cid)
-        except Exception as e:
-            logger.warning("Meilisearch post-commit delete error for course %s: %s", cid, e)
+    delete_tasks = [meili_index.delete_document(cid) for cid in sorted(deleted_course_ids)]
+    wait_meili_tasks(meili_index, delete_tasks)
 
 
 def sync_deltas_feed(
@@ -623,6 +621,11 @@ def backfill_term(
     touched_courses: list[Course] = []
 
     for item in courses_raw:
+        snap_inst = dict(inst_cache)
+        snap_room = dict(room_cache)
+        snap_dept = dict(dept_cache)
+        snap_term = dict(term_cache)
+        snap_catalog = set(catalog_seen)
         try:
             with session.begin_nested():
                 dept_kisaadi = item.get("department")
@@ -649,6 +652,11 @@ def backfill_term(
                 if course:
                     touched_courses.append(course)
         except Exception as e:
+            inst_cache.clear(); inst_cache.update(snap_inst)
+            room_cache.clear(); room_cache.update(snap_room)
+            dept_cache.clear(); dept_cache.update(snap_dept)
+            term_cache.clear(); term_cache.update(snap_term)
+            catalog_seen.clear(); catalog_seen.update(snap_catalog)
             logger.warning("Skipping anomalous course %s in term %s: %s", item.get("course_code"), term_id, e)
 
     if not dry_run:
@@ -939,6 +947,7 @@ def _sync_all_terms(session, client: ScraperClient, meili_index: Any, valid_term
                     _mark_term_reconciled(session, term_id, datetime.now(UTC).isoformat())
                 session.expunge_all()
             except Exception as e:
+                session.rollback()
                 logger.error("Error refreshing term %s: %s", term_id, e)
     finally:
         if isinstance(client, ScraperClient):
@@ -1038,7 +1047,7 @@ def run_sync_cycle(session_factory, client: ScraperClient, meili_index, args) ->
 
 def invalidate_redis_cache() -> None:
     """Purge cached FastAPI response keys in Redis so updated terms/courses are immediately reflected."""
-    redis_url = os.getenv("REDIS_URL")
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379").strip()
     if not redis_url:
         return
     r = None
@@ -1061,6 +1070,35 @@ def invalidate_redis_cache() -> None:
     finally:
         if r is not None:
             r.close()
+
+
+def _connect_meili_index(meili_url: str, meili_key: str | None) -> Any | None:
+    """Create and configure the Meilisearch courses index with bounded HTTP timeout."""
+    if not meili_key:
+        return None
+    try:
+        meili_client = meilisearch.Client(meili_url, meili_key, timeout=15)
+        meili_index = meili_client.index("courses")
+        settings_task = meili_index.update_settings({
+            'filterableAttributes': [
+                'term', 'dept_code', 'department', 'instructor', 'instructor_id', 'delivery_method', 'has_syllabus'
+            ],
+            'searchableAttributes': [
+                'course_code', 'title', 'instructor', 'department', 'catalog_text', 'syllabus_snippet'
+            ],
+            'faceting': {
+                'maxValuesPerFacet': 10000
+            },
+            'pagination': {
+                'maxTotalHits': 200000
+            },
+            'sortableAttributes': ['term', 'course_code', 'title', 'instructor', 'credits', 'ects']
+        })
+        wait_meili_tasks(meili_client, [settings_task], timeout_in_ms=30000)
+        return meili_index
+    except Exception as e:
+        logger.warning("Could not connect to Meilisearch: %s. Proceeding with DB sync only.", e)
+        return None
 
 
 def main():
@@ -1086,36 +1124,17 @@ def main():
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     client = ScraperClient(base_url=args.scraper_url)
 
-    meili_index = None
     meili_url = os.getenv("MEILI_URL", "http://localhost:7700")
     meili_key = os.getenv("MEILI_MASTER_KEY")
-    if meili_key:
-        try:
-            meili_client = meilisearch.Client(meili_url, meili_key)
-            meili_index = meili_client.index("courses")
-            meili_index.update_settings({
-                'filterableAttributes': [
-                    'term', 'dept_code', 'department', 'instructor', 'instructor_id', 'delivery_method', 'has_syllabus'
-                ],
-                'searchableAttributes': [
-                    'course_code', 'title', 'instructor', 'department', 'catalog_text', 'syllabus_snippet'
-                ],
-                'faceting': {
-                    'maxValuesPerFacet': 10000
-                },
-                'pagination': {
-                    'maxTotalHits': 200000
-                },
-                'sortableAttributes': ['term', 'course_code', 'title', 'instructor', 'credits', 'ects']
-            })
-        except Exception as e:
-            logger.warning("Could not connect to Meilisearch: %s. Proceeding with DB sync only.", e)
+    meili_index = _connect_meili_index(meili_url, meili_key)
 
     if args.daemon:
         logger.info("Starting sync_worker daemon (interval: %ds, mode: %s)...", args.daemon_interval, args.mode)
         consecutive_errors = 0
         while True:
             try:
+                if meili_index is None and meili_key:
+                    meili_index = _connect_meili_index(meili_url, meili_key)
                 run_sync_cycle(Session, client, meili_index, args)
                 consecutive_errors = 0
             except Exception as e:

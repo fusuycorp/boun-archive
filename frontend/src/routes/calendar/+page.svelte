@@ -115,7 +115,7 @@
       undoTerm = "";
     }
     loadCoursesForTerm(newTerm);
-    sessionStorage.setItem("planner_selected_term", newTerm);
+    try { sessionStorage.setItem("planner_selected_term", newTerm); } catch {}
   }
 
   async function fetchTerms() {
@@ -124,7 +124,8 @@
       if (data) {
         terms = data;
         if (terms.length > 0) {
-          const savedTerm = sessionStorage.getItem("planner_selected_term");
+          let savedTerm: string | null = null;
+          try { savedTerm = sessionStorage.getItem("planner_selected_term"); } catch {}
           const termToSelect = (savedTerm && terms.some(t => t.id === savedTerm)) ? savedTerm : terms[0].id;
           selectedTerm = termToSelect;
           loadCoursesForTerm(termToSelect);
@@ -355,10 +356,10 @@
 
   function removeCourse(id: number | string | null | undefined, code?: string | null, sec?: string | null) {
     const normCode = code ? code.trim().toUpperCase() : null;
-    const normSec = sec ? sec.trim() : null;
+    const normSec = (sec || "01").trim();
     myCourses = myCourses.filter(c => {
       if (normCode && c.course_code.trim().toUpperCase() === normCode) {
-        if (!normSec || (c.section || "01").trim() === normSec) return false;
+        if ((c.section || "01").trim() === normSec) return false;
       }
       if (id != null && c.id != null && String(c.id) === String(id)) return false;
       return true;
@@ -467,6 +468,8 @@
             rName = prevRoom;
           } else if (rName) {
             prevRoom = rName;
+          } else {
+            prevRoom = "";
           }
           prevHour = hr;
           prevTitle = title;
@@ -538,12 +541,13 @@
   function isLabOrPS(slotType?: string | null) {
     if (!slotType) return false;
     const type = slotType.toLowerCase();
-    return type.includes("lab") || type.includes("ps") || type.includes("practice");
+    return type.includes("lab") || type.includes("p.s.") || type.includes("ps") || type.includes("practice");
   }
 
   onMount(() => {
     fetchTerms();
     return () => {
+      clearTimeout(timeout);
       if (searchAbortController) searchAbortController.abort();
       if (rehydrateAbortController) rehydrateAbortController.abort();
     };
@@ -740,8 +744,12 @@
 
         {#if searchResults.length > 0}
           <div class="space-y-2 max-h-72 sm:max-h-80 overflow-y-auto pr-1 custom-scrollbar">
-            {#each searchResults as course}
-              {@const isAdded = myCourses.some(c => (c.id != null && course.id != null && String(c.id) === String(course.id)) || (c.course_code === course.course_code && c.section === course.section))}
+            {#each searchResults as course (`${course.id ?? ""}-${course.course_code}-${course.section || "01"}`)}
+              {@const isAdded = myCourses.some(c =>
+                (c.id != null && course.id != null && String(c.id) === String(course.id)) ||
+                (c.course_code.trim().toUpperCase() === course.course_code.trim().toUpperCase() &&
+                  (c.section || "01").trim() === (course.section || "01").trim())
+              )}
               <button 
                 onclick={() => toggleCourse(course)}
                 class="w-full p-2.5 border rounded-lg text-left transition-colors group cursor-pointer
@@ -796,7 +804,7 @@
         </div>
 
         <div class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
-          {#each myCourses as course}
+          {#each myCourses as course (`${course.id ?? ""}-${course.course_code}-${course.section || "01"}`)}
             <div class="p-3 bg-[#faf8f5] border border-[#e5e0d8] rounded-lg group relative dark:bg-[#0a0e1a] dark:border-[#1e293b]">
               <div class="flex items-center space-x-2">
                 <div class="font-mono text-xs font-bold text-[#002d72] dark:text-slate-100 uppercase">{course.course_code}</div>
@@ -815,7 +823,7 @@
                     Hours (click to toggle):
                   </div>
                   <div class="flex flex-wrap gap-1">
-                    {#each course.slots as slot, sIdx}
+                    {#each course.slots as slot, sIdx (`${slot.day_code}-${slot.slot_hour}-${sIdx}`)}
                       {@const isSpecial = isLabOrPS(slot.slot_title)}
                       <button
                         type="button"
@@ -866,7 +874,7 @@
               <span class="text-[9px] bg-amber-600 text-white px-1.5 py-0.2 rounded font-bold uppercase">{commuteRisks.length} {commuteRisks.length === 1 ? 'Risk' : 'Risks'}</span>
             </div>
             <div class="text-[11px] font-mono text-amber-800 dark:text-amber-300 space-y-0.5">
-              {#each commuteRisks as r}
+              {#each commuteRisks as r (`${r.day}-${r.hourFrom}-${r.courseFrom}-${r.courseTo}`)}
                 <div>
                   • <strong>{r.day} Hour {r.hourFrom}→{r.hourTo}:</strong> {r.courseFrom} ({r.campusFrom} Kampüs, {r.roomFrom}) → {r.courseTo} ({r.campusTo} Kampüs, {r.roomTo}) in 10 minutes.
                 </div>
@@ -881,20 +889,20 @@
           <thead class="sticky top-0 z-20 bg-[#f3efe6]/90 border-b border-[#e5e0d8] dark:bg-[#0a0e1a] dark:border-[#1e293b]">
             <tr>
               <th class="p-2 sm:p-2.5 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider w-12 sm:w-14 border-r border-[#e5e0d8] dark:border-[#1e293b] sticky left-0 z-30 bg-[#f3efe6] dark:bg-[#0a0e1a]">Slot</th>
-              {#each days as day}
+              {#each days as day (day)}
                 <th class="p-2 sm:p-2.5 font-mono text-[10px] font-bold text-[#525f7f] dark:text-slate-400 uppercase tracking-wider">{day}</th>
               {/each}
             </tr>
           </thead>
           <tbody>
-            {#each hours as hour}
+            {#each hours as hour (hour)}
               <tr class="border-b border-[#e5e0d8] last:border-0 dark:border-[#1e293b]">
                 <td class="p-2 text-center font-mono text-xs font-bold text-[#525f7f] dark:text-slate-400 border-r border-[#e5e0d8] dark:border-[#1e293b] bg-[#f3efe6]/60 dark:bg-[#0a0e1a] sticky left-0 z-10">{hour}</td>
-                {#each days as day}
+                {#each days as day (day)}
                   {@const slotCourses = getCoursesAt(day, hour)}
                   <td class="p-1 h-20 sm:h-24 align-top relative">
                     <div class="flex flex-col gap-1 h-full">
-                      {#each slotCourses as course}
+                      {#each slotCourses as course, idx (`${course.id ?? ""}-${course.course_code}-${course.section || "01"}-${idx}`)}
                         {@const isSpecial = isLabOrPS(course.slot_type)}
                         <div 
                           class="p-1.5 rounded-lg border text-[9px] sm:text-[10px] leading-tight flex-1 flex flex-col justify-center

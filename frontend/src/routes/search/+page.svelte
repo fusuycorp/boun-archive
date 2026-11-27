@@ -35,6 +35,8 @@
   let filterDialog = $state<HTMLDialogElement | null>(null);
 
   let searchAbortController: AbortController | null = null;
+  let searchError = $state<string | null>(null);
+  let mounted = false;
 
   $effect(() => {
     if (!filterDialog) return;
@@ -57,6 +59,7 @@
   }
 
   function updateURL() {
+    if (!mounted) return;
     const params = new URLSearchParams();
     if (query) params.set("q", query);
     if (offset > 0) params.set("offset", offset.toString());
@@ -74,6 +77,7 @@
   }
 
   async function performSearch(resetOffset = true) {
+    if (!mounted) return;
     if (searchAbortController) {
       searchAbortController.abort();
     }
@@ -81,6 +85,7 @@
     searchAbortController = controller;
 
     loading = true;
+    searchError = null;
     if (resetOffset) offset = 0;
     
     updateURL();
@@ -103,10 +108,10 @@
       const response = await fetch(`${API_BASE}/v1/search?${params.toString()}`, {
         signal: controller.signal
       });
-      if (searchAbortController !== controller) return;
+      if (!mounted || searchAbortController !== controller) return;
       if (response.ok) {
         const data = await response.json();
-        if (searchAbortController !== controller) return;
+        if (!mounted || searchAbortController !== controller) return;
         results = data.hits || [];
         currentFacets = data.facetDistribution || {};
         totalHits = data.totalHits ?? data.estimatedTotalHits ?? 0;
@@ -115,12 +120,19 @@
         if (isUnfiltered && (!globalFacets?.term || Object.keys(globalFacets.term).length === 0) && data.facetDistribution) {
           globalFacets = data.facetDistribution;
         }
+      } else {
+        searchError = `Search request failed (HTTP ${response.status})`;
+        results = [];
+        totalHits = 0;
       }
     } catch (e) {
       if (e instanceof Error && e.name === 'AbortError') return;
       console.error("Search failed", e);
+      if (mounted && searchAbortController === controller) {
+        searchError = e instanceof Error ? e.message : "Failed to complete search request.";
+      }
     } finally {
-      if (searchAbortController === controller && !controller.signal.aborted) {
+      if (mounted && searchAbortController === controller && !controller.signal.aborted) {
         loading = false;
       }
     }
@@ -206,6 +218,7 @@
   }
 
   onMount(() => {
+    mounted = true;
     fetchGlobalFacets();
     
     // Parse URL search params on mount
@@ -213,16 +226,23 @@
     query = urlParams.get("q") || "";
     const parsedOffset = Number.parseInt(urlParams.get("offset") || "0", 10);
     const parsedLimit = Number.parseInt(urlParams.get("limit") || "20", 10);
-    offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+    offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? Math.min(parsedOffset, 10000) : 0;
     limit = Number.isFinite(parsedLimit) && parsedLimit >= 1 && parsedLimit <= 200 ? parsedLimit : 20;
     sortColumn = urlParams.get("sort_by") || "";
-    sortDirection = (urlParams.get("sort_order") as "asc" | "desc") || "asc";
+    const rawSortOrder = urlParams.get("sort_order");
+    sortDirection = rawSortOrder === "desc" ? "desc" : "asc";
     selectedTerms = urlParams.getAll("term");
     selectedDepts = urlParams.getAll("dept");
     const rawHasSyllabus = urlParams.get("has_syllabus");
     onlyWithSyllabus = rawHasSyllabus === "1" || rawHasSyllabus === "true";
 
     performSearch(false);
+
+    return () => {
+      mounted = false;
+      clearTimeout(debounceTimer);
+      searchAbortController?.abort();
+    };
   });
 </script>
 
@@ -418,6 +438,18 @@
           <div class="animate-spin rounded-full h-8 w-8 border-3 border-[#e5e0d8] border-t-[#002d72] dark:border-slate-800 dark:border-t-[#8cc8ea]"></div>
           <p class="text-[#525f7f] dark:text-slate-400 font-medium text-xs">Querying archive corpus...</p>
         </div>
+      {:else if searchError}
+        <div role="alert" class="bg-white p-12 rounded-xl border border-rose-200 text-center space-y-3 dark:bg-[#121827] dark:border-rose-900/60">
+          <h3 class="font-serif text-base font-bold text-rose-700 dark:text-rose-400">Search unavailable</h3>
+          <p class="text-[#525f7f] dark:text-slate-400 text-xs">{searchError}</p>
+          <button
+            type="button"
+            onclick={() => performSearch(false)}
+            class="inline-flex items-center px-4 py-2 rounded-lg bg-[#002d72] text-white text-xs font-semibold hover:bg-[#001b44] cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
       {:else}
         <!-- Mobile Cards List View (Visible on < sm) -->
         <div class="block sm:hidden space-y-3">
@@ -472,7 +504,7 @@
               </button>
               <button 
                 onclick={() => handlePageChange(offset + limit)}
-                disabled={offset + limit >= totalHits}
+                disabled={offset + limit >= Math.min(totalHits, 10000)}
                 class="flex-1 sm:flex-none px-4 py-2 bg-white border border-[#e5e0d8] rounded-lg text-xs font-semibold text-[#161e2e] hover:bg-[#f3efe6] hover:text-[#002d72] disabled:opacity-40 disabled:cursor-not-allowed transition-colors dark:bg-[#121827] dark:border-[#1e293b] dark:text-slate-300 dark:hover:bg-slate-800 shadow-2xs cursor-pointer"
               >
                 Next

@@ -12,11 +12,21 @@ export const load: PageLoad = async ({ fetch }) => {
   let terms: Term[] = [];
 
   if (deptsRes.status === 'fulfilled' && deptsRes.value.ok) {
-    departments = await deptsRes.value.json();
+    try {
+      const parsed = await deptsRes.value.json();
+      if (Array.isArray(parsed)) departments = parsed;
+    } catch {
+      departments = [];
+    }
   }
 
   if (termsRes.status === 'fulfilled' && termsRes.value.ok) {
-    terms = await termsRes.value.json();
+    try {
+      const parsed = await termsRes.value.json();
+      if (Array.isArray(parsed)) terms = parsed;
+    } catch {
+      terms = [];
+    }
   }
 
   return {

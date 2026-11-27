@@ -19,36 +19,57 @@ export const load: PageLoad = async ({ fetch }) => {
   let hasError = false;
 
   if (statsSearchRes.status === 'fulfilled' && statsSearchRes.value.ok) {
-    const searchData = await statsSearchRes.value.json();
-    totalCourses = searchData?.totalHits ?? searchData?.estimatedTotalHits ?? null;
+    try {
+      const searchData = await statsSearchRes.value.json();
+      totalCourses = searchData?.totalHits ?? searchData?.estimatedTotalHits ?? null;
+    } catch {
+      hasError = true;
+    }
   } else {
     hasError = true;
   }
 
   if (termsRes.status === 'fulfilled' && termsRes.value.ok) {
-    const termsData = await termsRes.value.json();
-    if (Array.isArray(termsData) && termsData.length > 0) {
-      totalTerms = termsData.length;
+    try {
+      const termsData = await termsRes.value.json();
+      if (Array.isArray(termsData) && termsData.length > 0) {
+        totalTerms = termsData.length;
+      }
+    } catch {
+      hasError = true;
     }
   } else {
     hasError = true;
   }
 
   if (deptsRes.status === 'fulfilled' && deptsRes.value.ok) {
-    const deptsData = await deptsRes.value.json();
-    if (Array.isArray(deptsData) && deptsData.length > 0) {
-      totalDepts = deptsData.length;
+    try {
+      const deptsData = await deptsRes.value.json();
+      if (Array.isArray(deptsData) && deptsData.length > 0) {
+        totalDepts = deptsData.length;
+      }
+    } catch {
+      hasError = true;
     }
   } else {
     hasError = true;
   }
 
   if (evolutionRes.status === 'fulfilled' && evolutionRes.value.ok) {
-    evolutionData = await evolutionRes.value.json();
+    try {
+      evolutionData = await evolutionRes.value.json();
+    } catch {
+      evolutionData = null;
+    }
   }
 
   if (heatmapRes.status === 'fulfilled' && heatmapRes.value.ok) {
-    heatmapData = await heatmapRes.value.json();
+    try {
+      const parsedHeatmap = await heatmapRes.value.json();
+      heatmapData = Array.isArray(parsedHeatmap) ? parsedHeatmap : [];
+    } catch {
+      heatmapData = [];
+    }
   }
 
   return {

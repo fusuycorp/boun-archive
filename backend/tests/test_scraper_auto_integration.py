@@ -75,8 +75,11 @@ def test_webhook_unauthorized_when_secret_set(client, monkeypatch):
 
 
 def test_webhook_deltas_ingestion(client, test_db, monkeypatch):
+    from unittest.mock import MagicMock
+
     secret = "secret_for_test"
     monkeypatch.setenv("WEBHOOK_SECRET", secret)
+    monkeypatch.setattr("app.main.MEILI_CLIENT", MagicMock())
 
     delta_payload = {
         "event": "courses.deltas",
@@ -170,8 +173,8 @@ def test_webhook_scrape_summary(client, test_db, monkeypatch):
     assert response.json()["status"] == "ok"
     assert response.json()["run_id"] == "run-test-99"
 
-    # Verify SyncState was updated
-    state = test_db.query(models.SyncState).filter(models.SyncState.feed_name == "upstream_run:run-test-99").first()
+    # Verify SyncState was updated on canonical upstream_run key
+    state = test_db.query(models.SyncState).filter(models.SyncState.feed_name == "upstream_run").first()
     assert state is not None
     assert state.last_cursor == "2026-09-23T18:05:00Z"
 

@@ -45,16 +45,66 @@
     });
   }
 
+  const DEPT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+  function parseCachedEnvelope(raw: string): unknown[] | null {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const envelope = parsed as Record<string, unknown>;
+    if (
+      typeof envelope.ts !== "number" ||
+      !Number.isFinite(envelope.ts) ||
+      Date.now() - envelope.ts > DEPT_CACHE_TTL_MS ||
+      !Array.isArray(envelope.data) ||
+      envelope.data.length === 0
+    ) {
+      return null;
+    }
+    return envelope.data;
+  }
+
+  function isValidCourseCacheItem(item: unknown): item is DepartmentUniqueCourse {
+    if (typeof item !== "object" || item === null) return false;
+    const c = item as Record<string, unknown>;
+    return (
+      typeof c.course_code === "string" &&
+      c.course_code.length > 0 &&
+      Array.isArray(c.terms) &&
+      c.terms.every((t) => typeof t === "string")
+    );
+  }
+
+  function isValidInstructorCacheItem(item: unknown): item is DepartmentInstructor {
+    if (typeof item !== "object" || item === null) return false;
+    const i = item as Record<string, unknown>;
+    return (
+      typeof i.id === "number" &&
+      Number.isFinite(i.id) &&
+      typeof i.full_name === "string" &&
+      i.full_name.length > 0
+    );
+  }
+
   function loadCachedDeptData(deptCode: string): { hasCourses: boolean; hasInstructors: boolean } {
     let hasCourses = false;
     let hasInstructors = false;
     try {
       const savedCourses = sessionStorage.getItem(`dept_courses_${deptCode}`);
       if (savedCourses) {
-        const parsed = JSON.parse(savedCourses);
-        if (Array.isArray(parsed)) {
-          uniqueCourses = parsed;
-          hasCourses = true;
+        const items = parseCachedEnvelope(savedCourses);
+        if (items && items.every(isValidCourseCacheItem)) {
+          const seenCodes = new Set<string>();
+          const validUnique = items.filter((c) => {
+            if (seenCodes.has(c.course_code)) return false;
+            seenCodes.add(c.course_code);
+            return true;
+          });
+          if (validUnique.length > 0) {
+            uniqueCourses = validUnique;
+            hasCourses = true;
+          } else {
+            sessionStorage.removeItem(`dept_courses_${deptCode}`);
+          }
         } else {
           sessionStorage.removeItem(`dept_courses_${deptCode}`);
         }
@@ -67,10 +117,20 @@
     try {
       const savedInstructors = sessionStorage.getItem(`dept_instructors_${deptCode}`);
       if (savedInstructors) {
-        const parsed = JSON.parse(savedInstructors);
-        if (Array.isArray(parsed)) {
-          deptInstructors = parsed;
-          hasInstructors = true;
+        const items = parseCachedEnvelope(savedInstructors);
+        if (items && items.every(isValidInstructorCacheItem)) {
+          const seenIds = new Set<number>();
+          const validUnique = items.filter((i) => {
+            if (seenIds.has(i.id)) return false;
+            seenIds.add(i.id);
+            return true;
+          });
+          if (validUnique.length > 0) {
+            deptInstructors = validUnique;
+            hasInstructors = true;
+          } else {
+            sessionStorage.removeItem(`dept_instructors_${deptCode}`);
+          }
         } else {
           sessionStorage.removeItem(`dept_instructors_${deptCode}`);
         }
@@ -104,9 +164,14 @@
           const payload: DepartmentUniqueCourse[] = await res.json();
           if (controller.signal.aborted) return;
           uniqueCourses = payload.map((c) => ({ ...c, latest_term: c.terms[0] || "" }));
-          try {
-            sessionStorage.setItem(`dept_courses_${deptCode}`, JSON.stringify(uniqueCourses));
-          } catch {}
+          if (uniqueCourses.length > 0) {
+            try {
+              sessionStorage.setItem(
+                `dept_courses_${deptCode}`,
+                JSON.stringify({ ts: Date.now(), data: uniqueCourses })
+              );
+            } catch {}
+          }
         })());
       }
 
@@ -119,9 +184,14 @@
           const payload: DepartmentInstructor[] = await res.json();
           if (controller.signal.aborted) return;
           deptInstructors = payload;
-          try {
-            sessionStorage.setItem(`dept_instructors_${deptCode}`, JSON.stringify(deptInstructors));
-          } catch {}
+          if (deptInstructors.length > 0) {
+            try {
+              sessionStorage.setItem(
+                `dept_instructors_${deptCode}`,
+                JSON.stringify({ ts: Date.now(), data: deptInstructors })
+              );
+            } catch {}
+          }
         })());
       }
 
@@ -245,7 +315,12 @@
     }
   }
 
-  onMount(restoreSessionState);
+  onMount(() => {
+    restoreSessionState();
+    return () => {
+      activeFetchController?.abort();
+    };
+  });
 
   const filteredDepts = $derived(
     departments.filter(d => 

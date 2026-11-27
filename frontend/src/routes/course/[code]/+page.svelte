@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount, untrack } from "svelte";
   import { page } from "$app/state";
   import {
     Calendar,
@@ -65,6 +66,20 @@
     } else if (syllabusDialog.open) {
       syllabusDialog.close();
     }
+  });
+
+  $effect(() => {
+    void courseCode;
+    untrack(() => {
+      closeSyllabusModal();
+    });
+  });
+
+  onMount(() => {
+    return () => {
+      syllabusAbortController?.abort();
+      syllabusAbortController = null;
+    };
   });
 
   function safeHttpUrl(raw?: string | null): string | null {

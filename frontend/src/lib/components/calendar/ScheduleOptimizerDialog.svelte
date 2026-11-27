@@ -64,6 +64,14 @@
     }
   });
 
+  $effect(() => {
+    void selectedTerm;
+    untrack(() => {
+      abortSolving();
+      optimizerState = { status: "idle" };
+    });
+  });
+
   function abortSolving() {
     if (optimizerState.status === "solving") {
       optimizerState.abort.abort();
@@ -481,7 +489,7 @@
           </div>
 
           <div class="space-y-2.5">
-            {#each optimizerState.combinations as combo, idx}
+            {#each optimizerState.combinations as combo, idx (`${combo.sections.map((s) => `${s.course_code}.${s.section}`).join("|")}-${idx}`)}
               {@const isSelected = optimizerState.selectedIdx === idx}
               <button
                 type="button"
@@ -510,7 +518,7 @@
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-2">
-                  {#each combo.sections as sec}
+                  {#each combo.sections as sec (`${sec.course_code}.${sec.section}`)}
                     <div class="text-[11px] font-mono bg-white/70 dark:bg-[#0a0e1a]/70 px-2.5 py-1.5 rounded-lg border border-[#e5e0d8]/70 dark:border-[#1e293b]">
                       <div class="font-bold text-[#161e2e] dark:text-slate-100">
                         {sec.course_code}.{sec.section}

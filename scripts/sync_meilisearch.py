@@ -13,32 +13,23 @@ from _pathutil import add_import_paths
 add_import_paths()
 
 from app.models import Course, CourseCatalog, CourseSlot
-from app.sync import _build_meili_document
+from app.sync import _build_meili_document, _extract_meili_task_uid, wait_meili_tasks
+
+from scripts.sync_from_scraper import invalidate_redis_cache
 
 load_dotenv()
 
 
 def _extract_task_uid(task):
-    if task is None:
-        return None
-    if isinstance(task, dict):
-        return task.get("taskUid") if task.get("taskUid") is not None else task.get("task_uid")
-    return getattr(task, "task_uid", None)
+    return _extract_meili_task_uid(task)
 
 
 def _wait_for_meili_task(client, task, timeout_in_ms: int = 30000):
-    task_uid = _extract_task_uid(task)
-    if task_uid is None:
-        return None
-    res = client.wait_for_task(task_uid, timeout_in_ms=timeout_in_ms)
-    status = res.get("status") if isinstance(res, dict) else getattr(res, "status", None)
-    if status == "failed":
-        err = res.get("error") if isinstance(res, dict) else getattr(res, "error", None)
-        raise RuntimeError(f"Meilisearch task {task_uid} failed: {err}")
-    return res
+    results = wait_meili_tasks(client, [task], timeout_in_ms=timeout_in_ms)
+    return results[0] if results else None
 
 
-def _prune_orphaned_docs(index, client, session):
+def _prune_orphaned_docs(index, client, session) -> int:
     print("Checking for pruned/deleted courses in Meilisearch...")
     try:
         db_course_ids = {r[0] for r in session.query(Course.id).all()}
@@ -59,12 +50,14 @@ def _prune_orphaned_docs(index, client, session):
 
         if orphaned_ids:
             print(f"Pruning {len(orphaned_ids)} deleted course(s) from Meilisearch...")
-            _wait_for_meili_task(client, index.delete_documents(orphaned_ids))
+            wait_meili_tasks(client, [index.delete_documents(orphaned_ids)], timeout_in_ms=30000)
             print(f"Pruned {len(orphaned_ids)} deleted course(s).")
-        else:
-            print("No orphaned course documents to prune.")
+            return len(orphaned_ids)
+        print("No orphaned course documents to prune.")
+        return 0
     except Exception as e:
         print(f"Warning: Document pruning check encountered an error: {e}")
+        return 0
 
 
 def _index_already_populated(index, session, force: bool) -> bool:
@@ -123,7 +116,7 @@ def _configure_meili_index(client, index) -> None:
     _wait_for_meili_task(client, config_task, timeout_in_ms=30000)
 
 
-def _push_course_chunks(client, index, session) -> None:
+def _push_course_chunks(client, index, session) -> int:
     print("Fetching catalog descriptions and courses from PostgreSQL...")
     catalog_map = {
         code: (text_val or "")[:4000]
@@ -140,25 +133,27 @@ def _push_course_chunks(client, index, session) -> None:
     chunk_size = 2000
     chunk_count = 0
     documents = []
-    last_task = None
+    queued_tasks = []
 
     for c in query.yield_per(chunk_size):
         documents.append(_build_meili_document(c, catalog_map))
         if len(documents) >= chunk_size:
-            last_task = index.add_documents(documents, primary_key="id")
+            queued_tasks.append(index.add_documents(documents, primary_key="id"))
             chunk_count += 1
             if chunk_count % 10 == 0:
                 print(f"Queued chunk {chunk_count}...")
             documents = []
 
     if documents:
-        last_task = index.add_documents(documents, primary_key="id")
+        queued_tasks.append(index.add_documents(documents, primary_key="id"))
         chunk_count += 1
         print(f"Queued final chunk {chunk_count}")
 
-    if last_task:
-        print(f"Awaiting indexing completion for task UID {_extract_task_uid(last_task)}...")
-        _wait_for_meili_task(client, last_task, timeout_in_ms=300000)
+    if queued_tasks:
+        print(f"Awaiting indexing completion for {len(queued_tasks)} queued Meilisearch task(s)...")
+        wait_meili_tasks(client, queued_tasks, timeout_in_ms=300000)
+
+    return chunk_count
 
 
 def sync_meilisearch(force: bool = False):
@@ -173,14 +168,19 @@ def sync_meilisearch(force: bool = False):
 
     engine = create_engine(os.getenv("DATABASE_URL"))
     session = sessionmaker(bind=engine)()
+    chunks_pushed = 0
+    pruned_count = 0
     try:
         if _index_already_populated(index, session, force):
             return
         _configure_meili_index(client, index)
-        _push_course_chunks(client, index, session)
-        _prune_orphaned_docs(index, client, session)
+        chunks_pushed = _push_course_chunks(client, index, session)
+        pruned_count = _prune_orphaned_docs(index, client, session)
     finally:
         session.close()
+
+    if chunks_pushed > 0 or pruned_count > 0:
+        invalidate_redis_cache()
 
     print("Meilisearch sync completed!")
 

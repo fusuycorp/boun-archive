@@ -15,18 +15,52 @@
 
   let OfficialViewerComponent = $state<Component | null>(null);
   let MatrixComponent = $state<Component | null>(null);
+  let officialLoadError = $state<string | null>(null);
+  let matrixLoadError = $state<string | null>(null);
+  let loadingOfficial = $state(false);
+  let loadingMatrix = $state(false);
   let tabOfficial = $state<HTMLButtonElement | null>(null);
   let tabMatrix = $state<HTMLButtonElement | null>(null);
 
-  $effect(() => {
-    if (activeTab === "official" && !OfficialViewerComponent) {
-      import("$lib/components/schedule/OfficialScheduleViewer.svelte").then((m) => {
+  function loadOfficialTab() {
+    if (OfficialViewerComponent || loadingOfficial) return;
+    loadingOfficial = true;
+    officialLoadError = null;
+    import("$lib/components/schedule/OfficialScheduleViewer.svelte")
+      .then((m) => {
         OfficialViewerComponent = m.default;
+      })
+      .catch((err) => {
+        officialLoadError =
+          err instanceof Error ? err.message : "Failed to load Official Schedule view.";
+      })
+      .finally(() => {
+        loadingOfficial = false;
       });
-    } else if (activeTab === "matrix" && !MatrixComponent) {
-      import("$lib/components/schedule/ClassroomScheduleMatrix.svelte").then((m) => {
+  }
+
+  function loadMatrixTab() {
+    if (MatrixComponent || loadingMatrix) return;
+    loadingMatrix = true;
+    matrixLoadError = null;
+    import("$lib/components/schedule/ClassroomScheduleMatrix.svelte")
+      .then((m) => {
         MatrixComponent = m.default;
+      })
+      .catch((err) => {
+        matrixLoadError =
+          err instanceof Error ? err.message : "Failed to load Classroom Schedule Matrix.";
+      })
+      .finally(() => {
+        loadingMatrix = false;
       });
+  }
+
+  $effect(() => {
+    if (activeTab === "official" && !OfficialViewerComponent && !officialLoadError) {
+      loadOfficialTab();
+    } else if (activeTab === "matrix" && !MatrixComponent && !matrixLoadError) {
+      loadMatrixTab();
     }
   });
 
@@ -143,6 +177,18 @@
     <div id="schedule-panel-official" role="tabpanel" aria-labelledby="schedule-tab-official">
       {#if OfficialViewerComponent}
         <OfficialViewerComponent />
+      {:else if officialLoadError}
+        <div role="alert" class="p-8 rounded-xl bg-white dark:bg-[#121827] border border-rose-200 dark:border-rose-900/60 text-center space-y-3">
+          <p class="text-sm font-semibold text-rose-700 dark:text-rose-400">Failed to load Official Schedule viewer</p>
+          <p class="text-xs text-[#525f7f] dark:text-slate-400">{officialLoadError}</p>
+          <button
+            type="button"
+            onclick={loadOfficialTab}
+            class="inline-flex items-center px-4 py-2 rounded-lg bg-[#002d72] text-white text-xs font-semibold hover:bg-[#001b44] cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
       {:else}
         <div class="h-96 rounded-xl bg-white dark:bg-[#121827] border border-[#e5e0d8] dark:border-[#1e293b] animate-pulse"></div>
       {/if}
@@ -151,6 +197,18 @@
     <div id="schedule-panel-matrix" role="tabpanel" aria-labelledby="schedule-tab-matrix">
       {#if MatrixComponent}
         <MatrixComponent />
+      {:else if matrixLoadError}
+        <div role="alert" class="p-8 rounded-xl bg-white dark:bg-[#121827] border border-rose-200 dark:border-rose-900/60 text-center space-y-3">
+          <p class="text-sm font-semibold text-rose-700 dark:text-rose-400">Failed to load Classroom Schedule Matrix</p>
+          <p class="text-xs text-[#525f7f] dark:text-slate-400">{matrixLoadError}</p>
+          <button
+            type="button"
+            onclick={loadMatrixTab}
+            class="inline-flex items-center px-4 py-2 rounded-lg bg-[#002d72] text-white text-xs font-semibold hover:bg-[#001b44] cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
       {:else}
         <div class="h-96 rounded-xl bg-white dark:bg-[#121827] border border-[#e5e0d8] dark:border-[#1e293b] animate-pulse"></div>
       {/if}

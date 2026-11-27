@@ -61,7 +61,7 @@ def run_migrations_online() -> None:
     """
     db_url = os.getenv("DATABASE_URL") or database.SQLALCHEMY_DATABASE_URL
     if db_url:
-        config.set_main_option("sqlalchemy.url", db_url)
+        config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),

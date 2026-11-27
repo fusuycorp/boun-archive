@@ -527,6 +527,21 @@ def _apply_course_updates(
             setattr(course, field, value)
 
 
+def _extract_desc_url_update(val_payload: dict[str, Any]) -> tuple[str | None, bool]:
+    """Resolve canonical desc_url from desc_url/description_link_url without clobbering non-empty fallback."""
+    raw_primary = val_payload.get("desc_url")
+    raw_fallback = val_payload.get("description_link_url")
+    has_primary = isinstance(raw_primary, str) and bool(raw_primary.strip())
+    has_fallback = isinstance(raw_fallback, str) and bool(raw_fallback.strip())
+    if has_primary:
+        return _sanitize_http_url(raw_primary), False
+    if has_fallback:
+        return _sanitize_http_url(raw_fallback), False
+    chosen = raw_primary if raw_primary is not None else raw_fallback
+    should_clear = raw_primary == "" or raw_fallback == ""
+    return _sanitize_http_url(chosen), should_clear
+
+
 def _extract_enrichment_fields(
     val_payload: dict[str, Any],
     is_new: bool,
@@ -537,9 +552,9 @@ def _extract_enrichment_fields(
     clear_fields: set[str] = set()
 
     if "desc_url" in val_payload or "description_link_url" in val_payload:
-        raw_desc = val_payload.get("desc_url") if "desc_url" in val_payload else val_payload.get("description_link_url")
-        fields["desc_url"] = _sanitize_http_url(raw_desc)
-        if raw_desc == "":
+        desc_val, should_clear = _extract_desc_url_update(val_payload)
+        fields["desc_url"] = desc_val
+        if should_clear:
             clear_fields.add("desc_url")
 
     if "syllabus_url" in val_payload:
@@ -732,8 +747,21 @@ def _record_course_change(
     section: str | None,
     timestamp: str,
 ) -> None:
-    """Persist a CourseChange audit record for a delta event."""
+    """Persist a CourseChange audit record for a delta event (idempotent on retry)."""
     raw_type = str(item.get("change_type") or "")[:32]
+    existing = (
+        session.query(models.CourseChange.id)
+        .filter(
+            models.CourseChange.change_type == raw_type,
+            models.CourseChange.term_id == term_id,
+            models.CourseChange.course_code == course_code,
+            models.CourseChange.section == section,
+            models.CourseChange.timestamp == timestamp,
+        )
+        .first()
+    )
+    if existing is not None:
+        return
     details = item.get("details")
     session.add(
         models.CourseChange(
@@ -882,6 +910,45 @@ def _is_room_only_delta(change_type: str, val_payload: dict[str, Any]) -> bool:
     )
 
 
+def _extract_meili_task_uid(task: Any) -> int | None:
+    """Extract an integer Meilisearch task UID from a TaskInfo or dict, ignoring mock objects."""
+    if task is None:
+        return None
+    if isinstance(task, dict):
+        uid = task.get("taskUid") if task.get("taskUid") is not None else task.get("task_uid")
+    else:
+        uid = getattr(task, "task_uid", None)
+    if isinstance(uid, int) and not isinstance(uid, bool):
+        return uid
+    return None
+
+
+def wait_meili_tasks(client: Any, tasks: Any, timeout_in_ms: int = 30000) -> list[Any]:
+    """Await every queued Meilisearch task UID and raise RuntimeError if any task fails."""
+    if client is None or tasks is None:
+        return []
+    wait_fn = getattr(client, "wait_for_task", None)
+    if not callable(wait_fn):
+        inner_client = getattr(client, "client", None)
+        wait_fn = getattr(inner_client, "wait_for_task", None)
+    if not callable(wait_fn):
+        return []
+
+    task_list = list(tasks) if isinstance(tasks, (list, tuple, set)) else [tasks]
+    results: list[Any] = []
+    for task in task_list:
+        task_uid = _extract_meili_task_uid(task)
+        if task_uid is None:
+            continue
+        res = wait_fn(task_uid, timeout_in_ms=timeout_in_ms)
+        status = res.get("status") if isinstance(res, dict) else getattr(res, "status", None)
+        if status == "failed":
+            err = res.get("error") if isinstance(res, dict) else getattr(res, "error", None)
+            raise RuntimeError(f"Meilisearch task {task_uid} failed: {err}")
+        results.append(res)
+    return results
+
+
 def _handle_course_removal_delta(
     session: Session,
     term_id: str,
@@ -901,7 +968,8 @@ def _handle_course_removal_delta(
         touched_course_ids.discard(removed_id)
     if deleted_course_ids is None and meili_index:
         try:
-            meili_index.delete_document(removed_id)
+            task = meili_index.delete_document(removed_id)
+            wait_meili_tasks(meili_index, [task])
         except Exception as e:
             logger.warning("Meilisearch delete error for course %s: %s", removed_id, e)
 
@@ -1045,20 +1113,26 @@ def _build_meili_document(c: models.Course, catalog_map: dict[str, str]) -> dict
     }
 
 
-def sync_meili_documents(meili_index, courses: list[models.Course], chunk_size: int = 1000):
-    """Serialize courses to Meilisearch search documents and push in batches."""
+def sync_meili_documents(
+    meili_index,
+    courses: list[models.Course],
+    chunk_size: int = 1000,
+    timeout_in_ms: int = 30000,
+):
+    """Serialize courses to Meilisearch search documents, push in batches, and await all tasks."""
     if not meili_index or not courses:
         return
     catalog_map = _load_catalog_text_map(courses)
     documents = [_build_meili_document(c, catalog_map) for c in courses]
+    queued_tasks: list[Any] = []
 
     for i in range(0, len(documents), chunk_size):
         chunk = documents[i:i + chunk_size]
-        try:
-            meili_index.add_documents(chunk, primary_key="id")
-            logger.info("Pushed %d document(s) to Meilisearch index", len(chunk))
-        except Exception as e:
-            logger.error("Failed pushing %d documents to Meilisearch: %s", len(chunk), e)
+        task = meili_index.add_documents(chunk, primary_key="id")
+        queued_tasks.append(task)
+        logger.info("Queued %d document(s) to Meilisearch index", len(chunk))
+
+    wait_meili_tasks(meili_index, queued_tasks, timeout_in_ms=timeout_in_ms)
 
 
 def apply_deltas_batch(
@@ -1104,11 +1178,8 @@ def apply_deltas_batch(
     if not dry_run:
         session.commit()
         if meili_index and deleted_ids:
-            for cid in deleted_ids:
-                try:
-                    meili_index.delete_document(cid)
-                except Exception as e:
-                    logger.warning("Meilisearch post-commit delete error for course %s: %s", cid, e)
+            delete_tasks = [meili_index.delete_document(cid) for cid in sorted(deleted_ids)]
+            wait_meili_tasks(meili_index, delete_tasks)
         if meili_index and touched_ids:
             updated_courses = session.query(models.Course).options(
                 joinedload(models.Course.term),
@@ -1122,25 +1193,13 @@ def apply_deltas_batch(
 
 
 def record_scrape_summary(session: Session, summary: dict[str, Any], dry_run: bool = False) -> None:
-    """Record an upstream scrape completion summary."""
-    run_id = summary.get("run_id")
-    term = summary.get("term")
+    """Record an upstream scrape completion summary against the canonical upstream_run state."""
     completed_at = summary.get("completed_at") or datetime.now(UTC).isoformat()
     if not dry_run:
-        if run_id:
-            feed_key = f"upstream_run:{run_id}"
-            state = session.query(models.SyncState).filter(models.SyncState.feed_name == feed_key).first()
-            if not state:
-                state = models.SyncState(feed_name=feed_key, last_cursor=completed_at)
-                session.add(state)
-            else:
-                state.last_cursor = completed_at
-        if term:
-            term_key = f"term_reconciled:{term}"
-            state = session.query(models.SyncState).filter(models.SyncState.feed_name == term_key).first()
-            if not state:
-                state = models.SyncState(feed_name=term_key, last_cursor=completed_at)
-                session.add(state)
-            else:
-                state.last_cursor = completed_at
+        state = session.query(models.SyncState).filter(models.SyncState.feed_name == "upstream_run").first()
+        if not state:
+            state = models.SyncState(feed_name="upstream_run", last_cursor=completed_at)
+            session.add(state)
+        else:
+            state.last_cursor = completed_at
         session.commit()

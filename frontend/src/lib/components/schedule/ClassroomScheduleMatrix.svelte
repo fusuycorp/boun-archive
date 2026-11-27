@@ -91,7 +91,11 @@
     slotsByRoomHour: Map<string, GhostScheduleItem[]>
   ): boolean {
     if (mode === "all") return true;
-    if (mode === "conflicts") return conflicts.has(room);
+    if (mode === "conflicts") {
+      return focusHour !== null
+        ? (slotsByRoomHour.get(`${room}|${focusHour}`)?.length ?? 0) > 1
+        : conflicts.has(room);
+    }
     const wantOccupied = mode === "occupied";
     const checkHours = focusHour !== null ? [focusHour] : hours;
     return checkHours.some((h) => {
@@ -173,7 +177,10 @@
   }
 
   let buildingGroups = $derived.by(() => {
-    const activeRooms = Array.from(new Set(filteredSchedule.map(s => s.room_name)));
+    const activeRooms =
+      availabilityFilter === "all" || availabilityFilter === "free"
+        ? Array.from(roomLocationMap.keys())
+        : Array.from(new Set(filteredSchedule.map(s => s.room_name)));
     const bMap = new Map<string, { campus: string; rooms: string[] }>();
     const q = roomSearch.toLowerCase().trim();
 
@@ -279,7 +286,8 @@
       const params = new URLSearchParams();
       selectedDepts.forEach(d => params.append("dept", d));
       // Load term schedule so campus selections toggle instantly in-memory without destructive loss
-      const res = await fetch(`${API_BASE}/v1/analytics/ghost-schedule/${selectedTerm}?${params.toString()}`, {
+      const encodedTerm = selectedTerm.split("/").map(encodeURIComponent).join("/");
+      const res = await fetch(`${API_BASE}/v1/analytics/ghost-schedule/${encodedTerm}?${params.toString()}`, {
         signal: controller.signal
       });
       if (scheduleAbortController !== controller) return;
@@ -338,7 +346,12 @@
     fetchSchedule();
   }
 
-  onMount(fetchInitialData);
+  onMount(() => {
+    fetchInitialData();
+    return () => {
+      scheduleAbortController?.abort();
+    };
+  });
 </script>
 
 <div class="space-y-4 sm:space-y-6">
@@ -705,7 +718,7 @@
               <th scope="col" class="p-3 text-left font-mono text-[11px] font-bold text-[#525f7f] dark:text-slate-400 uppercase border-r border-[#e5e0d8] dark:border-[#1e293b] w-44 sm:w-52 sticky left-0 z-30 bg-[#f3efe6] dark:bg-[#0a0e1a] shadow-2xs">
                 Room / Hour
               </th>
-              {#each hours as hour}
+              {#each hours as hour (hour)}
                 <th scope="col" class="p-2.5 text-center font-mono text-[11px] font-bold uppercase min-w-[75px] sm:min-w-[95px] {
                   selectedHour === hour 
                     ? 'bg-[#002d72]/15 text-[#002d72] dark:bg-[#8cc8ea]/20 dark:text-[#8cc8ea]' 
@@ -717,7 +730,7 @@
               {/each}
             </tr>
           </thead>
-          {#each campusGroups as cGroup, cIdx}
+          {#each campusGroups as cGroup, cIdx (cGroup.campus)}
             <tbody class={cIdx > 0 ? "deferred-campus-section" : undefined}>
               <!-- Campus Section Header Row -->
               <tr class="bg-[#002d72] text-white dark:bg-[#1a2333] border-t-2 border-b border-[#002d72] dark:border-[#2b3a51]">
@@ -736,7 +749,7 @@
               </tr>
 
               <!-- Buildings within this Campus -->
-              {#each cGroup.buildings as group}
+              {#each cGroup.buildings as group (`${cGroup.campus}:${group.building}`)}
                 <!-- Building Row Header -->
                 <tr class="bg-[#ede8dc]/85 border-y border-[#dfd9cc] dark:bg-[#0d1322] dark:border-[#1e293b]/80">
                   <td colspan={15} class="py-2 px-3 sticky left-0 z-15 bg-[#ede8dc] dark:bg-[#0d1322]">
@@ -749,7 +762,7 @@
                 </tr>
 
                 <!-- Room Rows within this Building -->
-                {#each group.rooms as room}
+                {#each group.rooms as room (`${cGroup.campus}:${group.building}:${room}`)}
                   <tr class="border-b border-[#e5e0d8] hover:bg-[#f3efe6]/40 transition-colors dark:border-[#1e293b] dark:hover:bg-slate-800/40">
                     <td class="p-3 text-xs font-mono font-bold text-[#161e2e] dark:text-slate-200 border-r border-[#e5e0d8] dark:border-[#1e293b] bg-[#f3efe6]/80 dark:bg-[#0a0e1a] sticky left-0 z-10 truncate max-w-[140px] sm:max-w-none shadow-2xs">
                       <div class="flex flex-col">
@@ -757,7 +770,7 @@
                         <span class="text-[9px] font-normal text-[#525f7f] dark:text-slate-400 truncate">{group.building}</span>
                       </div>
                     </td>
-                    {#each hours as hour}
+                    {#each hours as hour (hour)}
                       {@const slots = slotMap.get(`${room}|${hour}`)}
                       {@const isFocusedHour = selectedHour === hour}
                       <td class="p-1 text-center h-14 sm:h-16 {isFocusedHour ? 'bg-[#002d72]/5 dark:bg-[#8cc8ea]/5' : ''}">
@@ -781,7 +794,7 @@
                               <span>Conflict ({slots.length})</span>
                             </div>
                             <div class="w-full flex flex-col items-center gap-0.5 overflow-hidden">
-                              {#each slots as slot}
+                              {#each slots as slot, sIdx (`${slot.course_code}-${slot.dept_kisaadi}-${sIdx}`)}
                                 <div class="font-mono text-[8px] sm:text-[9px] font-bold text-amber-950 dark:text-amber-100 truncate max-w-[85px] leading-tight">
                                   {slot.course_code} <span class="text-[7px] font-normal text-amber-800 dark:text-amber-300">({slot.dept_kisaadi})</span>
                                 </div>

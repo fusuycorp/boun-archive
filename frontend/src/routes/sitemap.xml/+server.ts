@@ -18,7 +18,7 @@ export const GET: RequestHandler = async ({ fetch }) => {
   const dynamicUrls: Array<{ loc: string; priority: string; changefreq: string }> = [];
 
   try {
-    const instRes = await fetch(`${API_BASE}/v1/instructors`);
+    const instRes = await fetch(`${API_BASE}/v1/instructors?limit=500`);
 
     if (instRes.ok) {
       const insts = await instRes.json();

@@ -11,12 +11,23 @@ const MAX_ENTRIES = 20;
 const responseCache = new Map<string, CacheEntry<unknown>>();
 const inflightRequests = new Map<string, Promise<unknown>>();
 
+function isEmptyPayload(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length === 0;
+  if (value !== null && typeof value === "object") {
+    const proto = Object.getPrototypeOf(value);
+    if (proto === Object.prototype || proto === null) {
+      return Object.keys(value).length === 0;
+    }
+  }
+  return false;
+}
+
 function setBoundedEntry<T>(key: string, value: T, ttlMs: number): void {
   if (responseCache.size >= MAX_ENTRIES && !responseCache.has(key)) {
     const oldestKey = responseCache.keys().next().value;
     if (oldestKey !== undefined) responseCache.delete(oldestKey);
   }
-  responseCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+  responseCache.set(key, { value: structuredClone(value), expiresAt: Date.now() + ttlMs });
 }
 
 /**
@@ -31,11 +42,11 @@ export async function fetchJsonCached<T>(
   if (browser) {
     const cached = responseCache.get(url);
     if (cached && cached.expiresAt > Date.now()) {
-      return cached.value as T;
+      return structuredClone(cached.value) as T;
     }
     const existing = inflightRequests.get(url);
     if (existing) {
-      return existing as Promise<T | null>;
+      return existing.then((v) => (v === null ? null : structuredClone(v))) as Promise<T | null>;
     }
   }
 
@@ -43,7 +54,7 @@ export async function fetchJsonCached<T>(
     const res = await fetchImpl(url);
     if (!res.ok) return null;
     const data = (await res.json()) as T;
-    if (browser) {
+    if (browser && !isEmptyPayload(data)) {
       setBoundedEntry(url, data, ttlMs);
     }
     return data;
@@ -54,7 +65,8 @@ export async function fetchJsonCached<T>(
   }
 
   try {
-    return await task;
+    const result = await task;
+    return result === null ? null : structuredClone(result);
   } finally {
     if (browser) {
       inflightRequests.delete(url);

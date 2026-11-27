@@ -55,6 +55,10 @@
       query = qParam;
       searchInstructors();
     }
+    return () => {
+      clearTimeout(timeout);
+      searchAbortController?.abort();
+    };
   });
 </script>
 

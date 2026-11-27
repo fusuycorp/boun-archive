@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import time
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -17,9 +18,9 @@ from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from fastapi_cache.coder import JsonCoder
 from fastapi_cache.decorator import cache
-from meilisearch.errors import MeilisearchApiError
+from meilisearch.errors import MeilisearchApiError, MeilisearchError
 from redis import asyncio as aioredis
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, defer, joinedload, selectinload
 
 from . import database, models, schemas
@@ -41,6 +42,7 @@ from .sync import (
     ensure_schema_columns,
     record_scrape_summary,
     verify_webhook_signature,
+    wait_meili_tasks,
 )
 
 ALLOWED_SORTS = {"term", "course_code", "title", "instructor", "credits", "ects"}
@@ -127,7 +129,7 @@ def custom_key_builder(
         k: v for k, v in kwargs.items()
         if not isinstance(v, (Session, Request)) and k not in ("db", "request")
     }
-    accept_raw = request.headers.get("accept", "") if request and hasattr(request, "headers") else ""
+    accept_raw = (request.headers.get("accept", "") if request and hasattr(request, "headers") else "").lower()
     if "text/turtle" in accept_raw or "application/x-turtle" in accept_raw:
         accept_hdr = "text/turtle"
     elif "application/ld+json" in accept_raw or "application/json-ld" in accept_raw:
@@ -168,12 +170,16 @@ def _trigger_initial_meili_sync_if_empty() -> None:
 def _init_meilisearch_on_boot() -> None:
     try:
         try:
-            MEILI_CLIENT.create_index("courses", {"primaryKey": "id"})
+            create_task = MEILI_CLIENT.create_index("courses", {"primaryKey": "id"})
+            wait_meili_tasks(MEILI_CLIENT, [create_task], timeout_in_ms=30000)
         except MeilisearchApiError as e:
             if e.code != "index_already_exists":
                 logger.error("Failed to create Meilisearch 'courses' index: %s", e)
+        except RuntimeError as e:
+            if "index_already_exists" not in str(e):
+                logger.error("Failed to create Meilisearch 'courses' index: %s", e)
 
-        MEILI_CLIENT.index("courses").update_settings(
+        settings_task = MEILI_CLIENT.index("courses").update_settings(
             {
                 "filterableAttributes": [
                     "term",
@@ -197,6 +203,7 @@ def _init_meilisearch_on_boot() -> None:
                 "sortableAttributes": ["term", "course_code", "title", "instructor", "credits", "ects"],
             }
         )
+        wait_meili_tasks(MEILI_CLIENT, [settings_task], timeout_in_ms=30000)
         _trigger_initial_meili_sync_if_empty()
     except Exception as e:
         logger.warning("Meilisearch setup/configuration encountered an issue on startup: %s", e)
@@ -381,6 +388,28 @@ def _apply_db_search_query_filter(query: Any, q: str) -> tuple[Any, bool]:
     return query, True
 
 
+_TR_FOLD_TABLE = str.maketrans({"İ": "i", "I": "ı", "Ğ": "ğ", "Ü": "ü", "Ş": "ş", "Ö": "ö", "Ç": "ç"})
+
+
+def _turkish_fold(text_val: str) -> str:
+    return text_val.strip().translate(_TR_FOLD_TABLE).casefold().replace("i\u0307", "i")
+
+
+def _resolve_instructor_ids(db: Session, instructor_query: str) -> list[int]:
+    clean_inst = instructor_query.strip()
+    if not clean_inst:
+        return []
+    exact = db.query(models.Instructor.id).filter(models.Instructor.full_name == clean_inst).first()
+    if exact is not None:
+        return [exact[0]]
+    target_fold = _turkish_fold(clean_inst)
+    return [
+        inst_id
+        for inst_id, full_name in db.query(models.Instructor.id, models.Instructor.full_name).all()
+        if full_name and _turkish_fold(full_name) == target_fold
+    ]
+
+
 def _apply_db_search_filters(
     query: Any,
     term: list[str] | None,
@@ -388,6 +417,7 @@ def _apply_db_search_filters(
     instructor: str | None,
     has_syllabus: bool | None,
     has_instructor_join: bool,
+    db: Session | None = None,
 ) -> tuple[Any, bool]:
     if term:
         clean_terms = [t.strip() for t in term if t and t.strip()]
@@ -397,11 +427,18 @@ def _apply_db_search_filters(
         clean_depts = [d.strip().upper() for d in dept if d and d.strip()]
         if clean_depts:
             query = query.filter(models.Course.dept_kisaadi.in_(clean_depts))
-    if instructor:
-        if not has_instructor_join:
-            query = query.join(models.Instructor)
-            has_instructor_join = True
-        query = query.filter(func.upper(models.Instructor.full_name) == instructor.strip().upper())
+    if instructor and instructor.strip():
+        if db is not None:
+            matched_ids = _resolve_instructor_ids(db, instructor)
+            if matched_ids:
+                query = query.filter(models.Course.instructor_id.in_(matched_ids))
+            else:
+                query = query.filter(models.Course.instructor_id == -1)
+        else:
+            if not has_instructor_join:
+                query = query.join(models.Instructor)
+                has_instructor_join = True
+            query = query.filter(func.upper(models.Instructor.full_name) == instructor.strip().upper())
     if has_syllabus is not None:
         query = query.filter(models.Course.has_syllabus.is_(has_syllabus))
     return query, has_instructor_join
@@ -468,7 +505,7 @@ def _search_courses_from_db(
         )
         query, has_instructor_join = _apply_db_search_query_filter(query, q)
         query, has_instructor_join = _apply_db_search_filters(
-            query, term, dept, instructor, has_syllabus, has_instructor_join
+            query, term, dept, instructor, has_syllabus, has_instructor_join, db=db
         )
         total_hits = query.count()
         query = _apply_db_search_sorting(query, sort_by, sort_order, has_instructor_join)
@@ -495,10 +532,17 @@ def read_root():
 def health_check():
     return {"status": "healthy"}
 
+def _strip_keyset_cursor_ts(cursor_val: str | None) -> str | None:
+    if not cursor_val:
+        return None
+    ts_part = cursor_val.split("|", 1)[0].strip()
+    return ts_part or None
+
+
 def _resolve_fallback_scrape_ts(db: Session, feed_map: dict[str, dict[str, Any]]) -> str | None:
     candidates: list[str] = []
     for feed_name in ("deltas", "quota_snapshots"):
-        cursor_val = (feed_map.get(feed_name) or {}).get("last_cursor")
+        cursor_val = _strip_keyset_cursor_ts((feed_map.get(feed_name) or {}).get("last_cursor"))
         if cursor_val:
             candidates.append(cursor_val)
     for scalar in (
@@ -511,10 +555,11 @@ def _resolve_fallback_scrape_ts(db: Session, feed_map: dict[str, dict[str, Any]]
 
 
 def _is_timestamp_stale(ts_str: str | None) -> bool:
-    if not ts_str:
+    clean_ts = _strip_keyset_cursor_ts(ts_str)
+    if not clean_ts:
         return True
     try:
-        ts_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        ts_dt = datetime.fromisoformat(clean_ts.replace("Z", "+00:00"))
         if ts_dt.tzinfo is None:
             ts_dt = ts_dt.replace(tzinfo=UTC)
         return (datetime.now(UTC) - ts_dt).total_seconds() / 3600 > 24
@@ -561,7 +606,7 @@ def _meili_or_clause(field: str, values: list[str], uppercase: bool = False) -> 
         cleaned = raw.strip() if raw else ""
         if not cleaned:
             continue
-        val = cleaned.upper() if uppercase else raw
+        val = cleaned.upper() if uppercase else cleaned
         terms.append(f"{field} = '{escape_meili_filter(val)}'")
     return f"({' OR '.join(terms)})" if terms else None
 
@@ -596,6 +641,36 @@ def _build_meili_sort(sort_by: str | None, sort_order: str) -> list[str]:
     return [f"{sort_by}:{sort_order}"]
 
 
+_MEILI_EMPTY_CACHE: tuple[float, bool] = (0.0, False)
+_MEILI_EMPTY_CACHE_TTL = 5.0
+
+
+def _extract_meili_doc_count(stats: Any) -> int | None:
+    doc_count = getattr(stats, "number_of_documents", None)
+    if doc_count is None and isinstance(stats, dict):
+        doc_count = stats.get("numberOfDocuments")
+    if isinstance(doc_count, int) and not isinstance(doc_count, bool):
+        return doc_count
+    return None
+
+
+def _is_meili_index_empty(index: Any) -> bool:
+    global _MEILI_EMPTY_CACHE
+    now = time.monotonic()
+    cached_at, cached_empty = _MEILI_EMPTY_CACHE
+    is_live_index = isinstance(index, meilisearch.index.Index) and getattr(index, "uid", None) == "courses"
+    if is_live_index and (now - cached_at) < _MEILI_EMPTY_CACHE_TTL:
+        return cached_empty
+    try:
+        doc_count = _extract_meili_doc_count(index.get_stats())
+        is_empty = doc_count == 0
+    except Exception:
+        is_empty = False
+    if is_live_index:
+        _MEILI_EMPTY_CACHE = (now, is_empty)
+    return is_empty
+
+
 @app.get("/v1/search")
 @cache(expire=600)
 def search_courses(
@@ -614,7 +689,8 @@ def search_courses(
     sort_list = _build_meili_sort(sort_by, sort_order)
 
     try:
-        result = MEILI_CLIENT.index("courses").search(
+        index = MEILI_CLIENT.index("courses")
+        result = index.search(
             q,
             {
                 "filter": meili_filter,
@@ -624,21 +700,24 @@ def search_courses(
                 "sort": sort_list,
             },
         )
-        if (
-            not q.strip()
-            and not meili_filter
-            and (result.get("estimatedTotalHits", 0) or 0) == 0
+        zero_hits = (
+            (result.get("estimatedTotalHits", 0) or 0) == 0
             and (result.get("totalHits", 0) or 0) == 0
-        ):
-            db_res = _search_courses_from_db(
-                db, q, term, dept, instructor, sort_by, sort_order, limit, offset, has_syllabus=has_syllabus
-            )
-            if db_res.get("totalHits", 0) > 0:
-                logger.warning(
-                    "Meilisearch index 'courses' returned 0 unfiltered hits while PG has %d; serving PG fallback",
-                    db_res["totalHits"],
+        )
+        if zero_hits:
+            unfiltered = not q.strip() and not meili_filter
+            if unfiltered or _is_meili_index_empty(index):
+                db_res = _search_courses_from_db(
+                    db, q, term, dept, instructor, sort_by, sort_order, limit, offset, has_syllabus=has_syllabus
                 )
-                return db_res
+                if db_res.get("totalHits", 0) > 0:
+                    logger.warning(
+                        "Meilisearch index 'courses' returned 0 hits (index empty) while PG has %d; serving PG fallback",
+                        db_res["totalHits"],
+                    )
+                    return JSONResponse(content=db_res, headers={"Cache-Control": "no-store"})
+                if not unfiltered:
+                    return JSONResponse(content=result, headers={"Cache-Control": "no-store"})
         return result
     except MeilisearchApiError as e:
         if e.code == "index_not_found":
@@ -1061,12 +1140,16 @@ def get_course(course_id: int, db: Session = Depends(database.get_db)):
 
 @app.get("/v1/instructors", response_model=list[schemas.Instructor])
 @cache(expire=3600)
-def get_instructors(q: str = "", db: Session = Depends(database.get_db)):
+def get_instructors(
+    q: str = "",
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(database.get_db),
+):
     query = db.query(models.Instructor)
     if q:
         clean_q = escape_sql_wildcards(q.strip())
-        query = query.filter(models.Instructor.full_name.ilike(f"%{clean_q}%"))
-    return query.limit(50).all()
+        query = query.filter(models.Instructor.full_name.ilike(f"%{clean_q}%", escape="\\"))
+    return query.limit(limit).all()
 
 @app.get("/v1/instructors/{instructor_id}")
 @cache(expire=3600)
@@ -1075,18 +1158,23 @@ def get_instructor(instructor_id: int, request: Request = None, db: Session = De
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor not found")
     if request:
-        accept = request.headers.get("accept", "")
+        accept = request.headers.get("accept", "").lower()
         if "text/turtle" in accept or "application/x-turtle" in accept:
             return Response(
                 content=instructor_to_turtle(instructor.id, instructor.full_name),
-                media_type="text/turtle; charset=utf-8"
+                media_type="text/turtle; charset=utf-8",
+                headers={"Vary": "Accept"},
             )
         if "application/ld+json" in accept or "application/json-ld" in accept:
             return JSONResponse(
                 content=instructor_to_json_ld(instructor.id, instructor.full_name),
-                media_type="application/ld+json"
+                media_type="application/ld+json",
+                headers={"Vary": "Accept"},
             )
-    return schemas.Instructor.model_validate(instructor).model_dump()
+    return JSONResponse(
+        content=schemas.Instructor.model_validate(instructor).model_dump(),
+        headers={"Vary": "Accept"},
+    )
 
 def _summarize_instructor_courses(rows: list[Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     summary: dict[str, dict[str, Any]] = {}
@@ -1204,18 +1292,20 @@ def get_departments(request: Request = None, db: Session = Depends(database.get_
     valid_depts = [d for d in depts if d.kisaadi and not any(ch.isdigit() for ch in d.kisaadi)]
     dept_dicts = [schemas.Department.model_validate(d).model_dump() for d in valid_depts]
     if request:
-        accept = request.headers.get("accept", "")
+        accept = request.headers.get("accept", "").lower()
         if "text/turtle" in accept or "application/x-turtle" in accept:
             return Response(
                 content=departments_to_turtle(dept_dicts),
-                media_type="text/turtle; charset=utf-8"
+                media_type="text/turtle; charset=utf-8",
+                headers={"Vary": "Accept"},
             )
         if "application/ld+json" in accept or "application/json-ld" in accept:
             return JSONResponse(
                 content=departments_to_json_ld(dept_dicts),
-                media_type="application/ld+json"
+                media_type="application/ld+json",
+                headers={"Vary": "Accept"},
             )
-    return dept_dicts
+    return JSONResponse(content=dept_dicts, headers={"Vary": "Accept"})
 
 @app.get("/v1/departments/{dept_code}/unique-courses")
 @cache(expire=3600)
@@ -1325,18 +1415,20 @@ def get_course_history(course_code: str, request: Request = None, db: Session = 
     result.sort(key=lambda x: x['section'] or '')
     result.sort(key=lambda x: x['term_id'], reverse=True)
     if request:
-        accept = request.headers.get("accept", "")
+        accept = request.headers.get("accept", "").lower()
         if "text/turtle" in accept or "application/x-turtle" in accept:
             return Response(
                 content=course_history_to_turtle(clean_code, result),
-                media_type="text/turtle; charset=utf-8"
+                media_type="text/turtle; charset=utf-8",
+                headers={"Vary": "Accept"},
             )
         if "application/ld+json" in accept or "application/json-ld" in accept:
             return JSONResponse(
                 content=course_history_to_json_ld(clean_code, result),
-                media_type="application/ld+json"
+                media_type="application/ld+json",
+                headers={"Vary": "Accept"},
             )
-    return result
+    return JSONResponse(content=result, headers={"Vary": "Accept"})
 
 @app.get("/v1/courses/{course_code}/schedule.ics")
 @cache(expire=3600)
@@ -1497,8 +1589,24 @@ def optimize_schedule(
     return solve_schedule_csp(db=db, request=request)
 
 
+_SYNC_ADVISORY_LOCK_ID = 4288192
+
+
 async def _clear_fastapi_cache_safely() -> None:
     with suppress(Exception):
+        backend = FastAPICache.get_backend()
+        redis_client = getattr(backend, "redis", None)
+        prefix = FastAPICache.get_prefix() or "fastapi-cache"
+        if redis_client is not None and hasattr(redis_client, "scan_iter"):
+            batch: list[Any] = []
+            async for key in redis_client.scan_iter(match=f"{prefix}:*", count=500):
+                batch.append(key)
+                if len(batch) >= 500:
+                    await redis_client.delete(*batch)
+                    batch.clear()
+            if batch:
+                await redis_client.delete(*batch)
+            return
         await FastAPICache.clear()
 
 
@@ -1507,6 +1615,36 @@ def _parse_webhook_deltas(payload: Any) -> list[dict[str, Any]]:
     if isinstance(deltas, list):
         return deltas
     return [deltas] if isinstance(deltas, dict) else []
+
+
+async def _read_bounded_body(request: Request, max_bytes: int) -> bytes:
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > max_bytes:
+        raise HTTPException(status_code=413, detail="Webhook payload exceeds 2 MiB limit")
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail="Webhook payload exceeds 2 MiB limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _acquire_pg_advisory_xact_lock(db: Session) -> None:
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": _SYNC_ADVISORY_LOCK_ID})
+
+
+def _apply_webhook_deltas_locked(db: Session, deltas: list[dict[str, Any]], meili_index: Any) -> list[int]:
+    _acquire_pg_advisory_xact_lock(db)
+    return apply_deltas_batch(db, deltas, meili_index, False)
+
+
+def _record_webhook_summary_locked(db: Session, payload: dict[str, Any]) -> None:
+    _acquire_pg_advisory_xact_lock(db)
+    record_scrape_summary(db, payload, False)
 
 
 @app.post("/v1/webhooks/scraper")
@@ -1518,13 +1656,7 @@ async def handle_scraper_webhook(
     Real-time webhook ingestion endpoint for upstream boun-scrape events.
     Receives and processes HMAC-SHA256 signed delta change events and scrape completion summaries.
     """
-    content_length = request.headers.get("content-length")
-    if content_length and content_length.isdigit() and int(content_length) > _MAX_WEBHOOK_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="Webhook payload exceeds 2 MiB limit")
-
-    raw_body = await request.body()
-    if len(raw_body) > _MAX_WEBHOOK_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="Webhook payload exceeds 2 MiB limit")
+    raw_body = await _read_bounded_body(request, _MAX_WEBHOOK_BODY_BYTES)
 
     signature = request.headers.get("x-boun-signature")
     secret = os.getenv("WEBHOOK_SECRET")
@@ -1545,13 +1677,16 @@ async def handle_scraper_webhook(
     # 1. Delta Changes Event
     if event_type == "courses.deltas" or (isinstance(payload, dict) and "deltas" in payload):
         deltas = _parse_webhook_deltas(payload)
-        touched_ids = await asyncio.to_thread(
-            apply_deltas_batch,
-            db,
-            deltas,
-            meili_index,
-            False,
-        )
+        try:
+            touched_ids = await asyncio.to_thread(
+                _apply_webhook_deltas_locked,
+                db,
+                deltas,
+                meili_index,
+            )
+        except (MeilisearchError, RuntimeError) as e:
+            logger.error("Webhook delta search index sync failed: %s", e)
+            raise HTTPException(status_code=503, detail=f"Search index update failed: {e}")
         await _clear_fastapi_cache_safely()
         return {
             "status": "ok",
@@ -1563,26 +1698,33 @@ async def handle_scraper_webhook(
 
     # 2. Scrape Completion Summary Event
     if event_type == "scrape.summary" or (isinstance(payload, dict) and "run_id" in payload and "status" in payload):
-        await asyncio.to_thread(record_scrape_summary, db, payload, False)
-        if payload.get("changes_detected", 0) > 0:
+        await asyncio.to_thread(_record_webhook_summary_locked, db, payload)
+        try:
+            changes_detected = int(payload.get("changes_detected") or 0)
+        except (TypeError, ValueError):
+            changes_detected = 0
+        if changes_detected > 0:
             await _clear_fastapi_cache_safely()
         return {
             "status": "ok",
             "event": "scrape.summary",
             "run_id": payload.get("run_id"),
             "term": payload.get("term"),
-            "changes_detected": payload.get("changes_detected"),
+            "changes_detected": changes_detected,
         }
 
     # 3. Direct Single Delta (fallback)
     if isinstance(payload, dict) and payload.get("change_type") and payload.get("course_code"):
-        touched_ids = await asyncio.to_thread(
-            apply_deltas_batch,
-            db,
-            [payload],
-            meili_index,
-            False,
-        )
+        try:
+            touched_ids = await asyncio.to_thread(
+                _apply_webhook_deltas_locked,
+                db,
+                [payload],
+                meili_index,
+            )
+        except (MeilisearchError, RuntimeError) as e:
+            logger.error("Webhook single delta search index sync failed: %s", e)
+            raise HTTPException(status_code=503, detail=f"Search index update failed: {e}")
         await _clear_fastapi_cache_safely()
         return {
             "status": "ok",

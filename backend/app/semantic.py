@@ -538,8 +538,8 @@ def generate_void_description(base_url: str = DEFAULT_BASE_URL) -> str:
         f"    void:vocabulary <https://schema.org/>, <http://purl.org/vocab/aiiso/schema#> ;\n"
         f"    dcat:distribution [\n"
         f"        a dcat:Distribution ;\n"
-        f'        dcat:mediaType "text/turtle" ;\n'
-        f"        dcat:accessURL <{clean_base}/v1/departments>\n"
+        f"        dcat:mediaType \"text/turtle\" ;\n"
+        f"        dcat:accessURL <{clean_base}/api/v1/departments>\n"
         f"    ] .\n"
     )
 
@@ -571,12 +571,12 @@ def generate_dcat_catalog_jsonld(base_url: str = DEFAULT_BASE_URL) -> dict[str, 
                     {
                         "@type": "dcat:Distribution",
                         "dcat:mediaType": "application/ld+json",
-                        "dcat:accessURL": f"{clean_base}/v1/departments"
+                        "dcat:accessURL": f"{clean_base}/api/v1/departments"
                     },
                     {
                         "@type": "dcat:Distribution",
                         "dcat:mediaType": "text/turtle",
-                        "dcat:accessURL": f"{clean_base}/v1/departments"
+                        "dcat:accessURL": f"{clean_base}/api/v1/departments"
                     }
                 ]
             }
