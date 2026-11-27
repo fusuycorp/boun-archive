@@ -2,8 +2,7 @@ import time
 from itertools import combinations
 from typing import Any
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, defer, joinedload
 
 from . import models, schemas
 
@@ -82,11 +81,12 @@ def fetch_course_sections(
         return results
 
     courses = db.query(models.Course).options(
+        defer(models.Course.syllabus_text),
         joinedload(models.Course.instructor),
         joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
     ).filter(
         models.Course.term_id == term_id,
-        func.upper(models.Course.course_code).in_(clean_codes)
+        models.Course.course_code.in_(clean_codes)
     ).order_by(models.Course.course_code, models.Course.section).all()
 
     for c in courses:

@@ -20,7 +20,7 @@ from fastapi_cache.decorator import cache
 from meilisearch.errors import MeilisearchApiError
 from redis import asyncio as aioredis
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, defer, joinedload, selectinload
 
 from . import database, models, schemas
 from .analytics import MacroEngine
@@ -396,7 +396,7 @@ def _apply_db_search_filters(
     if dept:
         clean_depts = [d.strip().upper() for d in dept if d and d.strip()]
         if clean_depts:
-            query = query.filter(func.upper(models.Course.dept_kisaadi).in_(clean_depts))
+            query = query.filter(models.Course.dept_kisaadi.in_(clean_depts))
     if instructor:
         if not has_instructor_join:
             query = query.join(models.Instructor)
@@ -461,6 +461,7 @@ def _search_courses_from_db(
 ) -> dict:
     try:
         query = db.query(models.Course).options(
+            defer(models.Course.syllabus_text),
             joinedload(models.Course.department),
             joinedload(models.Course.instructor),
             selectinload(models.Course.slots).joinedload(models.CourseSlot.room),
@@ -962,7 +963,7 @@ def get_ghost_schedule(
     )
     if dept:
         clean_depts = [d.strip().upper() for d in dept if d and d.strip()]
-        query = query.filter(func.upper(models.Course.dept_kisaadi).in_(clean_depts))
+        query = query.filter(models.Course.dept_kisaadi.in_(clean_depts))
 
     payload = _expand_contiguous_room_slots(query.all())
     return _filter_ghost_payload(payload, building, campus)
@@ -987,7 +988,7 @@ def get_course_catalog(course_code: str, db: Session = Depends(database.get_db))
 
     entry = (
         db.query(models.CourseCatalog)
-        .filter(func.upper(models.CourseCatalog.course_code) == clean_code.upper())
+        .filter(models.CourseCatalog.course_code == clean_code.upper())
         .first()
     )
     if not entry:
@@ -1034,6 +1035,7 @@ def get_course_syllabus_text(course_id: int, db: Session = Depends(database.get_
 @cache(expire=3600)
 def get_course(course_id: int, db: Session = Depends(database.get_db)):
     course = db.query(models.Course).options(
+        defer(models.Course.syllabus_text),
         joinedload(models.Course.instructor),
         joinedload(models.Course.slots).joinedload(models.CourseSlot.room)
     ).filter(models.Course.id == course_id).first()
@@ -1209,7 +1211,7 @@ def get_department_unique_courses(dept_code: str, db: Session = Depends(database
         models.Course.title,
         models.Course.term_id
     ).filter(
-        func.upper(models.Course.dept_kisaadi) == clean_dept
+        models.Course.dept_kisaadi == clean_dept
     ).distinct().order_by(
         models.Course.course_code,
         models.Course.term_id.desc()
@@ -1238,7 +1240,7 @@ def get_department_instructors(dept_code: str, db: Session = Depends(database.ge
         func.max(models.Course.term_id).label("last_term"),
         func.count(models.Course.id).label("course_count"),
         func.count(func.distinct(models.Course.term_id)).label("total_semesters")
-    ).join(models.Course).filter(func.upper(models.Course.dept_kisaadi) == clean_dept).group_by(
+    ).join(models.Course).filter(models.Course.dept_kisaadi == clean_dept).group_by(
         models.Instructor.id, models.Instructor.full_name
     ).order_by(func.max(models.Course.term_id).desc()).all()
     
@@ -1261,15 +1263,17 @@ def get_course_history(course_code: str, request: Request = None, db: Session = 
         raise HTTPException(status_code=404, detail="Course history not found")
     
     courses = db.query(models.Course).options(
+        defer(models.Course.syllabus_text),
         joinedload(models.Course.instructor),
         selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
     ).filter(
-        func.upper(models.Course.course_code) == clean_code.upper()
+        models.Course.course_code == clean_code.upper()
     ).order_by(models.Course.term_id.desc(), models.Course.section.asc()).limit(1000).all()
     
     if not courses:
         no_spaces = clean_code.replace(" ", "").upper()
         courses = db.query(models.Course).options(
+            defer(models.Course.syllabus_text),
             joinedload(models.Course.instructor),
             selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
         ).filter(
@@ -1326,15 +1330,17 @@ def get_course_schedule_ics_feed(course_code: str, db: Session = Depends(databas
         raise HTTPException(status_code=404, detail="Course schedule not found")
     
     courses = db.query(models.Course).options(
+        defer(models.Course.syllabus_text),
         joinedload(models.Course.instructor),
         selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
     ).filter(
-        func.upper(models.Course.course_code) == clean_code.upper()
+        models.Course.course_code == clean_code.upper()
     ).order_by(models.Course.term_id.desc(), models.Course.section.asc()).limit(1000).all()
     
     if not courses:
         no_spaces = clean_code.replace(" ", "").upper()
         courses = db.query(models.Course).options(
+            defer(models.Course.syllabus_text),
             joinedload(models.Course.instructor),
             selectinload(models.Course.slots).joinedload(models.CourseSlot.room)
         ).filter(
@@ -1379,10 +1385,7 @@ def get_course_quota(
     if not clean_code:
         return []
     nospace_code = clean_code.replace(" ", "").upper()
-    code_match = or_(
-        func.upper(models.QuotaSnapshot.course_code) == clean_code.upper(),
-        func.upper(func.replace(models.QuotaSnapshot.course_code, " ", "")) == nospace_code,
-    )
+    code_match = func.upper(func.replace(models.QuotaSnapshot.course_code, " ", "")) == nospace_code
 
     target_term = _resolve_existing_term_id(db, term.strip()) if term and term.strip() else None
     if not target_term:
@@ -1439,10 +1442,7 @@ def get_course_changes(
     nospace_code = clean_code.replace(" ", "").upper()
 
     changes = db.query(models.CourseChange).filter(
-        or_(
-            func.upper(models.CourseChange.course_code) == clean_code.upper(),
-            func.upper(func.replace(models.CourseChange.course_code, " ", "")) == nospace_code,
-        )
+        func.upper(func.replace(models.CourseChange.course_code, " ", "")) == nospace_code
     ).order_by(
         models.CourseChange.timestamp.desc()
     ).limit(limit).all()

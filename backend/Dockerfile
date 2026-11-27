@@ -26,6 +26,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy actual source code
 COPY backend/app/ ./app/
+COPY backend/alembic.ini ./
+COPY backend/alembic/ ./alembic/
 COPY backend/wait_for_services.py ./
 COPY backend/entrypoint.sh ./
 

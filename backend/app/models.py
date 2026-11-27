@@ -19,14 +19,14 @@ class Department(Base):
 
 class Instructor(Base):
     __tablename__ = "instructors"
-    id = Column(Integer, primary_key=True, index=True)
-    full_name = Column(String(100), unique=True, nullable=False, index=True)
+    id = Column(Integer, primary_key=True)
+    full_name = Column(String(100), unique=True, nullable=False)
     courses = relationship("Course", back_populates="instructor")
 
 class Room(Base):
     __tablename__ = "rooms"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(50), unique=True, nullable=False, index=True)
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True, nullable=False)
     building = Column(String(50))
     capacity = Column(Integer)
     slots = relationship("CourseSlot", back_populates="room")
@@ -35,15 +35,17 @@ class Course(Base):
     __tablename__ = "courses"
     __table_args__ = (
         Index("idx_courses_term_dept", "term_id", "dept_kisaadi"),
+        Index("idx_courses_dept_term", "dept_kisaadi", "term_id"),
+        Index("idx_courses_instructor_term", "instructor_id", "term_id"),
         UniqueConstraint("term_id", "course_code", "section", name="uq_courses_term_code_section"),
     )
-    id = Column(Integer, primary_key=True, index=True)
-    term_id = Column(String(15), ForeignKey("terms.id"), index=True)
-    dept_kisaadi = Column(String(10), ForeignKey("departments.kisaadi"), index=True)
+    id = Column(Integer, primary_key=True)
+    term_id = Column(String(15), ForeignKey("terms.id"))
+    dept_kisaadi = Column(String(10), ForeignKey("departments.kisaadi"))
     course_code = Column(String(20), nullable=False, index=True)
     section = Column(String(5))
     title = Column(String(255))
-    instructor_id = Column(Integer, ForeignKey("instructors.id"), index=True)
+    instructor_id = Column(Integer, ForeignKey("instructors.id"))
     credits = Column(Integer)
     ects = Column(Integer)
     delivery_method = Column(String(50))
@@ -62,10 +64,11 @@ class CourseSlot(Base):
     __tablename__ = "course_slots"
     __table_args__ = (
         Index("idx_slots_course_room", "course_id", "room_id"),
+        Index("idx_slots_day_hour", "day_code", "slot_hour"),
     )
-    id = Column(Integer, primary_key=True, index=True)
-    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
-    day_code = Column(String(10), index=True)
+    id = Column(Integer, primary_key=True)
+    course_id = Column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False)
+    day_code = Column(String(10))
     slot_hour = Column(Integer, index=True)
     slot_title = Column(String(255))
     room_id = Column(Integer, ForeignKey("rooms.id"), index=True)
@@ -81,12 +84,11 @@ class QuotaSnapshot(Base):
     __tablename__ = "quota_snapshots"
     __table_args__ = (
         Index("idx_quota_code_term_captured", "course_code", "term_id", "captured_at"),
-        Index("idx_quota_course_captured", "course_code", "captured_at"),
         UniqueConstraint("term_id", "course_code", "section", "department", "captured_at", name="uq_quota_snapshot_entry"),
     )
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     term_id = Column(String(15), ForeignKey("terms.id"), index=True)
-    course_code = Column(String(20), nullable=False, index=True)
+    course_code = Column(String(20), nullable=False)
     section = Column(String(5))
     department = Column(String(100))
     status = Column(String(50))
@@ -104,11 +106,11 @@ class CourseChange(Base):
     __table_args__ = (
         Index("idx_changes_code_timestamp", "course_code", "timestamp"),
     )
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     change_type = Column(String(32), nullable=False, index=True)
     term_id = Column(String(15), nullable=False, index=True)
     dept_kisaadi = Column(String(10), index=True)
-    course_code = Column(String(20), nullable=False, index=True)
+    course_code = Column(String(20), nullable=False)
     section = Column(String(5))
     timestamp = Column(String(50), nullable=False, index=True)
     old_value = Column(Text, nullable=True)
@@ -120,7 +122,7 @@ class CourseCatalog(Base):
     """Canonical EN/TR university catalog descriptions keyed by normalized course code."""
 
     __tablename__ = "course_catalog"
-    course_code = Column(String(20), primary_key=True, index=True)
+    course_code = Column(String(20), primary_key=True)
     title = Column(String(255), nullable=True)
     en_url = Column(Text, nullable=True)
     tr_url = Column(Text, nullable=True)
