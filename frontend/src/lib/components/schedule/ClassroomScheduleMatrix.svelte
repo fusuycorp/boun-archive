@@ -15,6 +15,7 @@
     Sparkles
   } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import { fetchJsonCached } from "$lib/cache";
   import { exportToCSV } from "$lib/utils";
   import { resolveRoomLocation } from "$lib/campus";
   import type { Term, GhostScheduleItem, FacetDistribution } from "$lib/types";
@@ -248,15 +249,15 @@
 
   async function fetchInitialData() {
     try {
-      const [termsRes, facetsRes] = await Promise.allSettled([
-        fetch(`${API_BASE}/v1/terms`),
-        fetch(`${API_BASE}/v1/facets`)
+      const [termsData, facetsData] = await Promise.all([
+        fetchJsonCached<Term[]>(`${API_BASE}/v1/terms`),
+        fetchJsonCached<FacetDistribution>(`${API_BASE}/v1/facets`)
       ]);
-      if (termsRes.status === "fulfilled" && termsRes.value.ok) {
-        terms = await termsRes.value.json();
+      if (termsData) {
+        terms = termsData;
       }
-      if (facetsRes.status === "fulfilled" && facetsRes.value.ok) {
-        globalFacets = await facetsRes.value.json();
+      if (facetsData) {
+        globalFacets = facetsData;
       }
       
       if (terms.length > 0 && !selectedTerm) {

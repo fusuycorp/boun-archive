@@ -39,7 +39,7 @@
         </tr>
       </thead>
       <tbody class="divide-y divide-[#e5e0d8] dark:divide-[#1e293b]">
-        {#each results as course}
+        {#each results as course (course.id)}
           <tr class="hover:bg-[#f3efe6]/50 transition-colors group dark:hover:bg-slate-800/50">
             <td class="p-4 text-xs font-mono font-medium text-[#525f7f] dark:text-slate-400 whitespace-nowrap">
               {course.term}

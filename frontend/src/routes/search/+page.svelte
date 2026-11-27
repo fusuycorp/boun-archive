@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { Search, Filter, X, Download } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import { fetchJsonCached } from "$lib/cache";
   import { exportToCSV } from "$lib/utils";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
@@ -46,9 +47,9 @@
 
   async function fetchGlobalFacets() {
     try {
-      const response = await fetch(`${API_BASE}/v1/facets`);
-      if (response.ok) {
-        globalFacets = await response.json();
+      const data = await fetchJsonCached<FacetDistribution>(`${API_BASE}/v1/facets`);
+      if (data) {
+        globalFacets = data;
       }
     } catch (e) {
       console.error("Failed to fetch facets", e);
@@ -213,7 +214,7 @@
     const parsedOffset = Number.parseInt(urlParams.get("offset") || "0", 10);
     const parsedLimit = Number.parseInt(urlParams.get("limit") || "20", 10);
     offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
-    limit = Number.isFinite(parsedLimit) && parsedLimit >= 1 && parsedLimit <= 100 ? parsedLimit : 20;
+    limit = Number.isFinite(parsedLimit) && parsedLimit >= 1 && parsedLimit <= 200 ? parsedLimit : 20;
     sortColumn = urlParams.get("sort_by") || "";
     sortDirection = (urlParams.get("sort_order") as "asc" | "desc") || "asc";
     selectedTerms = urlParams.getAll("term");
@@ -420,7 +421,7 @@
       {:else}
         <!-- Mobile Cards List View (Visible on < sm) -->
         <div class="block sm:hidden space-y-3">
-          {#each results as course}
+          {#each results as course (course.id)}
             <SearchResultCard {course} />
           {:else}
             <div class="bg-white p-12 rounded-xl border border-[#e5e0d8] text-center dark:bg-[#121827] dark:border-[#1e293b]">

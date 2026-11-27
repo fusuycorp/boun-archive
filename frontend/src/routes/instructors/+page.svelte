@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { User, Search, History, BookOpen, Clock, Calendar, ArrowRight } from "lucide-svelte";
+  import { User, Search, ArrowRight } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
-  import { goto } from "$app/navigation";
   import type { Instructor } from "$lib/types";
   import type { PageData } from "./$types";
 
@@ -39,10 +38,6 @@
         loading = false;
       }
     }
-  }
-
-  function selectInstructor(id: number) {
-    goto(`/instructor/${id}`);
   }
 
   import { onMount } from "svelte";
@@ -98,10 +93,10 @@
            <span class="font-mono text-[10px] font-bold text-[#525f7f] uppercase tracking-wider px-2">Top Matches ({instructors.length})</span>
         </div>
         <div class="max-h-80 overflow-y-auto custom-scrollbar divide-y divide-[#e5e0d8] dark:divide-[#1e293b]">
-          {#each instructors as inst}
-            <button 
-              onclick={() => selectInstructor(inst.id)}
-              class="w-full text-left px-4 py-3 hover:bg-[#f3efe6]/50 flex items-center justify-between group dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
+          {#each instructors as inst (inst.id)}
+            <a
+              href="/instructor/{inst.id}"
+              class="w-full text-left px-4 py-3 hover:bg-[#f3efe6]/50 flex items-center justify-between group dark:hover:bg-slate-800/50 transition-colors"
             >
               <div class="flex items-center space-x-3">
                 <div class="w-8 h-8 bg-[#f3efe6] rounded-full flex items-center justify-center text-[#525f7f] group-hover:bg-[#002d72]/10 group-hover:text-[#002d72] dark:bg-slate-800 dark:text-slate-400 dark:group-hover:bg-[#8cc8ea]/15 dark:group-hover:text-[#8cc8ea] transition-colors shrink-0">
@@ -110,7 +105,7 @@
                 <span class="text-sm font-semibold text-[#161e2e] dark:text-slate-200 group-hover:text-[#002d72] dark:group-hover:text-[#8cc8ea] transition-colors">{inst.full_name}</span>
               </div>
               <ArrowRight size={15} class="text-[#525f7f] opacity-60 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all shrink-0" />
-            </button>
+            </a>
           {/each}
         </div>
       </div>

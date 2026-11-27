@@ -1,30 +1,8 @@
 <script lang="ts">
+  import { onMount, type Component } from "svelte";
   import { TrendingUp, LayoutGrid, Award, BookOpen, Calendar, RotateCcw, AlertTriangle } from "lucide-svelte";
   import { invalidateAll } from "$app/navigation";
-  import {
-    Chart,
-    LineController,
-    LineElement,
-    PointElement,
-    LinearScale,
-    CategoryScale,
-    Filler,
-    Tooltip,
-    Legend
-  } from 'chart.js';
-  import { Line } from 'svelte-chartjs';
   import type { PageData } from './$types';
-
-  Chart.register(
-    LineController,
-    LineElement,
-    PointElement,
-    LinearScale,
-    CategoryScale,
-    Filler,
-    Tooltip,
-    Legend
-  );
 
   let { data }: { data: PageData } = $props();
 
@@ -32,10 +10,25 @@
   let totalDepts = $derived(data.totalDepts);
   let totalTerms = $derived(data.totalTerms);
   let isRetrying = $state(false);
+  let EvolutionChartComponent = $state<Component<{ data: any }> | null>(null);
 
   // Chart & Heatmap State
   let evolutionData = $derived(data.evolutionData);
   let heatmapData = $derived(data.heatmapData ?? []);
+
+  onMount(() => {
+    let active = true;
+    import("$lib/components/dashboard/DepartmentEvolutionChart.svelte")
+      .then((mod) => {
+        if (active) EvolutionChartComponent = mod.default;
+      })
+      .catch((e) => {
+        console.error("Failed to load evolution chart", e);
+      });
+    return () => {
+      active = false;
+    };
+  });
 
   async function handleRetry() {
     isRetrying = true;
@@ -62,20 +55,28 @@
     })
   } : null);
 
-  // Heatmap Helpers
+  // Heatmap Helpers (O(1) precomputed lookup & max)
   const days = ["M", "T", "W", "Th", "F", "St", "Su"];
   const hours = Array.from({ length: 14 }, (_, i) => i + 1);
 
+  const heatmapIndex = $derived.by(() => {
+    const counts = new Map<string, number>();
+    let max = 1;
+    for (const slot of heatmapData) {
+      counts.set(`${slot.day_code}|${slot.slot_hour}`, slot.count);
+      if (slot.count > max) max = slot.count;
+    }
+    return { counts, max };
+  });
+
   function getHeatColor(count: number) {
     if (heatmapData.length === 0) return 'transparent';
-    const max = Math.max(...heatmapData.map(d => d.count), 1);
-    const intensity = count / max;
+    const intensity = count / heatmapIndex.max;
     return `rgba(0, 128, 201, ${0.06 + intensity * 0.94})`;
   }
 
   function getSlotCount(day: string, hour: number) {
-    const slot = heatmapData.find(d => d.day_code === day && d.slot_hour === hour);
-    return slot ? slot.count : 0;
+    return heatmapIndex.counts.get(`${day}|${hour}`) ?? 0;
   }
 
   const hasStatsError = $derived(totalCourses === null && totalDepts === null && totalTerms === null);
@@ -107,6 +108,12 @@
     }
   ]);
 </script>
+
+<svelte:head>
+  <title>BOUN Archive • Boğaziçi University Historical Course Catalog & Analytics</title>
+  <meta name="description" content="Explore 50+ years of Boğaziçi University course offerings, department evolution trends, instructor histories, classroom schedules, and quota analytics." />
+  <link rel="canonical" href="https://bountools.com/" />
+</svelte:head>
 
 <div class="space-y-6 sm:space-y-8">
   <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
@@ -163,21 +170,12 @@
         {#if isRetrying}
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[#002d72] dark:border-[#8cc8ea]"></div>
         {:else if evolutionChartData}
-          <div class="w-full h-full min-h-[260px] sm:min-h-[300px]">
-            <Line 
-              data={evolutionChartData} 
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                  legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10, family: 'Inter' } } }
-                },
-                scales: {
-                  y: { grid: { color: 'rgba(140,160,180,0.12)' } },
-                  x: { grid: { display: false } }
-                }
-              }} 
-            />
+          <div class="w-full h-full min-h-[260px] sm:min-h-[300px] flex items-center justify-center">
+            {#if EvolutionChartComponent}
+              <EvolutionChartComponent data={evolutionChartData} />
+            {:else}
+              <div class="w-full h-[260px] sm:h-[300px] rounded-lg bg-[#f3efe6]/50 dark:bg-slate-800/40 animate-pulse"></div>
+            {/if}
           </div>
         {:else}
           <div class="flex flex-col items-center justify-center text-center p-6 space-y-2 text-[#525f7f] dark:text-slate-400">

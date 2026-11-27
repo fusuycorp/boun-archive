@@ -1,23 +1,34 @@
 <script lang="ts">
+  import type { Component } from "svelte";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { 
     Calendar, 
     Globe, 
-    LayoutGrid, 
-    Building2, 
-    Sparkles 
+    LayoutGrid
   } from "lucide-svelte";
-  import OfficialScheduleViewer from "$lib/components/schedule/OfficialScheduleViewer.svelte";
-  import ClassroomScheduleMatrix from "$lib/components/schedule/ClassroomScheduleMatrix.svelte";
 
   // Tab mode: 'official' (OBIKAS iframes & links) or 'matrix' (All classes, rooms & campus heatmap)
   let activeTab = $state<"official" | "matrix">(
     page.url.searchParams.get("tab") === "matrix" ? "matrix" : "official"
   );
 
+  let OfficialViewerComponent = $state<Component | null>(null);
+  let MatrixComponent = $state<Component | null>(null);
   let tabOfficial = $state<HTMLButtonElement | null>(null);
   let tabMatrix = $state<HTMLButtonElement | null>(null);
+
+  $effect(() => {
+    if (activeTab === "official" && !OfficialViewerComponent) {
+      import("$lib/components/schedule/OfficialScheduleViewer.svelte").then((m) => {
+        OfficialViewerComponent = m.default;
+      });
+    } else if (activeTab === "matrix" && !MatrixComponent) {
+      import("$lib/components/schedule/ClassroomScheduleMatrix.svelte").then((m) => {
+        MatrixComponent = m.default;
+      });
+    }
+  });
 
   function setTab(tab: "official" | "matrix") {
     activeTab = tab;
@@ -130,11 +141,19 @@
   <!-- Feature Content Switch -->
   {#if activeTab === "official"}
     <div id="schedule-panel-official" role="tabpanel" aria-labelledby="schedule-tab-official">
-      <OfficialScheduleViewer />
+      {#if OfficialViewerComponent}
+        <OfficialViewerComponent />
+      {:else}
+        <div class="h-96 rounded-xl bg-white dark:bg-[#121827] border border-[#e5e0d8] dark:border-[#1e293b] animate-pulse"></div>
+      {/if}
     </div>
   {:else}
     <div id="schedule-panel-matrix" role="tabpanel" aria-labelledby="schedule-tab-matrix">
-      <ClassroomScheduleMatrix />
+      {#if MatrixComponent}
+        <MatrixComponent />
+      {:else}
+        <div class="h-96 rounded-xl bg-white dark:bg-[#121827] border border-[#e5e0d8] dark:border-[#1e293b] animate-pulse"></div>
+      {/if}
     </div>
   {/if}
 </div>

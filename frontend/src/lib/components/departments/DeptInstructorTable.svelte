@@ -14,8 +14,8 @@
 
 <!-- Mobile Instructor Cards (< sm) -->
 <div class="block sm:hidden divide-y divide-[#e5e0d8] dark:divide-[#1e293b]">
-  {#each instructors as instructor}
-    <div class="p-4 space-y-2.5">
+  {#each instructors as instructor (instructor.id)}
+    <div class="deferred-table-row p-4 space-y-2.5">
       <div class="flex items-center justify-between">
         <a 
           href="/instructor/{instructor.id}"
@@ -105,8 +105,8 @@
       </tr>
     </thead>
     <tbody class="divide-y divide-[#e5e0d8] dark:divide-[#1e293b]">
-      {#each instructors as instructor}
-        <tr class="hover:bg-[#f3efe6]/50 dark:hover:bg-slate-800/50 transition-colors group">
+      {#each instructors as instructor (instructor.id)}
+        <tr class="deferred-table-row hover:bg-[#f3efe6]/50 dark:hover:bg-slate-800/50 transition-colors group">
           <td class="p-4 whitespace-nowrap">
             <a 
               href="/instructor/{instructor.id}"

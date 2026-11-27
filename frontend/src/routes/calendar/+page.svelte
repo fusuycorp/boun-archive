@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, type Component } from "svelte";
   import { Search, Calendar, Plus, Trash2, AlertTriangle, Check, MapPin, BookOpen, Clock, RotateCcw, Download, Sparkles, Undo2 } from "lucide-svelte";
   import { API_BASE } from "$lib/config";
+  import { fetchJsonCached } from "$lib/cache";
   import { generateICS, downloadICS } from "$lib/ical";
   import { safeParsePlannerCourses, type CoursePlannerItem } from "$lib/schemas/planner";
   import { resolveRoomLocation, isInterCampusCommute } from "$lib/campus";
-  import ScheduleOptimizerDialog from "$lib/components/calendar/ScheduleOptimizerDialog.svelte";
   import type { Term, SearchCourseHit, TimetableSection } from "$lib/types";
 
   type ScheduledSlotItem = CoursePlannerItem & {
@@ -24,12 +24,33 @@
   let loading = $state(false);
   let mobileTab = $state<"schedule" | "courses">("schedule");
   let isOptimizerOpen = $state(false);
+  let OptimizerDialogComponent = $state<Component<{
+    open: boolean;
+    selectedTerm: string;
+    initialTargetCourses: string[];
+    onClose: () => void;
+    onApplySchedule: (sections: TimetableSection[]) => void;
+  }> | null>(null);
   let clearDialog = $state<HTMLDialogElement | null>(null);
   let previousScheduleSnapshot = $state<CoursePlannerItem[] | null>(null);
   let undoTerm = $state("");
   let tabSchedule = $state<HTMLButtonElement | null>(null);
   let tabCourses = $state<HTMLButtonElement | null>(null);
   let searchAbortController: AbortController | null = null;
+  let rehydrateAbortController: AbortController | null = null;
+
+  $effect(() => {
+    if (isOptimizerOpen && !OptimizerDialogComponent) {
+      import("$lib/components/calendar/ScheduleOptimizerDialog.svelte")
+        .then((mod) => {
+          OptimizerDialogComponent = mod.default;
+        })
+        .catch((e) => {
+          console.error("Failed to load schedule optimizer dialog", e);
+          isOptimizerOpen = false;
+        });
+    }
+  });
   let days = ["M", "T", "W", "Th", "F", "St", "Su"];
   let hours = Array.from({ length: 14 }, (_, i) => i + 1);
 
@@ -85,6 +106,7 @@
 
   function handleTermSelect(newTerm: string) {
     if (searchAbortController) searchAbortController.abort();
+    if (rehydrateAbortController) rehydrateAbortController.abort();
     selectedTerm = newTerm;
     searchQuery = "";
     searchResults = [];
@@ -98,9 +120,9 @@
 
   async function fetchTerms() {
     try {
-      const res = await fetch(`${API_BASE}/v1/terms`);
-      if (res.ok) {
-        terms = await res.json();
+      const data = await fetchJsonCached<Term[]>(`${API_BASE}/v1/terms`);
+      if (data) {
+        terms = data;
         if (terms.length > 0) {
           const savedTerm = sessionStorage.getItem("planner_selected_term");
           const termToSelect = (savedTerm && terms.some(t => t.id === savedTerm)) ? savedTerm : terms[0].id;
@@ -225,6 +247,9 @@
 
   async function rehydrateEnrolledCourses(term: string) {
     if (!term || myCourses.length === 0) return;
+    if (rehydrateAbortController) rehydrateAbortController.abort();
+    const controller = new AbortController();
+    rehydrateAbortController = controller;
     try {
       const snapshot = [...myCourses];
       const updatesByKey = new Map<string, any>();
@@ -233,8 +258,10 @@
         snapshot.map(async (course) => {
           if (!course.id) return;
           try {
-            const res = await fetch(`${API_BASE}/v1/courses/${course.id}`);
-            if (res.ok) {
+            const res = await fetch(`${API_BASE}/v1/courses/${course.id}`, {
+              signal: controller.signal
+            });
+            if (res.ok && !controller.signal.aborted) {
               const detailed = await res.json();
               if (detailed && detailed.slots && Array.isArray(detailed.slots)) {
                 const key = `${course.course_code.trim().toUpperCase()}_${(course.section || "01").trim()}`;
@@ -242,11 +269,12 @@
               }
             }
           } catch {
-            // Silently ignore network failures on rehydration
+            // Silently ignore network/abort failures on rehydration
           }
         })
       );
 
+      if (controller.signal.aborted || rehydrateAbortController !== controller) return;
       if (updatesByKey.size > 0 && selectedTerm === term) {
         let hasChanges = false;
         const reconciled = myCourses.map((currentCourse) => {
@@ -513,7 +541,13 @@
     return type.includes("lab") || type.includes("ps") || type.includes("practice");
   }
 
-  onMount(fetchTerms);
+  onMount(() => {
+    fetchTerms();
+    return () => {
+      if (searchAbortController) searchAbortController.abort();
+      if (rehydrateAbortController) rehydrateAbortController.abort();
+    };
+  });
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
   function handleInput() {
@@ -575,13 +609,15 @@
     </form>
   </dialog>
 
-  <ScheduleOptimizerDialog
-    open={isOptimizerOpen}
-    {selectedTerm}
-    initialTargetCourses={initialOptimizerCourses}
-    onClose={() => (isOptimizerOpen = false)}
-    onApplySchedule={applyOptimizedSchedule}
-  />
+  {#if OptimizerDialogComponent}
+    <OptimizerDialogComponent
+      open={isOptimizerOpen}
+      {selectedTerm}
+      initialTargetCourses={initialOptimizerCourses}
+      onClose={() => (isOptimizerOpen = false)}
+      onApplySchedule={applyOptimizedSchedule}
+    />
+  {/if}
 
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">

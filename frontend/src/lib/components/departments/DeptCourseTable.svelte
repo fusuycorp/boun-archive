@@ -14,8 +14,8 @@
 
 <!-- Mobile Course Cards (< sm) -->
 <div class="block sm:hidden divide-y divide-[#e5e0d8] dark:divide-[#1e293b]">
-  {#each courses as course}
-    <div class="p-4 space-y-2">
+  {#each courses as course (course.course_code)}
+    <div class="deferred-table-row p-4 space-y-2">
       <div class="flex items-start justify-between gap-2">
         <div>
           <span class="font-mono text-sm font-bold text-[#002d72] dark:text-slate-100">{course.course_code}</span>
@@ -91,8 +91,8 @@
       </tr>
     </thead>
     <tbody class="divide-y divide-[#e5e0d8] dark:divide-[#1e293b]">
-      {#each courses as course}
-        <tr class="hover:bg-[#f3efe6]/50 dark:hover:bg-slate-800/50 transition-colors group">
+      {#each courses as course (course.course_code)}
+        <tr class="deferred-table-row hover:bg-[#f3efe6]/50 dark:hover:bg-slate-800/50 transition-colors group">
           <td class="p-4 whitespace-nowrap"><span class="font-mono text-sm font-bold text-[#002d72] dark:text-slate-100">{course.course_code}</span></td>
           <td class="p-4"><span class="font-serif text-sm font-medium text-[#161e2e] dark:text-slate-200">{course.title}</span></td>
           <td class="p-4 whitespace-nowrap"><span class="font-mono text-xs font-medium text-[#525f7f] dark:text-slate-400">{course.latest_term}</span></td>
