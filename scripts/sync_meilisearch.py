@@ -140,7 +140,7 @@ def _push_course_chunks(client, index, session) -> None:
 
     if last_task:
         print(f"Awaiting indexing completion for task UID {_extract_task_uid(last_task)}...")
-        _wait_for_meili_task(client, last_task)
+        _wait_for_meili_task(client, last_task, timeout_in_ms=300000)
 
 
 def sync_meilisearch(force: bool = False):

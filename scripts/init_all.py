@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, inspect
 from wait_for_services import wait_for_meilisearch, wait_for_postgres, wait_for_redis
 
 from scripts.migrate_to_pg import migrate
+from scripts.sync_from_scraper import invalidate_redis_cache
 from scripts.sync_meilisearch import sync_meilisearch
 
 
@@ -65,6 +66,9 @@ def main():
     # 4. Synchronize Meilisearch Search Index
     print("Running Meilisearch sync...")
     sync_meilisearch()
+
+    # 5. Clear stale cached API responses after schema/index init
+    invalidate_redis_cache()
     
     print("=== BOUN Archive Initialization Job Finished Successfully ===")
 

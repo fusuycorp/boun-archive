@@ -614,7 +614,7 @@ def search_courses(
     sort_list = _build_meili_sort(sort_by, sort_order)
 
     try:
-        return MEILI_CLIENT.index("courses").search(
+        result = MEILI_CLIENT.index("courses").search(
             q,
             {
                 "filter": meili_filter,
@@ -624,6 +624,22 @@ def search_courses(
                 "sort": sort_list,
             },
         )
+        if (
+            not q.strip()
+            and not meili_filter
+            and (result.get("estimatedTotalHits", 0) or 0) == 0
+            and (result.get("totalHits", 0) or 0) == 0
+        ):
+            db_res = _search_courses_from_db(
+                db, q, term, dept, instructor, sort_by, sort_order, limit, offset, has_syllabus=has_syllabus
+            )
+            if db_res.get("totalHits", 0) > 0:
+                logger.warning(
+                    "Meilisearch index 'courses' returned 0 unfiltered hits while PG has %d; serving PG fallback",
+                    db_res["totalHits"],
+                )
+                return db_res
+        return result
     except MeilisearchApiError as e:
         if e.code == "index_not_found":
             logger.warning("Meilisearch index 'courses' not ready during search; raising 503 to avoid caching empty state")
