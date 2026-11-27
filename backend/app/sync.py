@@ -1055,7 +1055,7 @@ def sync_meili_documents(meili_index, courses: list[models.Course], chunk_size: 
     for i in range(0, len(documents), chunk_size):
         chunk = documents[i:i + chunk_size]
         try:
-            meili_index.add_documents(chunk)
+            meili_index.add_documents(chunk, primary_key="id")
             logger.info("Pushed %d document(s) to Meilisearch index", len(chunk))
         except Exception as e:
             logger.error("Failed pushing %d documents to Meilisearch: %s", len(chunk), e)

@@ -28,8 +28,14 @@ def _extract_task_uid(task):
 
 def _wait_for_meili_task(client, task, timeout_in_ms: int = 30000):
     task_uid = _extract_task_uid(task)
-    if task_uid is not None:
-        client.wait_for_task(task_uid, timeout_in_ms=timeout_in_ms)
+    if task_uid is None:
+        return None
+    res = client.wait_for_task(task_uid, timeout_in_ms=timeout_in_ms)
+    status = res.get("status") if isinstance(res, dict) else getattr(res, "status", None)
+    if status == "failed":
+        err = res.get("error") if isinstance(res, dict) else getattr(res, "error", None)
+        raise RuntimeError(f"Meilisearch task {task_uid} failed: {err}")
+    return res
 
 
 def _prune_orphaned_docs(index, client, session):
@@ -77,7 +83,19 @@ def _index_already_populated(index, session, force: bool) -> bool:
 
 
 def _configure_meili_index(client, index) -> None:
-    print("Configuring index settings...")
+    print("Ensuring index primaryKey='id' and configuring settings...")
+    create_task = client.create_index("courses", {"primaryKey": "id"})
+    try:
+        _wait_for_meili_task(client, create_task, timeout_in_ms=30000)
+    except RuntimeError as exc:
+        if "index_already_exists" not in str(exc):
+            raise
+    update_pk_task = index.update(primary_key="id")
+    try:
+        _wait_for_meili_task(client, update_pk_task, timeout_in_ms=30000)
+    except RuntimeError as exc:
+        if "index_primary_key_already_exists" not in str(exc):
+            raise
     config_task = index.update_settings(
         {
             "filterableAttributes": [
@@ -127,14 +145,14 @@ def _push_course_chunks(client, index, session) -> None:
     for c in query.yield_per(chunk_size):
         documents.append(_build_meili_document(c, catalog_map))
         if len(documents) >= chunk_size:
-            last_task = index.add_documents(documents)
+            last_task = index.add_documents(documents, primary_key="id")
             chunk_count += 1
             if chunk_count % 10 == 0:
                 print(f"Queued chunk {chunk_count}...")
             documents = []
 
     if documents:
-        last_task = index.add_documents(documents)
+        last_task = index.add_documents(documents, primary_key="id")
         chunk_count += 1
         print(f"Queued final chunk {chunk_count}")
 
